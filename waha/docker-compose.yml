@@ -1,0 +1,15 @@
+version: '3'
+services:
+  waha:
+    image: devlikeapro/waha
+    restart: unless-stopped
+    ports:
+      - "3001:3000"
+    environment:
+      - WAHA_API_KEY=devkey123
+      - WAHA_API_KEY_HEADER=X-Api-Key
+      - WHATSAPP_HOOK_URL=http://172.17.0.1:3000/webhook
+      - WHATSAPP_HOOK_EVENTS=message
+    volumes:
+      - ./.waha:/app/.waha
+
