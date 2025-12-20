@@ -1,35 +1,76 @@
-use axum::{routing::post, Json, Router};
+use axum::{
+    extract::State,
+    routing::post,
+    Json,
+    Router,
+};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use std::collections::HashSet;
 use std::net::SocketAddr;
+use std::sync::{Arc, Mutex};
 use tokio::net::TcpListener;
 
-// Incoming webhook payload from WAHA
+// Track recent message IDs to avoid duplicates
+type MessageCache = Arc<Mutex<HashSet<String>>>;
+
 #[derive(Debug, Deserialize)]
 struct WebhookPayload {
-    message: Message,
+    event: String,
+    session: String,
+    payload: MessagePayload,
 }
 
 #[derive(Debug, Deserialize)]
-struct Message {
+struct MessagePayload {
+    #[serde(default)]
+    id: String,
+    #[serde(default)]
     body: String,
     from: String,
+    #[serde(default)]
+    #[serde(rename = "fromMe")]
+    from_me: bool,
+    #[serde(flatten)]
+    extra: Value,
 }
 
-// Outgoing message payload to WAHA
 #[derive(Debug, Serialize)]
 struct SendTextRequest {
     #[serde(rename = "chatId")]
     chat_id: String,
     text: String,
+    session: String,
 }
 
-// Main webhook handler
-// Semua message bakal masuk ke sini dulu
-async fn webhook(Json(payload): Json<WebhookPayload>) {
-    println!("📨 Received message from {}: {}", payload.message.from, payload.message.body);
+async fn webhook(
+    State(cache): State<MessageCache>,
+    Json(payload): Json<WebhookPayload>,
+) {
+    // Skip non-message.any events
+    if payload.event != "message.any" {
+        return;
+    }
+    
+    // Deduplicate by message ID
+    let msg_id = payload.payload.id.clone();
+    {
+        let mut cache = cache.lock().unwrap();
+        if cache.contains(&msg_id) {
+            println!("⏭️  Skipping duplicate message: {}", msg_id);
+            return;
+        }
+        cache.insert(msg_id.clone());
+        
+        // Keep cache size manageable (last 100 messages)
+        if cache.len() > 100 {
+            cache.clear();
+        }
+    }
+    
+    println!("📨 Message from {}: {}", payload.payload.from, payload.payload.body);
 
-    // Check if message is a command
-    let response_text = match payload.message.body.trim() {
+    let response_text = match payload.payload.body.trim() {
         "#ping" => {
             println!("✅ PING command detected");
             Some("pong")
@@ -40,22 +81,21 @@ async fn webhook(Json(payload): Json<WebhookPayload>) {
         }
     };
 
-    // Send reply if we have a response
     if let Some(text) = response_text {
-        match send_reply(&payload.message.from, text).await {
+        match send_reply(&payload.payload.from, text).await {
             Ok(_) => println!("✅ Reply sent successfully"),
             Err(e) => eprintln!("❌ Failed to send reply: {}", e),
         }
     }
 }
 
-// Function to send message via WAHA API
 async fn send_reply(chat_id: &str, text: &str) -> Result<(), Box<dyn std::error::Error>> {
     let waha_url = "http://localhost:3001/api/sendText";
     
     let payload = SendTextRequest {
         chat_id: chat_id.to_string(),
         text: text.to_string(),
+        session: "default".to_string(),
     };
 
     println!("📤 Sending to WAHA: {} -> '{}'", chat_id, text);
@@ -63,6 +103,7 @@ async fn send_reply(chat_id: &str, text: &str) -> Result<(), Box<dyn std::error:
     let client = reqwest::Client::new();
     let response = client
         .post(waha_url)
+        .header("X-Api-Key", "devkey123")
         .json(&payload)
         .send()
         .await?;
@@ -82,8 +123,11 @@ async fn send_reply(chat_id: &str, text: &str) -> Result<(), Box<dyn std::error:
 async fn main() {
     println!("🚀 Starting WhatsApp Academic Bot");
     
+    let cache: MessageCache = Arc::new(Mutex::new(HashSet::new()));
+    
     let app = Router::new()
-        .route("/webhook", post(webhook));
+        .route("/webhook", post(webhook))
+        .with_state(cache);
 
     let addr = SocketAddr::from(([0, 0, 0, 0], 3000));
     println!("👂 Listening on {}", addr);
