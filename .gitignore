@@ -1,0 +1,42 @@
+# Rust
+backend/target/
+backend/Cargo.lock
+**/*.rs.bk
+*.pdb
+
+# WAHA / WhatsApp Sessions (SENSITIVE - DO NOT COMMIT)
+waha/waha_data/
+waha/.sessions/
+**/.wwebjs_auth/
+**/.wwebjs_cache/
+
+# Environment & Secrets
+.env
+.env.local
+*.env
+secrets/
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Logs
+*.log
+logs/
+
+# OS Files
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+
+# IDEs
+.vscode/
+.idea/
+*.iml
+
+# Backup files
+*.bak
+*.tmp
