@@ -11,6 +11,7 @@ use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 use tokio::net::TcpListener;
 
+
 // Track recent message IDs to avoid duplicates
 type MessageCache = Arc<Mutex<HashSet<String>>>;
 
@@ -31,6 +32,8 @@ struct MessagePayload {
     #[serde(default)]
     #[serde(rename = "fromMe")]
     from_me: bool,
+    #[serde(default)]
+    #[serde(rename = "chatId")]
     #[serde(flatten)]
     extra: Value,
 }
@@ -43,6 +46,7 @@ struct SendTextRequest {
     session: String,
 }
 
+
 async fn webhook(
     State(cache): State<MessageCache>,
     Json(payload): Json<WebhookPayload>,
@@ -51,21 +55,44 @@ async fn webhook(
     if payload.event != "message.any" {
         return;
     }
+
+    // DEBUG: Print the full payload structure
+    // println!("🔍 DEBUG payload.payload: {:?}", payload.payload);
     
-    // Deduplicate by message ID
-    let msg_id = payload.payload.id.clone();
+
+    // kadang waha ngirim webhook 2x
+    // gw juga bingung, fix later aja ini masih workaround
+    // Create composite deduplication key: timestamp + from + body
+    let dedup_key = format!(
+        "{}:{}:{}",
+        payload.payload.id,
+        payload.payload.from,
+        payload.payload.body.chars().take(50).collect::<String>() // First 50 chars
+    );
+    
+    // Deduplicate
     {
         let mut cache = cache.lock().unwrap();
-        if cache.contains(&msg_id) {
-            println!("⏭️  Skipping duplicate message: {}", msg_id);
+        if cache.contains(&dedup_key) {
+            println!("⏭️  Skipping duplicate message");
             return;
         }
-        cache.insert(msg_id.clone());
+        cache.insert(dedup_key);
         
-        // Keep cache size manageable (last 100 messages)
         if cache.len() > 100 {
             cache.clear();
         }
+    }
+    
+    // Skip messages sent BY us (via WhatsApp Web or bot replies)
+    // UNLESS it's a command (starts with #) for self-testing
+    if payload.payload.from_me {
+        // Allow self-testing with commands
+        if !payload.payload.body.trim().starts_with('#') {
+            println!("⏭️  Ignoring own message: {}", payload.payload.body);
+            return;
+        }
+        println!("🔧 Processing own command for testing: {}", payload.payload.body);
     }
     
     println!("📨 Message from {}: {}", payload.payload.from, payload.payload.body);
