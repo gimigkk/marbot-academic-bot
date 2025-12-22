@@ -3,7 +3,7 @@ use std::collections::HashSet;
 /// Whitelist configuration for academic channels/groups
 pub struct Whitelist {
     /// Chat IDs that are allowed to send academic info
-    /// Format: "6281234567890@c.us" for DMs or "123456789@g.us" for groups
+    /// Format: "6281234567890@c.us" for DMs or "123456789@g.us" for groups or "123@newsletter" for channels
     academic_channels: HashSet<String>,
 }
 
@@ -25,7 +25,7 @@ impl Whitelist {
         // Default fallback if no env var is set
         if academic_channels.is_empty() {
             println!("⚠️  No ACADEMIC_CHANNELS configured. Add to .env file:");
-            println!("   ACADEMIC_CHANNELS=6281234567890@c.us,987654321@g.us");
+            println!("   ACADEMIC_CHANNELS=120363423034679598@newsletter");
         }
         
         Self { academic_channels }
@@ -39,12 +39,12 @@ impl Whitelist {
     /// Check if we should process this message
     /// Returns (should_process, reason)
     pub fn should_process(&self, chat_id: &str, is_command: bool) -> (bool, &'static str) {
-        // Always process commands (they have #)
+        // Commands can come from ANYWHERE (DMs, groups, channels)
         if is_command {
             return (true, "command");
         }
         
-        // For non-command messages, only process if from academic channel
+        // Non-command messages ONLY from academic channels
         if self.is_academic_channel(chat_id) {
             (true, "academic_channel")
         } else {
