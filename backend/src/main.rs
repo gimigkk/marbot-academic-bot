@@ -61,21 +61,11 @@ async fn webhook(
         }
     }
     
-    // Skip messages sent BY us in DMs (but allow in channels for testing)
-    // Channels show "fromMe: true" when YOU post in YOUR channel
-    let is_channel = payload.payload.from.ends_with("@newsletter");
-    let is_dm = payload.payload.from.ends_with("@c.us");
-    
-    if payload.payload.from_me && is_dm {
-        // In DMs, only process commands when sent by us
-        if !payload.payload.body.trim().starts_with('#') {
-            println!("⏭️  Ignoring own DM message: {}", payload.payload.body);
-            return;
-        }
-        println!("🔧 Processing own command for testing: {}", payload.payload.body);
-    } else if payload.payload.from_me && is_channel {
-        // In channels, process everything (even non-commands) for testing
-        println!("📢 Processing message from your own channel: {}", payload.payload.body);
+    // Skip messages sent BY the bot (to avoid loops)
+    // But we don't skip channel messages anymore since bot has its own SIM
+    if payload.payload.from_me && !payload.payload.from.ends_with("@newsletter") {
+        println!("⏭️  Ignoring bot's own message");
+        return;
     }
     
     let separator = "=".repeat(60);
