@@ -24,7 +24,7 @@ use crate::database::crud;
 use models::{MessageType, AIClassification, WebhookPayload, SendTextRequest, NewAssignment};
 use classifier::classify_message;
 use parser::commands::handle_command;
-use parser::ai_extractor::extract_with_ai;
+use parser::ai_extractor::{extract_with_ai, match_update_to_assignment}; 
 use whitelist::Whitelist;
 
 type MessageCache = Arc<Mutex<HashSet<String>>>;
@@ -40,10 +40,13 @@ async fn webhook(
     State(state): State<AppState>,
     Json(payload): Json<WebhookPayload>,
 ) {
+    // For now we only get from "message.any"
     if payload.event != "message.any" {
         return;
     }
 
+    // this is for handling when WAHA sends duplicate messages
+    // don't know why it does that
     let dedup_key = format!(
         "{}:{}:{}",
         payload.payload.id,
@@ -65,11 +68,13 @@ async fn webhook(
         }
     }
 
-    if payload.payload.from_me && !payload.payload.from.ends_with("@newsletter") {
+    // for some reason messages that's sent by the bot is being read also.
+    if payload.payload.from_me {
         println!("⏭️  Ignoring bot's own message");
         return;
     }
 
+    // for debuggin in the terminal
     let separator = "=".repeat(60);
     println!("\n{}", separator);
     println!("📨 NEW MESSAGE");
@@ -89,11 +94,13 @@ async fn webhook(
     println!("From Me: {}", payload.payload.from_me);
     println!("{}\n", separator);
 
+    // STEP 1: CLASSIFY MESSAGE
     let message_type = classify_message(&payload.payload.body);
     let is_command = matches!(message_type, MessageType::Command(_));
 
     println!("🔍 Classification: {:?}", message_type);
 
+    // STEP 2: CHECK WHITELIST (for academic info)
     let (should_process, reason) =
         state.whitelist.should_process(&payload.payload.from, is_command);
 
@@ -102,11 +109,13 @@ async fn webhook(
         return;
     }
 
+    // STEP 3: RUN COMMAND (if it's a bot command)
     let response_text = match message_type {
     MessageType::Command(cmd) => {
         Some(handle_command(cmd, &payload.payload.from))
     }
 
+    // STEP 4: DATA EXTRACT WITH AI
     MessageType::NeedsAI(text) => {
         // Fetch available courses from database
         let courses_result = crud::get_all_courses_formatted(&state.pool).await;
@@ -118,7 +127,7 @@ async fn webhook(
                 // Pass courses to AI extraction
                 match extract_with_ai(&text, &courses_list).await {
                     Ok(classification) => {
-                        handle_ai_classification(
+                        handle_ai_classification( // The function is in this file btw
                             state.pool.clone(),
                             classification,
                             &payload.payload.id,
@@ -146,6 +155,8 @@ async fn webhook(
     }
 }
 
+/// After classifying the message by AI,
+/// business logic.
 fn handle_ai_classification(
     pool: PgPool,
     classification: AIClassification, 
@@ -225,48 +236,71 @@ fn handle_ai_classification(
         }
         
         AIClassification::AssignmentUpdate { reference_keywords, changes, new_deadline, new_description, .. } => {
-            println!("🔄 UPDATE DETECTED");
-            println!("   Keywords: {:?}", reference_keywords);
-            
-            let new_deadline_clone = new_deadline.clone();
-            
-            // Spawn database work in background
-            tokio::spawn(async move {
-                match crud::find_assignment_by_keywords(&pool, &reference_keywords, None).await {
-                    Ok(matches) if matches.len() == 1 => {
-                        let assignment = &matches[0];
+    println!("🔄 UPDATE DETECTED");
+    println!("   Keywords: {:?}", reference_keywords);
+    
+    let new_deadline_clone = new_deadline.clone();
+    let changes_clone = changes.clone();
+    let reference_keywords_clone = reference_keywords.clone();
+    let new_description_clone = new_description.clone();
+    let pool_clone = pool.clone();
+    
+    // Fetch active assignments BEFORE spawning (make this blocking/sync)
+    tokio::spawn(async move {
+        // Get active assignments inside spawn
+        match crud::get_active_assignments(&pool_clone).await {
+            Ok(active_assignments) if !active_assignments.is_empty() => {
+                println!("📋 Found {} active assignments", active_assignments.len());
+                
+                // Step 2: Ask AI to match
+                match parser::ai_extractor::match_update_to_assignment(
+                    &changes_clone,
+                    &reference_keywords_clone,
+                    &active_assignments
+                ).await {
+                    Ok(Some(assignment_id)) => {
+                        println!("✅ AI matched to assignment ID: {}", assignment_id);
                         
+                        // Step 3: Update the matched assignment
                         match crud::update_assignment_fields(
-                            &pool,
-                            assignment.id,
-                            parse_deadline(&new_deadline),
-                            new_description,
+                            &pool_clone,
+                            assignment_id,
+                            parse_deadline(&new_description_clone),
+                            new_description_clone,
                         ).await {
                             Ok(updated) => {
-                                println!("✅ Updated in database: {}", updated.title);
+                                println!("✅ Updated assignment: {}", updated.title);
                             }
                             Err(e) => {
                                 eprintln!("❌ Update failed: {}", e);
                             }
                         }
                     }
-                    Ok(matches) if matches.len() > 1 => {
-                        println!("⚠️ Multiple matches found, skipping update");
+                    Ok(None) => {
+                        println!("⚠️ AI couldn't confidently match to any assignment");
                     }
-                    _ => {
-                        println!("❓ No match found for update");
+                    Err(e) => {
+                        eprintln!("❌ AI matching failed: {}", e);
                     }
                 }
-            });
-            
-            Some(format!(
-                "🔄 *Update received!*\n\n\
-                ✏️ {}\n\
-                📅 {}",
-                changes,
-                new_deadline_clone.unwrap_or("Unchanged".to_string())
-            ))
+            }
+            Ok(_) => {
+                println!("⚠️ No active assignments found");
+            }
+            Err(e) => {
+                eprintln!("❌ Failed to fetch active assignments: {}", e);
+            }
         }
+    });
+    
+    Some(format!(
+        "🔄 *Update received!*\n\n\
+        ✏️ {}\n\
+        📅 {}",
+        changes,
+        new_deadline_clone.unwrap_or("Unchanged".to_string())
+    ))
+}
         
         AIClassification::Unrecognized => None,
     }
