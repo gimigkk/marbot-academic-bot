@@ -1,6 +1,6 @@
 use sqlx::{PgPool, Result};
 use uuid::Uuid;
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Utc, NaiveDate};
 
 use crate::models::{Assignment, NewAssignment, Course, AssignmentDisplay};
 
@@ -110,6 +110,51 @@ pub async fn get_active_assignments(pool: &PgPool) -> Result<Vec<Assignment>> {
     Ok(assignments)
 }
 
+/// Get recent assignments for update matching (doesn't filter by deadline)
+pub async fn get_recent_assignments_for_update(
+    pool: &PgPool,
+    course_id: Option<Uuid>,
+) -> Result<Vec<Assignment>> {
+    let assignments = if let Some(cid) = course_id {
+        // Get last 5 assignments from specific course
+        println!("🔍 Fetching last 5 assignments from course: {}", cid);
+        sqlx::query_as::<_, Assignment>(
+            r#"
+            SELECT a.* 
+            FROM assignments a
+            WHERE a.course_id = $1
+            ORDER BY a.created_at DESC
+            LIMIT 5
+            "#
+        )
+        .bind(cid)
+        .fetch_all(pool)
+        .await?
+    } else {
+        // Get last 3 assignments from each course (broader search)
+        println!("🔍 Fetching last 3 assignments from each course");
+        sqlx::query_as::<_, Assignment>(
+            r#"
+            WITH ranked_assignments AS (
+                SELECT a.*, 
+                       ROW_NUMBER() OVER (PARTITION BY a.course_id ORDER BY a.created_at DESC) as rn
+                FROM assignments a
+            )
+            SELECT id, created_at, course_id, title, description, deadline, parallel_code, sender_id, message_id
+            FROM ranked_assignments
+            WHERE rn <= 3
+            ORDER BY created_at DESC
+            "#
+        )
+        .fetch_all(pool)
+        .await?
+    };
+    
+    println!("✅ Found {} assignments for matching", assignments.len());
+    
+    Ok(assignments)
+}
+
 
 /// Find course by name (case-insensitive)
 pub async fn get_course_by_name(
@@ -126,8 +171,33 @@ pub async fn get_course_by_name(
     Ok(course)
 }
 
-/// TODO: CHANGE IT TO COURSE ALIAS
-/// Get all courses formatted as "course1, course2, course3"
+/// Find course by name or alias (case-insensitive)
+pub async fn get_course_by_name_or_alias(
+    pool: &PgPool,
+    search_term: &str,
+) -> Result<Option<Course>> {
+    let search_lower = search_term.to_lowercase();
+    
+    // Search by name OR any alias in the aliases array
+    let course = sqlx::query_as::<_, Course>(
+        r#"
+        SELECT * FROM courses 
+        WHERE LOWER(name) = LOWER($1) 
+           OR EXISTS (
+               SELECT 1 FROM unnest(aliases) AS alias 
+               WHERE LOWER(alias) = LOWER($1)
+           )
+        LIMIT 1
+        "#
+    )
+    .bind(&search_lower)
+    .fetch_optional(pool)
+    .await?;
+
+    Ok(course)
+}
+
+/// Get all courses formatted with their aliases for AI prompt
 pub async fn get_all_courses_formatted(pool: &PgPool) -> Result<String> {
     let courses = sqlx::query_as::<_, Course>(
         "SELECT * FROM courses ORDER BY name"
@@ -137,11 +207,21 @@ pub async fn get_all_courses_formatted(pool: &PgPool) -> Result<String> {
     
     let formatted = courses
         .iter()
-        .map(|c| c.name.as_str())
+        .map(|c| {
+            if let Some(ref aliases) = c.aliases {
+                if !aliases.is_empty() {
+                    format!("{} (aliases: {})", c.name, aliases.join(", "))
+                } else {
+                    c.name.clone()
+                }
+            } else {
+                c.name.clone()
+            }
+        })
         .collect::<Vec<_>>()
-        .join(", ");
+        .join("\n- ");
     
-    Ok(formatted)
+    Ok(format!("- {}", formatted))
 }
 
 /// Check if assignment already exists by message_id
@@ -159,44 +239,86 @@ pub async fn get_assignment_by_message_id(
     Ok(assignment)
 }
 
-/// Find assignments by keywords (for update detection)
+/// Find assignments by keywords (for update detection) - IMPROVED VERSION
 pub async fn find_assignment_by_keywords(
     pool: &PgPool,
     keywords: &[String],
-    _course_id: Option<Uuid>,
+    course_id: Option<Uuid>,
 ) -> Result<Vec<Assignment>> {
     if keywords.is_empty() {
+        println!("⚠️ No keywords provided for search");
         return Ok(vec![]);
     }
     
-    // Pre-build all patterns to ensure they live long enough
+    // Try different search strategies
+    
+    // Strategy 1: Search by course + keywords
+    if let Some(cid) = course_id {
+        println!("🔍 Strategy 1: Searching by course_id + keywords");
+        let patterns: Vec<String> = keywords
+            .iter()
+            .map(|kw| format!("%{}%", kw.to_lowercase()))
+            .collect();
+        
+        let mut query = String::from(
+            "SELECT * FROM assignments WHERE course_id = $1 AND ("
+        );
+        
+        let mut conditions = Vec::new();
+        for i in 0..keywords.len() {
+            conditions.push(format!(
+                "(LOWER(title) LIKE ${} OR LOWER(description) LIKE ${})",
+                i * 2 + 2,
+                i * 2 + 3
+            ));
+        }
+        
+        query.push_str(&conditions.join(" AND "));
+        query.push_str(") ORDER BY created_at DESC LIMIT 5");
+        
+        println!("🔍 Query: {}", query);
+        println!("🔍 Course ID: {}", cid);
+        println!("🔍 Keywords: {:?}", keywords);
+        
+        let mut sql_query = sqlx::query_as::<_, Assignment>(&query).bind(cid);
+        
+        for pattern in &patterns {
+            sql_query = sql_query.bind(pattern).bind(pattern);
+        }
+        
+        let assignments = sql_query.fetch_all(pool).await?;
+        
+        if !assignments.is_empty() {
+            println!("✅ Found {} assignments with strategy 1", assignments.len());
+            return Ok(assignments);
+        }
+    }
+    
+    // Strategy 2: Search by keywords only (broader search)
+    println!("🔍 Strategy 2: Searching by keywords only");
     let patterns: Vec<String> = keywords
         .iter()
         .map(|kw| format!("%{}%", kw.to_lowercase()))
         .collect();
     
-    // Build pattern matching for each keyword
     let mut conditions = Vec::new();
-    
-    for (i, _) in keywords.iter().enumerate() {
+    for i in 0..keywords.len() {
         conditions.push(format!(
             "(LOWER(title) LIKE ${} OR LOWER(description) LIKE ${})",
-            i * 2 + 1, 
+            i * 2 + 1,
             i * 2 + 2
         ));
     }
     
     let query = format!(
         "SELECT * FROM assignments WHERE {} ORDER BY created_at DESC LIMIT 5",
-        conditions.join(" AND ")
+        conditions.join(" OR ")  // Changed from AND to OR for broader matching
     );
     
-    println!("🔍 Searching with query: {}", query);
-    println!("🔍 Keywords: {:?}", keywords);
+    println!("🔍 Query: {}", query);
     
     let mut sql_query = sqlx::query_as::<_, Assignment>(&query);
     
-    // Bind each pattern twice (for title and description)
     for pattern in &patterns {
         sql_query = sql_query.bind(pattern).bind(pattern);
     }
@@ -219,6 +341,9 @@ pub async fn update_assignment_fields(
     new_deadline: Option<DateTime<Utc>>,
     new_description: Option<String>,
 ) -> Result<Assignment> {
+    println!("🔄 Updating assignment {} with deadline: {:?}, description: {:?}", 
+        id, new_deadline, new_description);
+    
     // Build dynamic query based on what changed
     let assignment = match (new_deadline, &new_description) {
         (Some(dl), Some(desc)) => {
@@ -278,7 +403,16 @@ pub async fn update_assignment_fields(
         }
     };
     
-    println!("✅ Updated assignment: {}", assignment.title);
+    println!("✅ Successfully updated assignment: {}", assignment.title);
     
     Ok(assignment)
+}
+
+/// Parse deadline string (YYYY-MM-DD) to DateTime<Utc>
+pub fn parse_deadline(deadline_str: &str) -> Result<DateTime<Utc>, String> {
+    use chrono::NaiveDate;
+    
+    NaiveDate::parse_from_str(deadline_str, "%Y-%m-%d")
+        .map_err(|e| format!("Failed to parse date '{}': {}", deadline_str, e))
+        .map(|date| date.and_hms_opt(23, 59, 59).unwrap().and_utc())
 }

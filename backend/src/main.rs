@@ -246,39 +246,88 @@ fn handle_ai_classification(
             let new_description_clone = new_description.clone();
             let pool_clone = pool.clone();
             
-            // Fetch active assignments BEFORE spawning (make this blocking/sync)
+            // Clone again for the response message (since it's moved into tokio::spawn)
+            let response_deadline = new_deadline.clone();
+            let response_changes = changes.clone();
+            
             tokio::spawn(async move {
-                // Get active assignments inside spawn
-                match crud::get_active_assignments(&pool_clone).await {
-                    Ok(active_assignments) if !active_assignments.is_empty() => {
-                        println!("📋 Found {} active assignments", active_assignments.len());
+                // Try to identify course from keywords
+                let mut course_id: Option<uuid::Uuid> = None;
+                
+                for keyword in &reference_keywords_clone {
+                    println!("🔍 Checking if '{}' is a course name/alias...", keyword);
+                    match crud::get_course_by_name_or_alias(&pool_clone, keyword).await {
+                        Ok(Some(course)) => {
+                            println!("✅ Found course: {} (ID: {})", course.name, course.id);
+                            course_id = Some(course.id);
+                            break;
+                        }
+                        Ok(None) => {
+                            println!("   '{}' is not a course", keyword);
+                        }
+                        Err(e) => {
+                            eprintln!("❌ Error looking up course: {}", e);
+                        }
+                    }
+                }
+                
+                // Get recent assignments (from specific course if identified, or last 3 from each course)
+                match crud::get_recent_assignments_for_update(&pool_clone, course_id).await {
+                    Ok(assignments) if !assignments.is_empty() => {
+                        println!("📋 Found {} assignments to check for matching", assignments.len());
+                        println!("📋 Assignments being sent to AI:");
+                        for (i, a) in assignments.iter().enumerate() {
+                            println!("   {}. Title: '{}', Description: '{}'", i + 1, a.title, a.description);
+                        }
                         
                         // Step 2: Ask AI to match
                         match parser::ai_extractor::match_update_to_assignment(
                             &changes_clone,
                             &reference_keywords_clone,
-                            &active_assignments
+                            &assignments
                         ).await {
                             Ok(Some(assignment_id)) => {
                                 println!("✅ AI matched to assignment ID: {}", assignment_id);
+                                
+                                // Parse the new deadline if provided
+                                let parsed_deadline = if let Some(ref deadline_str) = new_deadline_clone {
+                                    match crud::parse_deadline(deadline_str) {
+                                        Ok(dt) => {
+                                            println!("✅ Parsed deadline: {}", dt);
+                                            Some(dt)
+                                        }
+                                        Err(e) => {
+                                            eprintln!("❌ Failed to parse deadline '{}': {}", deadline_str, e);
+                                            None
+                                        }
+                                    }
+                                } else {
+                                    None
+                                };
                                 
                                 // Step 3: Update the matched assignment
                                 match crud::update_assignment_fields(
                                     &pool_clone,
                                     assignment_id,
-                                    parse_deadline(&new_description_clone),
+                                    parsed_deadline,
                                     new_description_clone,
                                 ).await {
                                     Ok(updated) => {
-                                        println!("✅ Updated assignment: {}", updated.title);
+                                        println!("✅ Successfully updated assignment: {}", updated.title);
+                                        println!("   New deadline: {:?}", updated.deadline);
+                                        println!("   Description: {}", updated.description);
                                     }
                                     Err(e) => {
-                                        eprintln!("❌ Update failed: {}", e);
+                                        eprintln!("❌ Database update failed: {}", e);
                                     }
                                 }
                             }
                             Ok(None) => {
                                 println!("⚠️ AI couldn't confidently match to any assignment");
+                                println!("   Possible reasons:");
+                                println!("   - No assignment title/description matches keywords");
+                                println!("   - Multiple assignments could match (ambiguous)");
+                                println!("   - Assignment topic not found in database");
                             }
                             Err(e) => {
                                 eprintln!("❌ AI matching failed: {}", e);
@@ -286,10 +335,15 @@ fn handle_ai_classification(
                         }
                     }
                     Ok(_) => {
-                        println!("⚠️ No active assignments found");
+                        println!("⚠️ No assignments found in database");
+                        if let Some(cid) = course_id {
+                            println!("   (searched in course ID: {})", cid);
+                        } else {
+                            println!("   (searched across all courses)");
+                        }
                     }
                     Err(e) => {
-                        eprintln!("❌ Failed to fetch active assignments: {}", e);
+                        eprintln!("❌ Failed to fetch assignments from database: {}", e);
                     }
                 }
             });
@@ -298,8 +352,8 @@ fn handle_ai_classification(
                 "🔄 *Update received!*\n\n\
                 ✏️ {}\n\
                 📅 {}",
-                changes,
-                new_deadline_clone.unwrap_or("Unchanged".to_string())
+                response_changes,
+                response_deadline.unwrap_or("Unchanged".to_string())
             ))
         }
         
