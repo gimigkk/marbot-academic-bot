@@ -104,6 +104,7 @@ pub enum AIClassification {
 pub struct Course {
     pub id: Uuid,
     pub name: String,
+    pub aliases: Option<Vec<String>>,
     pub created_at: DateTime<Utc>,
 }
 
