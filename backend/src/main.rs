@@ -45,8 +45,7 @@ async fn webhook(
         return;
     }
 
-    // this is for handling when WAHA sends duplicate messages
-    // don't know why it does that
+    // Deduplication Logic
     let dedup_key = format!(
         "{}:{}:{}",
         payload.payload.id,
@@ -68,30 +67,19 @@ async fn webhook(
         }
     }
 
-    // for some reason messages that's sent by the bot is being read also.
+    // Ignore bot's own messages
     if payload.payload.from_me {
         println!("⏭️  Ignoring bot's own message");
         return;
     }
 
-    // for debuggin in the terminal
+    // Debug Prints
     let separator = "=".repeat(60);
     println!("\n{}", separator);
     println!("📨 NEW MESSAGE");
     println!("{}", separator);
     println!("From: {}", payload.payload.from);
-
-    if payload.payload.from.ends_with("@newsletter") {
-        println!("   📢 Type: WhatsApp Channel/Newsletter");
-    } else if payload.payload.from.ends_with("@g.us") {
-        println!("   👥 Type: WhatsApp Group");
-    } else {
-        println!("   💬 Type: Direct Message");
-    }
-
-    println!("Message ID: {}", payload.payload.id);
     println!("Body: {}", payload.payload.body);
-    println!("From Me: {}", payload.payload.from_me);
     println!("{}\n", separator);
 
     // STEP 1: CLASSIFY MESSAGE
@@ -100,7 +88,7 @@ async fn webhook(
 
     println!("🔍 Classification: {:?}", message_type);
 
-    // STEP 2: CHECK WHITELIST (for academic info)
+    // STEP 2: CHECK WHITELIST
     let (should_process, reason) =
         state.whitelist.should_process(&payload.payload.from, is_command);
 
@@ -109,44 +97,46 @@ async fn webhook(
         return;
     }
 
-    // STEP 3: RUN COMMAND (if it's a bot command)
+    // STEP 3: EXECUTE LOGIC (Command or AI)
     let response_text = match message_type {
-    MessageType::Command(cmd) => {
-        Some(handle_command(cmd, &payload.payload.from))
-    }
+    
+        MessageType::Command(cmd) => {
+            // .await
+            Some(handle_command(cmd, &payload.payload.from, &state.pool).await)
+        }
 
-    // STEP 4: DATA EXTRACT WITH AI
-    MessageType::NeedsAI(text) => {
-        // Fetch available courses from database
-        let courses_result = crud::get_all_courses_formatted(&state.pool).await;
-        
-        match courses_result {
-            Ok(courses_list) => {
-                println!("📚 Available courses: {}", courses_list);
-                
-                // Pass courses to AI extraction
-                match extract_with_ai(&text, &courses_list).await {
-                    Ok(classification) => {
-                        handle_ai_classification( // The function is in this file btw
-                            state.pool.clone(),
-                            classification,
-                            &payload.payload.id,
-                            &payload.payload.from,
-                        )
-                    }
-                    Err(e) => {
-                        eprintln!("❌ AI extraction failed: {}", e);
-                        Some("❌ Failed to process message".to_string())
+        // STEP 4: DATA EXTRACT WITH AI
+        MessageType::NeedsAI(text) => {
+            // Fetch available courses from database
+            let courses_result = crud::get_all_courses_formatted(&state.pool).await;
+            
+            match courses_result {
+                Ok(courses_list) => {
+                    println!("📚 Available courses: {}", courses_list);
+                    
+                    // Pass courses to AI extraction
+                    match extract_with_ai(&text, &courses_list).await {
+                        Ok(classification) => {
+                            handle_ai_classification(
+                                state.pool.clone(),
+                                classification,
+                                &payload.payload.id,
+                                &payload.payload.from,
+                            )
+                        }
+                        Err(e) => {
+                            eprintln!("❌ AI extraction failed: {}", e);
+                            Some("❌ Failed to process message".to_string())
+                        }
                     }
                 }
-            }
-            Err(e) => {
-                eprintln!("❌ Failed to fetch courses: {}", e);
-                Some("❌ Failed to fetch course list".to_string())
+                Err(e) => {
+                    eprintln!("❌ Failed to fetch courses: {}", e);
+                    Some("❌ Failed to fetch course list".to_string())
+                }
             }
         }
-    }
-};
+    };
 
     // STEP 5: SEND REPLY
     if let Some(text) = response_text {
@@ -156,8 +146,7 @@ async fn webhook(
     }
 }
 
-/// After classifying the message by AI,
-/// business logic.
+/// Handle business logic after AI classifies the message
 fn handle_ai_classification(
     pool: PgPool,
     classification: AIClassification, 
@@ -172,7 +161,6 @@ fn handle_ai_classification(
     match classification {
         AIClassification::AssignmentInfo { course_name, title, deadline, description, .. } => {
             println!("📚 NEW ASSIGNMENT DETECTED");
-            println!("   Course: {}", course_name.as_ref().unwrap_or(&"Unknown".to_string()));
             
             let pool_clone = pool.clone();
             let course_name_for_lookup = course_name.clone();
@@ -185,32 +173,21 @@ fn handle_ai_classification(
             tokio::spawn(async move {
                 // Look up course_id by name
                 let course_id = if let Some(name) = &course_name_for_lookup {
-                    match crud::get_course_by_name(&pool_clone, name).await {
-                        Ok(Some(course)) => {
-                            println!("✅ Found course: {} (ID: {})", course.name, course.id);
-                            Some(course.id)
-                        }
-                        Ok(None) => {
-                            println!("⚠️ Course '{}' not found in database", name);
-                            None
-                        }
-                        Err(e) => {
-                            eprintln!("❌ Error looking up course: {}", e);
-                            None
-                        }
+                    match crud::create_assignment(&pool_clone, 
+                        
+                        name, // course name query
+                        parallel_code.as_deref(),
+                        &title_clone,
+                        &description_clone,
+                        Some(&sender_id),
+                        &message_id,
+                        deadline_parsed
+                    ).await {
+                        Ok(msg) => println!("✅ DB: {}", msg),
+                        Err(e) => eprintln!("❌ DB Error: {}", e),
                     }
                 } else {
-                    None
-                };
-                
-                let new_assignment = NewAssignment {
-                    course_id,
-                    title: title_clone.clone(),
-                    description: description_clone.clone(),
-                    deadline: deadline_parsed,
-                    parallel_code,
-                    sender_id: Some(sender_id.clone()),
-                    message_id: message_id.clone(),
+                    println!("⚠️ No course name detected");
                 };
                 
                 match crud::create_assignment(&pool_clone, new_assignment).await {
@@ -224,15 +201,10 @@ fn handle_ai_classification(
             });
             
             Some(format!(
-                "✅ *Assignment Saved!*\n\n\
-                📚 Course: {}\n\
-                📝 {}\n\
-                📅 Due: {}\n\
-                📄 {}",
+                "✅ *Assignment Detected*\n\n📚 Course: {}\n📝 {}\n📅 Due: {}\n\n_Sedang disimpan ke database..._",
                 course_name.unwrap_or("Unknown".to_string()),
                 title,
                 deadline.unwrap_or("No due date".to_string()),
-                description
             ))
         }
         
@@ -283,6 +255,8 @@ fn handle_ai_classification(
                             Err(e) => {
                                 eprintln!("❌ AI matching failed: {}", e);
                             }
+                            Ok(None) => println!("⚠️ AI couldn't match assignment"),
+                            Err(e) => eprintln!("❌ AI matching error: {}", e),
                         }
                     }
                     Ok(_) => {
@@ -309,8 +283,7 @@ fn handle_ai_classification(
 
 async fn send_reply(chat_id: &str, text: &str) -> Result<(), Box<dyn std::error::Error>> {
     let waha_url = "http://localhost:3001/api/sendText";
-    let api_key = std::env::var("WAHA_API_KEY")
-        .unwrap_or_else(|_| "devkey123".to_string());
+    let api_key = std::env::var("WAHA_API_KEY").unwrap_or_else(|_| "devkey123".to_string());
     
     let payload = SendTextRequest {
         chat_id: chat_id.to_string(),
@@ -328,15 +301,11 @@ async fn send_reply(chat_id: &str, text: &str) -> Result<(), Box<dyn std::error:
         .send()
         .await?;
 
-    let status = response.status();
-    
-    if status.is_success() {
+    if response.status().is_success() {
         println!("✅ WAHA API responded successfully");
         Ok(())
     } else {
-        let body = response.text().await?;
-        eprintln!("❌ WAHA API error: {} - {}", status, body);
-        Err(format!("WAHA API error: {}", status).into())
+        Err(format!("WAHA API error: {}", response.status()).into())
     }
 }
 
@@ -386,11 +355,8 @@ async fn main() {
         .with_state(state);
 
     let addr = SocketAddr::from(([0, 0, 0, 0], 3000));
-    let separator = "=".repeat(60);
     println!("👂 Listening on {}", addr);
-    println!("📍 Webhook endpoint: http://localhost:3000/webhook");
-    println!("\n{}\n", separator);
-
+    
     let listener = TcpListener::bind(addr).await.unwrap();
     axum::serve(listener, app).await.unwrap();
 }

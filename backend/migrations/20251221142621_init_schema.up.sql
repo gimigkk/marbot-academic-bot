@@ -6,19 +6,19 @@ create extension if not exists "uuid-ossp";
 create table public.courses (
   id uuid default uuid_generate_v4() primary key,
   name text not null unique,   -- Nama Matkul (Unique Value)
+  aliases text[], 
   created_at timestamp with time zone default timezone('utc'::text, now()) not null
 );
 
 -- INPUT Mata Kuliah
-insert into public.courses (name) values 
-  ('Pro Gaming'),
-  ('Struktur Data'),
-  ('Rekayasa Perangkat Lunak'),
-  ('Organisasi dan Arsitektur Komputer'),
-  ('Metode Kuantitatif'),
-  ('Grafika Komputer dan Visualisasi'),
-  ('User Experience Design');
-
+insert into public.courses (name, aliases) values 
+  ('Desain Pengalaman', ARRAY['dp', 'depe', 'ux']),
+  ('Pemrograman', ARRAY['pemrog', 'prog', 'pro gaming']),
+  ('Metode Kuantitatif', ARRAY['mk', 'metku']),
+  ('Organisasi dan Arsitektur Komputer', ARRAY['orkom', 'oak']),
+  ('Grafika Komputer dan Visualisasi', ARRAY['gkdv','grafika', 'grafkom', 'gkv']),
+  ('Struktur Data', ARRAY['strukdat', 'sd']),
+  ('Rekayasa Perangkat Lunak', ARRAY['rpl']);
 
 
 -- TABEL 2: ASSIGNMENTS (Tugas)
