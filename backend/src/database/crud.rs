@@ -2,7 +2,7 @@ use sqlx::{PgPool, Result};
 use uuid::Uuid;
 use chrono::{DateTime, Utc};
 
-use crate::models::{Assignment, NewAssignment, Course};
+use crate::models::{Assignment, NewAssignment, Course, AssignmentDisplay};
 
 // ========================================
 // CREATE OPERATIONS
@@ -12,35 +12,81 @@ use crate::models::{Assignment, NewAssignment, Course};
 pub async fn create_assignment(
     pool: &PgPool,
     new_assignment: NewAssignment,
-) -> Result<Assignment> {
-    let assignment = sqlx::query_as::<_, Assignment>(
+) -> Result<String, sqlx::Error> {
+    
+    // A. Cari Course (ILIKE)
+    let course = sqlx::query!(
         r#"
-        INSERT INTO assignments (
-            course_id, title, description, deadline,
-            parallel_code, sender_id, message_id
-        )
-        VALUES ($1, $2, $3, $4, $5, $6, $7)
-        RETURNING *
-        "#
+        SELECT id, name 
+        FROM courses 
+        WHERE id = $1
+        LIMIT 1
+        "#,
+        new_assignment.course_id
     )
-    .bind(new_assignment.course_id)
-    .bind(new_assignment.title)
-    .bind(new_assignment.description)
-    .bind(new_assignment.deadline)
-    .bind(new_assignment.parallel_code)
-    .bind(new_assignment.sender_id)
-    .bind(new_assignment.message_id)
-    .fetch_one(pool)
+    .fetch_optional(pool)
     .await?;
 
-    println!("✅ Created assignment: {} (ID: {})", assignment.title, assignment.id);
-    
-    Ok(assignment)
+    // Validasi Course
+    let real_course_name = match course {
+        Some(c) => c.name,
+        None => match new_assignment.course_id {
+            Some(id) => return Ok(format!("Gagal: Mata kuliah dengan ID '{}' tidak ditemukan", id)),
+            None => return Ok("Gagal: Mata kuliah tidak ditemukan (ID tidak ada)".to_string()),
+        }
+    };
+    // kode paralel (huruf kecil)
+    let clean_parallel = new_assignment.parallel_code.as_ref().map(|p| p.to_lowercase());
+
+    // B. Insert Tugas
+    sqlx::query!(
+        r#"
+        INSERT INTO assignments (
+            course_id, parallel_code, title, description, 
+            deadline, sender_id, message_id
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
+        "#,
+        new_assignment.course_id,
+        clean_parallel,
+        new_assignment.title,
+        new_assignment.description,
+        new_assignment.deadline,
+        new_assignment.sender_id,
+        new_assignment.message_id
+    )
+    .execute(pool)
+    .await?;
+
+    Ok(format!("Sukses! Tugas '{}' berhasil disimpan ke matkul '{}'", new_assignment.title, real_course_name))
 }
 
 // ========================================
 // READ OPERATIONS
 // ========================================
+
+// 2. READ (Melihat SEMUA Tugas)
+pub async fn get_assignments(pool: &PgPool) -> Result<Vec<AssignmentDisplay>, sqlx::Error> {
+    let assignments = sqlx::query_as!(
+        AssignmentDisplay,
+        r#"
+        SELECT 
+            a.id, 
+            c.name as "course_name!", 
+            a.parallel_code, 
+            a.title, 
+            a.description, 
+            a.deadline
+        FROM assignments a
+        JOIN courses c ON a.course_id = c.id
+        ORDER BY a.deadline ASC
+        "#
+    )
+    .fetch_all(pool)
+    .await?;
+
+    Ok(assignments)
+}
 
 /// Get active assignments (not past deadline) with course info
 pub async fn get_active_assignments(pool: &PgPool) -> Result<Vec<Assignment>> {

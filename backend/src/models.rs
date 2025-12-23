@@ -125,6 +125,16 @@ pub struct Assignment {
     pub message_id: String,             // WhatsApp message ID
 }
 
+#[derive(Debug, Clone, FromRow, Serialize, Deserialize)]
+pub struct AssignmentDisplay {
+    pub course_name: String,
+    pub id: Uuid,
+    pub title: String,
+    pub description: String,
+    pub deadline: Option<DateTime<Utc>>,
+    pub parallel_code: Option<String>,  // k1, k2, k3, p1, p2, p3
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct NewAssignment {
     pub course_id: Option<Uuid>,
