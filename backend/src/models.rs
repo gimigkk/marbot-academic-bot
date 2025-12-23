@@ -1,5 +1,8 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use sqlx::FromRow;
+use uuid::Uuid;
+use chrono::{DateTime, Utc};
 
 // ===== WEBHOOK PAYLOAD TYPES (from WAHA) =====
 
@@ -53,17 +56,17 @@ pub struct ForwardMessageRequest {
 #[derive(Debug)]
 pub enum MessageType {
     Command(BotCommand),
-    NeedsAI(String), // Raw message text to send to AI
+    NeedsAI(String),
 }
 
 #[derive(Debug)]
 pub enum BotCommand {
     Ping,
     Tugas,
-    Expand(u32),  // #expand 1
-    Done(u32),    // #done 1
+    Expand(u32),
+    Done(u32),
     Help,
-    UnknownCommand(String), // Any # command we don't recognize
+    UnknownCommand(String),
 }
 
 // ===== AI EXTRACTION RESULTS =====
@@ -73,24 +76,75 @@ pub enum BotCommand {
 pub enum AIClassification {
     AssignmentInfo {
         title: String,
-        due_date: Option<String>,  // e.g., "2025-01-15"
+        deadline: Option<String>,  // "2025-01-15"
         description: String,
         #[serde(default)]
         #[serde(skip_serializing_if = "Option::is_none")]
-        original_message: Option<String>,  // Ignore if AI returns it
+        original_message: Option<String>,
     },
-    CourseInfo {
-        content: String,
+    
+    AssignmentUpdate {
+        reference_keywords: Vec<String>,
+        changes: String,
+        new_deadline: Option<String>,
+        new_description: Option<String>,
         #[serde(default)]
         #[serde(skip_serializing_if = "Option::is_none")]
-        original_message: Option<String>,  // Ignore if AI returns it
+        original_message: Option<String>,
     },
-    AssignmentReminder {
-        assignment_reference: String,
-    },
-    FailedCommand {
-        attempted_command: String,
-        suggestion: String,
-    },
+    
     Unrecognized,
+}
+
+// ===== DATABASE MODELS =====
+
+#[derive(Debug, Clone, FromRow, Serialize, Deserialize)]
+pub struct Course {
+    pub id: Uuid,
+    pub name: String,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct NewCourse {
+    pub name: String,
+}
+
+#[derive(Debug, Clone, FromRow, Serialize, Deserialize)]
+pub struct Assignment {
+    pub id: Uuid,
+    pub created_at: DateTime<Utc>,
+    pub course_id: Option<Uuid>,
+    pub title: String,
+    pub description: String,
+    pub deadline: Option<DateTime<Utc>>,
+    pub parallel_code: Option<String>,
+    pub sender_id: Option<String>,
+    pub message_id: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct NewAssignment {
+    pub course_id: Option<Uuid>,
+    pub title: String,
+    pub description: String,
+    pub deadline: Option<DateTime<Utc>>,
+    pub parallel_code: Option<String>,
+    pub sender_id: Option<String>,
+    pub message_id: String,
+}
+
+#[derive(Debug, Clone, FromRow, Serialize, Deserialize)]
+pub struct WaLog {
+    pub id: Uuid,
+    pub created_at: DateTime<Utc>,
+    pub event_type: Option<String>,
+    pub payload: Option<Value>,
+    pub processed: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct NewWaLog {
+    pub event_type: Option<String>,
+    pub payload: Option<Value>,
 }
