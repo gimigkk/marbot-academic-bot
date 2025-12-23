@@ -1,3 +1,7 @@
+use crate::models::BotCommand;
+use crate::database; // Import modul database
+use sqlx::PgPool;    // Import PgPool
+
 /// Handle bot commands and return response text
 pub async fn handle_command(cmd: BotCommand, user_phone: &str, pool: &PgPool) -> String {
     match cmd {
