@@ -57,7 +57,7 @@ pub async fn extract_with_ai(
         }],
         "generationConfig": {
             "temperature": 0.2,
-            "maxOutputTokens": 2048,
+            "maxOutputTokens": 4096,
             "responseMimeType": "application/json"
         }
     });
@@ -129,7 +129,7 @@ pub async fn match_update_to_assignment(
         }],
         "generationConfig": {
             "temperature": 0.2,
-            "maxOutputTokens": 2048,
+            "maxOutputTokens": 4096,
             "responseMimeType": "application/json"
         }
     });
@@ -187,6 +187,10 @@ RULES:
   * "besok" (tomorrow) = add 1 day
   * "minggu depan" (next week) = add 7 days
   * "senin/selasa/etc" = find next occurrence of that day
+- For recurring assignments (LKP, weekly tasks):
+  * If message contains assignment name + deadline but NO prior context, classify as "assignment_info"
+  * Example: "LKP 13 deadline tonight" → assignment_info (could be first mention of LKP 13)
+  * Only use "assignment_update" if message clearly references a change/reminder to existing assignment
 - For "assignment_update":
   * "reference_keywords" must include course name/alias AND specific assignment identifiers
   * Example: ["pemrograman", "bab 2"] or ["GKV", "matriks"]

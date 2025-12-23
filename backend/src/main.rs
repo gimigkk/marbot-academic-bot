@@ -1,5 +1,3 @@
-// src/main.rs
-
 use axum::{
     extract::State,
     routing::post,
@@ -127,7 +125,7 @@ async fn webhook(
                 // Pass courses to AI extraction
                 match extract_with_ai(&text, &courses_list).await {
                     Ok(classification) => {
-                        handle_ai_classification( // The function is in this file btw
+                        handle_ai_classification(
                             state.pool.clone(),
                             classification,
                             &payload.payload.id,
@@ -177,9 +175,11 @@ fn handle_ai_classification(
             let pool_clone = pool.clone();
             let course_name_for_lookup = course_name.clone();
             let title_clone = title.clone();
-            let description_clone = description.clone();
+            let description_clone = description.clone().unwrap_or_else(|| "No description".to_string());
             let deadline_parsed = parse_deadline(&deadline);
             let parallel_code = extract_parallel_code(&title);
+            let deadline_for_response = deadline.clone();
+            let course_name_for_response = course_name.clone();
             
             // Spawn async database work in background
             tokio::spawn(async move {
@@ -203,6 +203,53 @@ fn handle_ai_classification(
                     None
                 };
                 
+                // **NEW: Check for existing assignment with same title**
+                if let Some(cid) = course_id {
+                    match crud::get_assignment_by_title_and_course(&pool_clone, &title_clone, cid).await {
+                        Ok(Some(existing)) => {
+                            println!("⚠️ Assignment '{}' already exists (ID: {})", title_clone, existing.id);
+                            println!("🔄 Updating existing assignment instead of creating duplicate...");
+                            
+                            // Update the existing assignment instead of creating duplicate
+                            match crud::update_assignment_fields(
+                                &pool_clone,
+                                existing.id,
+                                deadline_parsed,
+                                Some(description_clone.clone()),
+                            ).await {
+                                Ok(updated) => {
+                                    println!("✅ Successfully updated assignment: {}", updated.title);
+                                    
+                                    let response = format!(
+                                        "🔄 *Assignment Updated!*\n\n\
+                                        📝 {}\n\
+                                        📅 Due: {}\n\
+                                        📄 {}",
+                                        updated.title,
+                                        deadline_for_response.unwrap_or("No due date".to_string()),
+                                        description_clone
+                                    );
+                                    
+                                    if let Err(e) = send_reply(&sender_id, &response).await {
+                                        eprintln!("❌ Failed to send update confirmation: {}", e);
+                                    }
+                                }
+                                Err(e) => {
+                                    eprintln!("❌ Database update failed: {}", e);
+                                }
+                            }
+                            return; // Exit early, don't create new
+                        }
+                        Ok(None) => {
+                            println!("✅ No duplicate found, proceeding with creation");
+                        }
+                        Err(e) => {
+                            eprintln!("❌ Error checking for duplicates: {}", e);
+                        }
+                    }
+                }
+                
+                // Original creation code continues...
                 let new_assignment = NewAssignment {
                     course_id,
                     title: title_clone.clone(),
@@ -216,6 +263,23 @@ fn handle_ai_classification(
                 match crud::create_assignment(&pool_clone, new_assignment).await {
                     Ok(message) => {
                         println!("✅ {}", message);
+                        
+                        // Send creation confirmation
+                        let response = format!(
+                            "✅ *Assignment Saved!*\n\n\
+                            📚 Course: {}\n\
+                            📝 {}\n\
+                            📅 Due: {}\n\
+                            📄 {}",
+                            course_name_for_response.unwrap_or("Unknown".to_string()),
+                            title_clone,
+                            deadline_for_response.unwrap_or("No due date".to_string()),
+                            description_clone
+                        );
+                        
+                        if let Err(e) = send_reply(&sender_id, &response).await {
+                            eprintln!("❌ Failed to send creation confirmation: {}", e);
+                        }
                     }
                     Err(e) => {
                         eprintln!("❌ Failed to save to database: {}", e);
@@ -223,17 +287,8 @@ fn handle_ai_classification(
                 }
             });
             
-            Some(format!(
-                "✅ *Assignment Saved!*\n\n\
-                📚 Course: {}\n\
-                📝 {}\n\
-                📅 Due: {}\n\
-                📄 {}",
-                course_name.unwrap_or("Unknown".to_string()),
-                title,
-                deadline.unwrap_or("No due date".to_string()),
-                description
-            ))
+            // Return None since we're sending replies inside the tokio::spawn
+            None
         }
         
         AIClassification::AssignmentUpdate { reference_keywords, changes, new_deadline, new_description, .. } => {
@@ -246,13 +301,13 @@ fn handle_ai_classification(
             let new_description_clone = new_description.clone();
             let pool_clone = pool.clone();
             
-            // Clone again for the response message (since it's moved into tokio::spawn)
-            let response_deadline = new_deadline.clone();
-            let response_changes = changes.clone();
+            // Clone for response - we'll determine the response type inside the spawn
+            let sender_id_for_response = sender_id.to_string();
             
             tokio::spawn(async move {
                 // Try to identify course from keywords
                 let mut course_id: Option<uuid::Uuid> = None;
+                let mut course_name: Option<String> = None;
                 
                 for keyword in &reference_keywords_clone {
                     println!("🔍 Checking if '{}' is a course name/alias...", keyword);
@@ -260,6 +315,7 @@ fn handle_ai_classification(
                         Ok(Some(course)) => {
                             println!("✅ Found course: {} (ID: {})", course.name, course.id);
                             course_id = Some(course.id);
+                            course_name = Some(course.name.clone());
                             break;
                         }
                         Ok(None) => {
@@ -271,7 +327,7 @@ fn handle_ai_classification(
                     }
                 }
                 
-                // Get recent assignments (from specific course if identified, or last 3 from each course)
+                // Get recent assignments
                 match crud::get_recent_assignments_for_update(&pool_clone, course_id).await {
                     Ok(assignments) if !assignments.is_empty() => {
                         println!("📋 Found {} assignments to check for matching", assignments.len());
@@ -280,7 +336,7 @@ fn handle_ai_classification(
                             println!("   {}. Title: '{}', Description: '{}'", i + 1, a.title, a.description);
                         }
                         
-                        // Step 2: Ask AI to match
+                        // Ask AI to match
                         match parser::ai_extractor::match_update_to_assignment(
                             &changes_clone,
                             &reference_keywords_clone,
@@ -305,17 +361,32 @@ fn handle_ai_classification(
                                     None
                                 };
                                 
-                                // Step 3: Update the matched assignment
+                                // Update the matched assignment
                                 match crud::update_assignment_fields(
                                     &pool_clone,
                                     assignment_id,
                                     parsed_deadline,
-                                    new_description_clone,
+                                    new_description_clone.clone(),
                                 ).await {
                                     Ok(updated) => {
                                         println!("✅ Successfully updated assignment: {}", updated.title);
                                         println!("   New deadline: {:?}", updated.deadline);
                                         println!("   Description: {}", updated.description);
+                                        
+                                        // Send update confirmation
+                                        let response = format!(
+                                            "🔄 *Assignment Updated!*\n\n\
+                                            📝 {}\n\
+                                            ✏️ {}\n\
+                                            📅 {}",
+                                            updated.title,
+                                            changes_clone,
+                                            new_deadline_clone.unwrap_or("Unchanged".to_string())
+                                        );
+                                        
+                                        if let Err(e) = send_reply(&sender_id_for_response, &response).await {
+                                            eprintln!("❌ Failed to send update confirmation: {}", e);
+                                        }
                                     }
                                     Err(e) => {
                                         eprintln!("❌ Database update failed: {}", e);
@@ -324,10 +395,6 @@ fn handle_ai_classification(
                             }
                             Ok(None) => {
                                 println!("⚠️ AI couldn't confidently match to any assignment");
-                                println!("   Possible reasons:");
-                                println!("   - No assignment title/description matches keywords");
-                                println!("   - Multiple assignments could match (ambiguous)");
-                                println!("   - Assignment topic not found in database");
                             }
                             Err(e) => {
                                 eprintln!("❌ AI matching failed: {}", e);
@@ -341,6 +408,92 @@ fn handle_ai_classification(
                         } else {
                             println!("   (searched across all courses)");
                         }
+                        
+                        // FALLBACK: Create new assignment
+                        if let Some(cid) = course_id {
+                            if let Some(ref deadline_str) = new_deadline_clone {
+                                println!("💡 Converting update to new assignment creation...");
+                                
+                                // Extract title
+                                let title = reference_keywords_clone
+                                    .iter()
+                                    .find(|k| {
+                                        let lower = k.to_lowercase();
+                                        lower.contains("lkp") || 
+                                        lower.contains("tugas") || 
+                                        lower.contains("quiz") ||
+                                        lower.contains("uts") ||
+                                        lower.contains("uas") ||
+                                        lower.starts_with("bab ")
+                                    })
+                                    .cloned()
+                                    .unwrap_or_else(|| "Assignment".to_string());
+                                
+                                println!("   Title: {}", title);
+                                println!("   Deadline: {}", deadline_str);
+                                
+                                // Extract parallel code
+                                let parallel_code = reference_keywords_clone
+                                    .iter()
+                                    .find(|k| k.to_uppercase().starts_with('K') && k.len() == 2)
+                                    .map(|k| k.to_lowercase());
+                                
+                                if let Some(ref pc) = parallel_code {
+                                    println!("   Parallel: {}", pc);
+                                }
+                                
+                                // Parse deadline
+                                match crud::parse_deadline(deadline_str) {
+                                    Ok(parsed_deadline) => {
+                                        let description = new_description_clone
+                                            .unwrap_or_else(|| changes_clone.clone());
+                                        
+                                        let new_assignment = NewAssignment {
+                                            course_id: Some(cid),
+                                            title: title.clone(),
+                                            description: description.clone(),
+                                            deadline: Some(parsed_deadline),
+                                            parallel_code: parallel_code.clone(),
+                                            sender_id: None,
+                                            message_id: String::new(),
+                                        };
+                                        
+                                        match crud::create_assignment(&pool_clone, new_assignment).await {
+                                            Ok(success_msg) => {
+                                                println!("✅ {}", success_msg);
+                                                
+                                                // Send creation confirmation
+                                                let response = format!(
+                                                    "✅ *New Assignment Saved!*\n\n\
+                                                    📚 {}\n\
+                                                    📝 {}\n\
+                                                    📅 {}\n\
+                                                    📄 {}",
+                                                    course_name.unwrap_or("Unknown".to_string()),
+                                                    title,
+                                                    deadline_str,
+                                                    description
+                                                );
+                                                
+                                                if let Err(e) = send_reply(&sender_id_for_response, &response).await {
+                                                    eprintln!("❌ Failed to send creation confirmation: {}", e);
+                                                }
+                                            }
+                                            Err(e) => {
+                                                eprintln!("❌ Failed to create assignment: {}", e);
+                                            }
+                                        }
+                                    }
+                                    Err(e) => {
+                                        eprintln!("❌ Failed to parse deadline '{}': {}", deadline_str, e);
+                                    }
+                                }
+                            } else {
+                                println!("   ⚠️ Cannot create assignment - no deadline provided");
+                            }
+                        } else {
+                            println!("   ⚠️ Cannot create assignment - course not identified");
+                        }
                     }
                     Err(e) => {
                         eprintln!("❌ Failed to fetch assignments from database: {}", e);
@@ -348,13 +501,8 @@ fn handle_ai_classification(
                 }
             });
             
-            Some(format!(
-                "🔄 *Update received!*\n\n\
-                ✏️ {}\n\
-                📅 {}",
-                response_changes,
-                response_deadline.unwrap_or("Unchanged".to_string())
-            ))
+            // Return None since we're sending replies inside the tokio::spawn
+            None
         }
         
         AIClassification::Unrecognized => None,
