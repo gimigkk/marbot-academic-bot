@@ -74,7 +74,7 @@ pub async fn handle_command(cmd: BotCommand, user_phone: &str, pool: &PgPool) ->
         BotCommand::Help => {
             "🤖 *WhatsApp Academic Bot*\n\n\
             *Perintah:*\n\
-            • #read / #tugas - Lihat daftar tugas\n\
+            • #tugas - Lihat daftar tugas\n\
             • #ping - Cek status bot\n\
             • #help - Bantuan\n\n\
             *Cara Tambah Tugas:*\n\
