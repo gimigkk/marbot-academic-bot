@@ -113,7 +113,7 @@ pub struct NewCourse {
 }
 
 #[derive(Debug, Clone, FromRow, Serialize, Deserialize)]
-pub struct Assignment {
+pub struct AssignmentDisplay {
     pub id: Uuid,
     pub created_at: DateTime<Utc>,
     pub course_id: Option<Uuid>,  // Foreign key to courses table
