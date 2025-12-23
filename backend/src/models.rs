@@ -75,9 +75,11 @@ pub enum BotCommand {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum AIClassification {
     AssignmentInfo {
+        course_name: Option<String>,  // Added: Course name from AI
         title: String,
         deadline: Option<String>,  // "2025-01-15"
         description: String,
+        parallel_code: Option<String>,  // Added: parallel code (k1, k2, etc.)
         #[serde(default)]
         #[serde(skip_serializing_if = "Option::is_none")]
         original_message: Option<String>,
@@ -114,13 +116,13 @@ pub struct NewCourse {
 pub struct Assignment {
     pub id: Uuid,
     pub created_at: DateTime<Utc>,
-    pub course_id: Option<Uuid>,
+    pub course_id: Option<Uuid>,  // Foreign key to courses table
     pub title: String,
     pub description: String,
     pub deadline: Option<DateTime<Utc>>,
-    pub parallel_code: Option<String>,
-    pub sender_id: Option<String>,
-    pub message_id: String,
+    pub parallel_code: Option<String>,  // k1, k2, k3, p1, p2, p3
+    pub sender_id: Option<String>,      // WhatsApp sender number
+    pub message_id: String,             // WhatsApp message ID
 }
 
 #[derive(Debug, Serialize, Deserialize)]

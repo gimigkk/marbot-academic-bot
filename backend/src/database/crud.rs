@@ -57,6 +57,24 @@ pub async fn get_course_by_name(
     Ok(course)
 }
 
+/// TODO: CHANGE IT TO COURSE ALIAS
+/// Get all courses formatted as "course1, course2, course3"
+pub async fn get_all_courses_formatted(pool: &PgPool) -> Result<String> {
+    let courses = sqlx::query_as::<_, Course>(
+        "SELECT * FROM courses ORDER BY name"
+    )
+    .fetch_all(pool)
+    .await?;
+    
+    let formatted = courses
+        .iter()
+        .map(|c| c.name.as_str())
+        .collect::<Vec<_>>()
+        .join(", ");
+    
+    Ok(formatted)
+}
+
 /// Check if assignment already exists by message_id
 pub async fn get_assignment_by_message_id(
     pool: &PgPool,

@@ -103,27 +103,41 @@ async fn webhook(
     }
 
     let response_text = match message_type {
-        MessageType::Command(cmd) => {
-            Some(handle_command(cmd, &payload.payload.from))
-        }
+    MessageType::Command(cmd) => {
+        Some(handle_command(cmd, &payload.payload.from))
+    }
 
-        MessageType::NeedsAI(text) => {
-            match extract_with_ai(&text).await {
-                Ok(classification) => {
-                    handle_ai_classification(
-                        state.pool.clone(),
-                        classification,
-                        &payload.payload.id,
-                        &payload.payload.from,
-                    )
-                }
-                Err(e) => {
-                    eprintln!("❌ AI extraction failed: {}", e);
-                    Some("❌ Failed to process message".to_string())
+    MessageType::NeedsAI(text) => {
+        // Fetch available courses from database
+        let courses_result = crud::get_all_courses_formatted(&state.pool).await;
+        
+        match courses_result {
+            Ok(courses_list) => {
+                println!("📚 Available courses: {}", courses_list);
+                
+                // Pass courses to AI extraction
+                match extract_with_ai(&text, &courses_list).await {
+                    Ok(classification) => {
+                        handle_ai_classification(
+                            state.pool.clone(),
+                            classification,
+                            &payload.payload.id,
+                            &payload.payload.from,
+                        )
+                    }
+                    Err(e) => {
+                        eprintln!("❌ AI extraction failed: {}", e);
+                        Some("❌ Failed to process message".to_string())
+                    }
                 }
             }
+            Err(e) => {
+                eprintln!("❌ Failed to fetch courses: {}", e);
+                Some("❌ Failed to fetch course list".to_string())
+            }
         }
-    };
+    }
+};
 
     if let Some(text) = response_text {
         if let Err(e) = send_reply(&payload.payload.from, &text).await {
@@ -144,24 +158,50 @@ fn handle_ai_classification(
     let sender_id = sender_id.to_string();
     
     match classification {
-        AIClassification::AssignmentInfo { title, deadline, description, .. } => {
+        AIClassification::AssignmentInfo { course_name, title, deadline, description, .. } => {
             println!("📚 NEW ASSIGNMENT DETECTED");
+            println!("   Course: {}", course_name.as_ref().unwrap_or(&"Unknown".to_string()));
             
-            let new_assignment = NewAssignment {
-                course_id: None,
-                title: title.clone(),
-                description: description.clone(),
-                deadline: parse_deadline(&deadline),
-                parallel_code: extract_parallel_code(&title),
-                sender_id: Some(sender_id.clone()),
-                message_id: message_id.clone(),
-            };
+            let pool_clone = pool.clone();
+            let course_name_for_lookup = course_name.clone();
+            let title_clone = title.clone();
+            let description_clone = description.clone();
+            let deadline_parsed = parse_deadline(&deadline);
+            let parallel_code = extract_parallel_code(&title);
             
-            let deadline_clone = deadline.clone();
-            
-            // Spawn database work in background
+            // Spawn async database work in background
             tokio::spawn(async move {
-                match crud::create_assignment(&pool, new_assignment).await {
+                // Look up course_id by name
+                let course_id = if let Some(name) = &course_name_for_lookup {
+                    match crud::get_course_by_name(&pool_clone, name).await {
+                        Ok(Some(course)) => {
+                            println!("✅ Found course: {} (ID: {})", course.name, course.id);
+                            Some(course.id)
+                        }
+                        Ok(None) => {
+                            println!("⚠️ Course '{}' not found in database", name);
+                            None
+                        }
+                        Err(e) => {
+                            eprintln!("❌ Error looking up course: {}", e);
+                            None
+                        }
+                    }
+                } else {
+                    None
+                };
+                
+                let new_assignment = NewAssignment {
+                    course_id,
+                    title: title_clone.clone(),
+                    description: description_clone.clone(),
+                    deadline: deadline_parsed,
+                    parallel_code,
+                    sender_id: Some(sender_id.clone()),
+                    message_id: message_id.clone(),
+                };
+                
+                match crud::create_assignment(&pool_clone, new_assignment).await {
                     Ok(assignment) => {
                         println!("✅ Saved to database: {}", assignment.title);
                     }
@@ -173,11 +213,13 @@ fn handle_ai_classification(
             
             Some(format!(
                 "✅ *Assignment Saved!*\n\n\
+                📚 Course: {}\n\
                 📝 {}\n\
                 📅 Due: {}\n\
                 📄 {}",
+                course_name.unwrap_or("Unknown".to_string()),
                 title,
-                deadline_clone.unwrap_or("No due date".to_string()),
+                deadline.unwrap_or("No due date".to_string()),
                 description
             ))
         }
