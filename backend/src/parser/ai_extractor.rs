@@ -1,4 +1,5 @@
-use crate::models::AIClassification;
+use crate::models::{AIClassification, Assignment};  
+use uuid::Uuid;  
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
@@ -30,9 +31,9 @@ struct Part {
 pub async fn extract_with_ai(
     text: &str,
     available_courses: &str,  // e.g., "Grafkom, Basdat, Probstat"
-) -> Result<AIClassification, Box<dyn std::error::Error>> {
+) -> Result<AIClassification, String> {
     let api_key = std::env::var("GEMINI_API_KEY")
-        .map_err(|_| "GEMINI_API_KEY not set in .env")?;
+        .map_err(|_| "GEMINI_API_KEY not set in .env".to_string())?;
     
     let url = format!(
         "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key={}",
@@ -63,7 +64,8 @@ pub async fn extract_with_ai(
         .post(&url)
         .json(&request_body)
         .send()
-        .await?;
+        .await
+        .map_err(|e| e.to_string())?;
     
     let status = response.status();
     
@@ -78,10 +80,10 @@ pub async fn extract_with_ai(
                     eprintln!("   Retry after: {}", retry_info);
                 }
             }
-            return Err("Rate limit exceeded. Try again later.".into());
+            return Err("Rate limit exceeded. Try again later.".to_string());
         }
         
-        return Err(format!("Gemini API error {}: {}", status, error_text).into());
+        return Err(format!("Gemini API error {}: {}", status, error_text));
     }
     
     let gemini_response: GeminiResponse = response.json().await
@@ -93,10 +95,61 @@ pub async fn extract_with_ai(
     parse_classification(ai_text)
 }
 
+
+// ===== MATCH WITH AN EXISTING ASSIGNMENT FOR UPDATE =====
+
+/// Use AI to match an update to a specific assignment
+pub async fn match_update_to_assignment(
+    changes: &str,
+    keywords: &[String],
+    active_assignments: &[Assignment],
+) -> Result<Option<Uuid>, String> {
+    let api_key = std::env::var("GEMINI_API_KEY")
+        .map_err(|_| "GEMINI_API_KEY not set in .env".to_string())?;
+    
+    let url = format!(
+        "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key={}",
+        api_key
+    );
+    
+    let prompt = build_matching_prompt(changes, keywords, active_assignments);
+    
+    let request_body = json!({
+        "contents": [{
+            "parts": [{
+                "text": prompt
+            }]
+        }],
+        "generationConfig": {
+            "temperature": 0.1,
+            "maxOutputTokens": 512,
+            "responseMimeType": "application/json"
+        }
+    });
+    
+    println!("🤖 Asking AI to match update to assignment...");
+    
+    let client = reqwest::Client::new();
+    let response = client.post(&url).json(&request_body).send().await
+        .map_err(|e| e.to_string())?;
+    
+    if !response.status().is_success() {
+        return Err(format!("AI matching failed: {}", response.status()));
+    }
+    
+    let gemini_response: GeminiResponse = response.json().await
+        .map_err(|e| e.to_string())?;
+    let ai_text = extract_ai_text(&gemini_response)?;
+    
+    println!("🤖 AI match result: {}", ai_text);
+    
+    parse_match_result(ai_text)
+}
+
 // ===== HELPER FUNCTIONS =====
 
 /// Build the classification prompt for Gemini
-/// TODO GILANG: Change from course name to alias
+/// TODO GILANG: Change from course name to alias, go to crud.rs
 fn build_classification_prompt(text: &str, available_courses: &str) -> String {
     format!(
         r#"Classify this WhatsApp academic message. Return ONLY valid JSON, NO markdown.
@@ -127,6 +180,44 @@ RULES:
     )
 }
 
+/// Build the matching prompt for Gemini
+fn build_matching_prompt(changes: &str, keywords: &[String], assignments: &[Assignment]) -> String {
+    let assignments_list = assignments
+        .iter()
+        .enumerate()
+        .map(|(i, a)| {
+            format!(
+                "{}. ID: {}, Title: \"{}\", Description: \"{}\", Deadline: {}",
+                i + 1,
+                a.id,
+                a.title,
+                a.description,
+                a.deadline.map(|d| d.format("%Y-%m-%d").to_string()).unwrap_or("None".to_string())
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    
+    format!(
+        r#"Match this update to the correct assignment.
+
+Update: "{}"
+Keywords: {:?}
+
+Active assignments:
+{}
+
+Return JSON with the assignment ID if confident, or null if uncertain:
+{{"assignment_id": "uuid-here", "confidence": "high"}}
+or
+{{"assignment_id": null, "confidence": "low", "reason": "ambiguous match"}}
+
+Only return high confidence if you're certain which assignment this refers to."#,
+        changes, keywords, assignments_list
+    )
+}
+
+
 /// Extract retry delay from rate limit error
 fn extract_retry_delay(error_json: &serde_json::Value) -> Option<String> {
     error_json
@@ -145,17 +236,17 @@ fn extract_retry_delay(error_json: &serde_json::Value) -> Option<String> {
 }
 
 /// Extract AI text from Gemini response structure
-fn extract_ai_text(gemini_response: &GeminiResponse) -> Result<&str, Box<dyn std::error::Error>> {
+fn extract_ai_text(gemini_response: &GeminiResponse) -> Result<&str, String> {
     gemini_response
         .candidates
         .first()
         .and_then(|candidate| candidate.content.parts.first())
         .map(|part| part.text.as_str())
-        .ok_or_else(|| "Gemini returned empty response".into())
+        .ok_or_else(|| "Gemini returned empty response".to_string())
 }
 
 /// Clean and parse the AI classification from text
-fn parse_classification(ai_text: &str) -> Result<AIClassification, Box<dyn std::error::Error>> {
+fn parse_classification(ai_text: &str) -> Result<AIClassification, String> {
     // Clean up markdown code blocks if present
     let cleaned = ai_text
         .trim()
@@ -185,6 +276,40 @@ fn parse_classification(ai_text: &str) -> Result<AIClassification, Box<dyn std::
             
             // Fallback to unrecognized instead of failing
             Ok(AIClassification::Unrecognized)
+        }
+    }
+}
+
+/// Clean and parse AI matching for update
+fn parse_match_result(ai_text: &str) -> Result<Option<Uuid>, String> {
+    let cleaned = ai_text.trim()
+        .trim_start_matches("```json")
+        .trim_start_matches("```")
+        .trim_end_matches("```")
+        .trim();
+    
+    #[derive(Deserialize)]
+    struct MatchResult {
+        assignment_id: Option<String>,
+        confidence: String,
+    }
+    
+    match serde_json::from_str::<MatchResult>(cleaned) {
+        Ok(result) => {
+            if result.confidence == "high" {
+                if let Some(id_str) = result.assignment_id {
+                    Ok(Some(Uuid::parse_str(&id_str).map_err(|e| e.to_string())?))
+                } else {
+                    Ok(None)
+                }
+            } else {
+                println!("⚠️ AI has low confidence in match");
+                Ok(None)
+            }
+        }
+        Err(e) => {
+            eprintln!("❌ Failed to parse match result: {}", e);
+            Ok(None)
         }
     }
 }
