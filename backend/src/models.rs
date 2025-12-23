@@ -78,7 +78,7 @@ pub enum AIClassification {
         course_name: Option<String>,  // Added: Course name from AI
         title: String,
         deadline: Option<String>,  // "2025-01-15"
-        description: String,
+        description: Option<String>, // kayaknya nanti gw bikin harus diisi
         parallel_code: Option<String>,  // Added: parallel code (k1, k2, etc.)
         #[serde(default)]
         #[serde(skip_serializing_if = "Option::is_none")]

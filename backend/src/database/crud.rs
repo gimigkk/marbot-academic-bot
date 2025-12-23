@@ -88,6 +88,31 @@ pub async fn get_assignments(pool: &PgPool) -> Result<Vec<AssignmentDisplay>, sq
     Ok(assignments)
 }
 
+/// Check if an assignment with this title already exists for a course
+/// Uses case-insensitive comparison to catch duplicates like "LKP 13" vs "lkp 13"
+pub async fn get_assignment_by_title_and_course(
+    pool: &PgPool,
+    title: &str,
+    course_id: Uuid,
+) -> Result<Option<Assignment>, String> {
+    sqlx::query_as::<_, Assignment>(
+        r#"
+        SELECT id, course_id, title, description, deadline, parallel_code, 
+               created_at, sender_id, message_id
+        FROM assignments
+        WHERE course_id = $1 
+          AND LOWER(TRIM(title)) = LOWER(TRIM($2))
+        ORDER BY created_at DESC
+        LIMIT 1
+        "#
+    )
+    .bind(course_id)
+    .bind(title)
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| format!("Database error: {}", e))
+}
+
 /// Get active assignments (not past deadline) with course info
 pub async fn get_active_assignments(pool: &PgPool) -> Result<Vec<Assignment>> {
     let now = Utc::now();
