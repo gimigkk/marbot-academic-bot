@@ -36,7 +36,7 @@ pub async fn extract_with_ai(
         .map_err(|_| "GEMINI_API_KEY not set in .env".to_string())?;
     
     let url = format!(
-        "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key={}",
+        "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={}",
         api_key
     );
     
@@ -50,8 +50,8 @@ pub async fn extract_with_ai(
             }]
         }],
         "generationConfig": {
-            "temperature": 0.1,
-            "maxOutputTokens": 512,
+            "temperature": 0.2,
+            "maxOutputTokens": 2048,
             "responseMimeType": "application/json"
         }
     });
@@ -108,7 +108,7 @@ pub async fn match_update_to_assignment(
         .map_err(|_| "GEMINI_API_KEY not set in .env".to_string())?;
     
     let url = format!(
-        "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key={}",
+        "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={}",
         api_key
     );
     
@@ -121,8 +121,8 @@ pub async fn match_update_to_assignment(
             }]
         }],
         "generationConfig": {
-            "temperature": 0.1,
-            "maxOutputTokens": 512,
+            "temperature": 0.2,
+            "maxOutputTokens": 2048,
             "responseMimeType": "application/json"
         }
     });

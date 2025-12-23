@@ -148,6 +148,7 @@ async fn webhook(
     }
 };
 
+    // STEP 5: SEND REPLY
     if let Some(text) = response_text {
         if let Err(e) = send_reply(&payload.payload.from, &text).await {
             eprintln!("❌ Failed to send reply: {}", e);
@@ -213,8 +214,8 @@ fn handle_ai_classification(
                 };
                 
                 match crud::create_assignment(&pool_clone, new_assignment).await {
-                    Ok(assignment) => {
-                        println!("✅ Saved to database: {}", assignment.title);
+                    Ok(message) => {
+                        println!("✅ {}", message);
                     }
                     Err(e) => {
                         eprintln!("❌ Failed to save to database: {}", e);
@@ -236,71 +237,71 @@ fn handle_ai_classification(
         }
         
         AIClassification::AssignmentUpdate { reference_keywords, changes, new_deadline, new_description, .. } => {
-    println!("🔄 UPDATE DETECTED");
-    println!("   Keywords: {:?}", reference_keywords);
-    
-    let new_deadline_clone = new_deadline.clone();
-    let changes_clone = changes.clone();
-    let reference_keywords_clone = reference_keywords.clone();
-    let new_description_clone = new_description.clone();
-    let pool_clone = pool.clone();
-    
-    // Fetch active assignments BEFORE spawning (make this blocking/sync)
-    tokio::spawn(async move {
-        // Get active assignments inside spawn
-        match crud::get_active_assignments(&pool_clone).await {
-            Ok(active_assignments) if !active_assignments.is_empty() => {
-                println!("📋 Found {} active assignments", active_assignments.len());
-                
-                // Step 2: Ask AI to match
-                match parser::ai_extractor::match_update_to_assignment(
-                    &changes_clone,
-                    &reference_keywords_clone,
-                    &active_assignments
-                ).await {
-                    Ok(Some(assignment_id)) => {
-                        println!("✅ AI matched to assignment ID: {}", assignment_id);
+            println!("🔄 UPDATE DETECTED");
+            println!("   Keywords: {:?}", reference_keywords);
+            
+            let new_deadline_clone = new_deadline.clone();
+            let changes_clone = changes.clone();
+            let reference_keywords_clone = reference_keywords.clone();
+            let new_description_clone = new_description.clone();
+            let pool_clone = pool.clone();
+            
+            // Fetch active assignments BEFORE spawning (make this blocking/sync)
+            tokio::spawn(async move {
+                // Get active assignments inside spawn
+                match crud::get_active_assignments(&pool_clone).await {
+                    Ok(active_assignments) if !active_assignments.is_empty() => {
+                        println!("📋 Found {} active assignments", active_assignments.len());
                         
-                        // Step 3: Update the matched assignment
-                        match crud::update_assignment_fields(
-                            &pool_clone,
-                            assignment_id,
-                            parse_deadline(&new_description_clone),
-                            new_description_clone,
+                        // Step 2: Ask AI to match
+                        match parser::ai_extractor::match_update_to_assignment(
+                            &changes_clone,
+                            &reference_keywords_clone,
+                            &active_assignments
                         ).await {
-                            Ok(updated) => {
-                                println!("✅ Updated assignment: {}", updated.title);
+                            Ok(Some(assignment_id)) => {
+                                println!("✅ AI matched to assignment ID: {}", assignment_id);
+                                
+                                // Step 3: Update the matched assignment
+                                match crud::update_assignment_fields(
+                                    &pool_clone,
+                                    assignment_id,
+                                    parse_deadline(&new_description_clone),
+                                    new_description_clone,
+                                ).await {
+                                    Ok(updated) => {
+                                        println!("✅ Updated assignment: {}", updated.title);
+                                    }
+                                    Err(e) => {
+                                        eprintln!("❌ Update failed: {}", e);
+                                    }
+                                }
+                            }
+                            Ok(None) => {
+                                println!("⚠️ AI couldn't confidently match to any assignment");
                             }
                             Err(e) => {
-                                eprintln!("❌ Update failed: {}", e);
+                                eprintln!("❌ AI matching failed: {}", e);
                             }
                         }
                     }
-                    Ok(None) => {
-                        println!("⚠️ AI couldn't confidently match to any assignment");
+                    Ok(_) => {
+                        println!("⚠️ No active assignments found");
                     }
                     Err(e) => {
-                        eprintln!("❌ AI matching failed: {}", e);
+                        eprintln!("❌ Failed to fetch active assignments: {}", e);
                     }
                 }
-            }
-            Ok(_) => {
-                println!("⚠️ No active assignments found");
-            }
-            Err(e) => {
-                eprintln!("❌ Failed to fetch active assignments: {}", e);
-            }
+            });
+            
+            Some(format!(
+                "🔄 *Update received!*\n\n\
+                ✏️ {}\n\
+                📅 {}",
+                changes,
+                new_deadline_clone.unwrap_or("Unchanged".to_string())
+            ))
         }
-    });
-    
-    Some(format!(
-        "🔄 *Update received!*\n\n\
-        ✏️ {}\n\
-        📅 {}",
-        changes,
-        new_deadline_clone.unwrap_or("Unchanged".to_string())
-    ))
-}
         
         AIClassification::Unrecognized => None,
     }
