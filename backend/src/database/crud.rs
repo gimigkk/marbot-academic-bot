@@ -42,6 +42,29 @@ pub async fn create_assignment(
 // READ OPERATIONS
 // ========================================
 
+/// Get active assignments (not past deadline) with course info
+pub async fn get_active_assignments(pool: &PgPool) -> Result<Vec<Assignment>> {
+    let now = Utc::now();
+    
+    let assignments = sqlx::query_as::<_, Assignment>(
+        r#"
+        SELECT a.* 
+        FROM assignments a
+        WHERE a.deadline > $1 OR a.deadline IS NULL
+        ORDER BY a.created_at DESC
+        LIMIT 20
+        "#
+    )
+    .bind(now)
+    .fetch_all(pool)
+    .await?;
+    
+    println!("✅ Found {} active assignments", assignments.len());
+    
+    Ok(assignments)
+}
+
+
 /// Find course by name (case-insensitive)
 pub async fn get_course_by_name(
     pool: &PgPool,
