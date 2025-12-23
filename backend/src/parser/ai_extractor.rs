@@ -2,6 +2,7 @@ use crate::models::{AIClassification, Assignment};
 use uuid::Uuid;  
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use chrono::{Utc, FixedOffset};
 
 // ===== GEMINI API RESPONSE STRUCTURES =====
 
@@ -30,7 +31,7 @@ struct Part {
 /// Extract structured info from WhatsApp message using Gemini AI
 pub async fn extract_with_ai(
     text: &str,
-    available_courses: &str,  // e.g., "Grafkom, Basdat, Probstat"
+    available_courses: &str,
 ) -> Result<AIClassification, String> {
     let api_key = std::env::var("GEMINI_API_KEY")
         .map_err(|_| "GEMINI_API_KEY not set in .env".to_string())?;
@@ -40,8 +41,13 @@ pub async fn extract_with_ai(
         api_key
     );
     
-    // Pass courses to prompt builder
-    let prompt = build_classification_prompt(text, available_courses);
+    // Get current datetime in GMT+7
+    let gmt7 = FixedOffset::east_opt(7 * 3600).unwrap();
+    let now = Utc::now().with_timezone(&gmt7);
+    let current_datetime = now.format("%Y-%m-%d %H:%M:%S").to_string();
+    let current_date = now.format("%Y-%m-%d").to_string();
+    
+    let prompt = build_classification_prompt(text, available_courses, &current_datetime, &current_date);
     
     let request_body = json!({
         "contents": [{
@@ -58,6 +64,7 @@ pub async fn extract_with_ai(
     
     println!("🤖 Sending to Gemini AI...");
     println!("📝 Message: {}", truncate_for_log(text, 100));
+    println!("📅 Current time (GMT+7): {}", current_datetime);
     
     let client = reqwest::Client::new();
     let response = client
@@ -148,35 +155,51 @@ pub async fn match_update_to_assignment(
 
 // ===== HELPER FUNCTIONS =====
 
-/// Build the classification prompt for Gemini
-/// TODO GILANG: Change from course name to alias, go to crud.rs
-fn build_classification_prompt(text: &str, available_courses: &str) -> String {
+/// Build the classification prompt for Gemini with current datetime context and course aliases
+fn build_classification_prompt(text: &str, available_courses: &str, current_datetime: &str, current_date: &str) -> String {
     format!(
         r#"Classify this WhatsApp academic message. Return ONLY valid JSON, NO markdown.
 
-Available courses: {}
+CURRENT DATE/TIME (GMT+7): {}
+TODAY'S DATE: {}
+
+Available courses with their aliases:
+{}
 
 Message: "{}"
 
 Output ONE of these exact formats:
 
 NEW assignment:
-{{"type":"assignment_info","course_name":"CourseName","title":"Brief title","deadline":"2025-12-31","description":"One line desc","parallel_code":"K1"}}
+{{"type":"assignment_info","course_name":"Pemrograman","title":"Tugas Bab 2","deadline":"2025-12-31","description":"Brief description","parallel_code":"K1"}}
 
-UPDATE to existing assignment (deadline change, cancellation, clarification):
-{{"type":"assignment_update","reference_keywords":["grafkom","ray tracing"],"changes":"deadline moved to Monday","new_deadline":"2025-12-31","new_description":null}}
+UPDATE to existing assignment:
+{{"type":"assignment_update","reference_keywords":["pemrograman","bab 2"],"changes":"deadline moved to 2025-12-05","new_deadline":"2025-12-05","new_description":null}}
 
 Other/unclear:
 {{"type":"unrecognized"}}
 
 RULES:
-- "course_name" must match one of the available courses (case-insensitive)
-- "assignment_update" for: deadline changes, cancellations, corrections, clarifications
-- "reference_keywords" should be 2-4 words that identify the original assignment
-- Keep all fields under 100 characters
-- Use null for unchanged fields"#,
-        available_courses,
-        text
+- Use FORMAL course name in "course_name" field (e.g., "Pemrograman" not "pemrog")
+- Match course aliases case-insensitively (pemrog → Pemrograman, GKV → Grafika Komputer dan Visualisasi)
+- For relative dates:
+  * "hari ini" (today) = {}
+  * "besok" (tomorrow) = add 1 day
+  * "minggu depan" (next week) = add 7 days
+  * "senin/selasa/etc" = find next occurrence of that day
+- For "assignment_update":
+  * "reference_keywords" must include course name/alias AND specific assignment identifiers
+  * Example: ["pemrograman", "bab 2"] or ["GKV", "matriks"]
+  * Use 2-4 keywords that uniquely identify the assignment
+- "changes" field should briefly describe what changed
+- All dates in YYYY-MM-DD format
+- Use null for unchanged fields
+- parallel_code format: K1, K2, K3, etc (uppercase K)"#,
+        current_datetime,
+        current_date,
+        available_courses,  // ← Added this!
+        text,
+        current_date
     )
 }
 
@@ -186,34 +209,68 @@ fn build_matching_prompt(changes: &str, keywords: &[String], assignments: &[Assi
         .iter()
         .enumerate()
         .map(|(i, a)| {
+            let deadline_str = a.deadline
+                .map(|d| d.format("%Y-%m-%d").to_string())
+                .unwrap_or("No deadline".to_string());
+            
+            let parallel_str = a.parallel_code
+                .as_deref()
+                .unwrap_or("N/A");
+            
             format!(
-                "{}. ID: {}, Title: \"{}\", Description: \"{}\", Deadline: {}",
+                "Assignment #{}:\n  ID: {}\n  Title: \"{}\"\n  Description: \"{}\"\n  Deadline: {}\n  Parallel: {}",
                 i + 1,
                 a.id,
                 a.title,
                 a.description,
-                a.deadline.map(|d| d.format("%Y-%m-%d").to_string()).unwrap_or("None".to_string())
+                deadline_str,
+                parallel_str
             )
         })
         .collect::<Vec<_>>()
-        .join("\n");
+        .join("\n\n");
     
     format!(
-        r#"Match this update to the correct assignment.
+        r#"You are helping match an update message to the correct assignment in a database.
 
-Update: "{}"
-Keywords: {:?}
+UPDATE MESSAGE: "{}"
+REFERENCE KEYWORDS: {:?}
 
-Active assignments:
+AVAILABLE ASSIGNMENTS:
 {}
 
-Return JSON with the assignment ID if confident, or null if uncertain:
-{{"assignment_id": "uuid-here", "confidence": "high"}}
-or
-{{"assignment_id": null, "confidence": "low", "reason": "ambiguous match"}}
+TASK:
+Look at the keywords and the update message. Find which assignment is being updated.
 
-Only return high confidence if you're certain which assignment this refers to."#,
-        changes, keywords, assignments_list
+MATCHING CRITERIA (in order of importance):
+1. Keywords mention course name AND assignment topic (e.g., "pemrograman" + "bab 2")
+2. Assignment title/description contains the topic mentioned in keywords
+3. Parallel code matches if mentioned in update
+4. Context makes sense (e.g., deadline change mentions date)
+
+RESPONSE FORMAT:
+Return JSON with:
+- "assignment_id": the UUID if confident match found, null otherwise
+- "confidence": "high" or "low"
+- "reason": explain why you matched or didn't match
+
+EXAMPLES:
+✅ HIGH confidence:
+- Keywords ["pemrograman", "bab 2"] + Assignment Title "Tugas Bab 2" → MATCH
+- Keywords ["GKV", "matriks"] + Assignment Description contains "matriks" → MATCH
+
+❌ LOW confidence:
+- Keywords too generic, multiple assignments match
+- No assignment contains the keywords
+- Ambiguous which assignment is meant
+
+Return ONLY valid JSON, no markdown:
+{{"assignment_id": "uuid-here", "confidence": "high", "reason": "title matches 'Tugas Bab 2'"}}
+or
+{{"assignment_id": null, "confidence": "low", "reason": "multiple assignments match keywords"}}"#,
+        changes, 
+        keywords, 
+        assignments_list
     )
 }
 
@@ -247,7 +304,6 @@ fn extract_ai_text(gemini_response: &GeminiResponse) -> Result<&str, String> {
 
 /// Clean and parse the AI classification from text
 fn parse_classification(ai_text: &str) -> Result<AIClassification, String> {
-    // Clean up markdown code blocks if present
     let cleaned = ai_text
         .trim()
         .trim_start_matches("```json")
@@ -257,14 +313,12 @@ fn parse_classification(ai_text: &str) -> Result<AIClassification, String> {
     
     println!("🧹 Cleaned: {}", cleaned);
     
-    // Basic JSON validation
     if !is_valid_json_object(cleaned) {
         eprintln!("⚠️  Response is not a valid JSON object");
         eprintln!("   Got: {}", cleaned);
         return Ok(AIClassification::Unrecognized);
     }
     
-    // Parse JSON into AIClassification
     match serde_json::from_str::<AIClassification>(cleaned) {
         Ok(classification) => {
             println!("✅ Parsed classification: {:?}", classification);
@@ -273,8 +327,6 @@ fn parse_classification(ai_text: &str) -> Result<AIClassification, String> {
         Err(e) => {
             eprintln!("❌ JSON parse error: {}", e);
             eprintln!("   Tried to parse: {}", cleaned);
-            
-            // Fallback to unrecognized instead of failing
             Ok(AIClassification::Unrecognized)
         }
     }
@@ -292,10 +344,17 @@ fn parse_match_result(ai_text: &str) -> Result<Option<Uuid>, String> {
     struct MatchResult {
         assignment_id: Option<String>,
         confidence: String,
+        #[serde(default)]
+        reason: Option<String>,
     }
     
     match serde_json::from_str::<MatchResult>(cleaned) {
         Ok(result) => {
+            println!("🔍 Match confidence: {}", result.confidence);
+            if let Some(ref reason) = result.reason {
+                println!("   Reason: {}", reason);
+            }
+            
             if result.confidence == "high" {
                 if let Some(id_str) = result.assignment_id {
                     Ok(Some(Uuid::parse_str(&id_str).map_err(|e| e.to_string())?))
@@ -321,7 +380,7 @@ fn is_valid_json_object(s: &str) -> bool {
         && s.matches('{').count() == s.matches('}').count()
 }
 
-/// Truncate text for logging (avoid spam in console)
+/// Truncate text for logging
 fn truncate_for_log(text: &str, max_len: usize) -> String {
     if text.len() <= max_len {
         text.to_string()
@@ -329,8 +388,6 @@ fn truncate_for_log(text: &str, max_len: usize) -> String {
         format!("{}...", &text[..max_len])
     }
 }
-
-// ===== TESTS =====
 
 #[cfg(test)]
 mod tests {
