@@ -11,11 +11,11 @@ use tokio::net::TcpListener;
 use sqlx::PgPool;
 use chrono::{DateTime, Utc, NaiveDate};
 
-mod models;
-mod classifier;
-mod parser;
-mod whitelist;
-mod database;
+pub mod models;
+pub mod classifier;
+pub mod parser;
+pub mod whitelist;
+pub mod database;
 
 use crate::database::crud;
 
@@ -110,7 +110,7 @@ async fn webhook(
     // STEP 3: RUN COMMAND (if it's a bot command)
     let response_text = match message_type {
     MessageType::Command(cmd) => {
-        Some(handle_command(cmd, &payload.payload.from))
+        Some(handle_command(cmd, &payload.payload.from, &state.pool).await)
     }
 
     // STEP 4: DATA EXTRACT WITH AI
