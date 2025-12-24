@@ -13,7 +13,7 @@ pub async fn start_scheduler(pool: PgPool) -> Result<(), JobSchedulerError> {
     sched.add(Job::new_async("0 0 0 * * *", move |_uuid, _l| {
         let pool = pool_pagi.clone();
         Box::pin(async move {
-            println!("⏰ REMINDER PAGI (07:00 WIB): Pengingat Tugas Harian");
+            println!("⏰ REMINDER PAGI (07:00 WIB):");
             if let Err(e) = run_reminder_task(pool, "Selamat Pagi Ilkomers! ☀️ Semangat menjalani hari ini!").await {
                 eprintln!("❌ Error reminder pagi: {}", e);
             }
@@ -25,7 +25,7 @@ pub async fn start_scheduler(pool: PgPool) -> Result<(), JobSchedulerError> {
     sched.add(Job::new_async("0 0 10 * * *", move |_uuid, _l| {
         let pool = pool_sore.clone();
         Box::pin(async move {
-            println!("⏰ REMINDER SORE (17:00 WIB): Pengingat Tugas Harian");
+            println!("⏰ REMINDER SORE (17:00 WIB):");
             if let Err(e) = run_reminder_task(pool, "Selamat Sore ILkomers! 🌇 Jangan lupa cek tugas sebelum istirahat.").await {
                 eprintln!("❌ Error reminder sore: {}", e);
             }
