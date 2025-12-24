@@ -26,43 +26,59 @@ pub async fn handle_command(
             
             match get_active_assignments_sorted(pool).await {
                 Ok(assignments) => {
-                    if assignments.is_empty() {
-                        CommandResponse::Text(
-                            "📋 *Daftar Tugas*\n\n\
-                            Belum ada tugas tersimpan.\n\n\
-                            Kirim info tugas dan saya akan simpan otomatis!\n\
-                            Contoh: \"Tugas matematika dikumpulkan Jumat\"".to_string()
-                        )
-                    } else {
-                        let mut response = "".to_string();
-                        
-                        for (i, assignment) in assignments.iter().enumerate() {
-                            let deadline = format_deadline_date(&assignment.deadline);
-                            
-                            let desc = assignment.description
-                                .as_ref()
-                                .map(|d| d.as_str())
-                                .unwrap_or("Tidak ada deskripsi");
-                            
-                            response.push_str(&format!(
-                                "*[ {} ]*\n#{} - {} - *{}*\n{}\n\n",
-                                i + 1,
-                                assignment.course_name,
-                                assignment.title,
-                                deadline,
-                                desc
-                            ));
-                        }
-                        
-                        response.push_str("\n_Gunakan #tugas <id> | #<id> untuk lihat detail lengkap_");
-                        CommandResponse::Text(response)
-                    }
+                    format_assignments_list(assignments, "📋 *Daftar Tugas*")
                 }
                 Err(e) => {
                     eprintln!("❌ Error fetching assignments: {}", e);
                     CommandResponse::Text(
                         "❌ Maaf, terjadi kesalahan saat mengambil data tugas.\n\
                         Silakan coba lagi nanti.".to_string()
+                    )
+                }
+            }
+        }
+        
+        BotCommand::Today => {
+            println!("📅 Today command received from {}", user_phone);
+            
+            match get_active_assignments_sorted(pool).await {
+                Ok(assignments) => {
+                    let today = chrono::Utc::now().date_naive();
+                    let today_assignments: Vec<_> = assignments
+                        .into_iter()
+                        .filter(|a| a.deadline.date_naive() == today)
+                        .collect();
+                    
+                    format_assignments_list(today_assignments, "📅 *Tugas Hari Ini*")
+                }
+                Err(e) => {
+                    eprintln!("❌ Error fetching assignments: {}", e);
+                    CommandResponse::Text(
+                        "❌ Maaf, terjadi kesalahan saat mengambil data tugas.".to_string()
+                    )
+                }
+            }
+        }
+        
+        BotCommand::Week => {
+            println!("📆 Week command received from {}", user_phone);
+            
+            match get_active_assignments_sorted(pool).await {
+                Ok(assignments) => {
+                    let now = chrono::Utc::now();
+                    let week_end = now + chrono::Duration::days(7);
+                    
+                    let week_assignments: Vec<_> = assignments
+                        .into_iter()
+                        .filter(|a| a.deadline >= now && a.deadline <= week_end)
+                        .collect();
+                    
+                    format_assignments_list(week_assignments, "📆 *Tugas Minggu Ini (7 Hari)*")
+                }
+                Err(e) => {
+                    eprintln!("❌ Error fetching assignments: {}", e);
+                    CommandResponse::Text(
+                        "❌ Maaf, terjadi kesalahan saat mengambil data tugas.".to_string()
                     )
                 }
             }
@@ -130,12 +146,13 @@ pub async fn handle_command(
                 *Perintah:*\n\
                 • #ping - Cek bot hidup\n\
                 • #tugas - Lihat semua tugas\n\
-                • #expand <id> | #tugas <id> | #<id> - Lihat pesan asli\n\
+                • #today - Lihat tugas hari ini\n\
+                • #week - Lihat tugas 7 hari ke depan\n\
+                • #tugas <id> | #<id> - Lihat pesan asli\n\
                 • #done <id> - Tandai tugas selesai\n\
                 • #help - Tampilkan bantuan\n\n\
-                *Pesan Natural:*\n\
-                Kirim info tugas secara natural!\n\
-                Contoh: \"Tugas bahasa Inggris deadline Senin\"".to_string()
+                *Bahasa Natural:*\n\
+                Info Tugas yang ada di grup akademik\nsudah otomatis saya simpan!".to_string()
             )
         }
         
@@ -147,6 +164,44 @@ pub async fn handle_command(
                 cmd
             ))
         }
+    }
+}
+
+// Helper function to format assignment lists
+fn format_assignments_list(
+    assignments: Vec<crate::models::AssignmentWithCourse>, 
+    header: &str
+) -> CommandResponse {
+    if assignments.is_empty() {
+        CommandResponse::Text(
+            format!("{}\n\n\
+                    Belum ada tugas untuk periode ini.\n\n\
+                    Kirim info tugas dan saya akan simpan otomatis!\n\
+                    Contoh: \"Tugas matematika dikumpulkan Jumat\"", header)
+        )
+    } else {
+        let mut response = format!("{}\n\n", header);
+        
+        for (i, assignment) in assignments.iter().enumerate() {
+            let deadline = format_deadline_date(&assignment.deadline);
+            
+            let desc = assignment.description
+                .as_ref()
+                .map(|d| d.as_str())
+                .unwrap_or("Tidak ada deskripsi");
+            
+            response.push_str(&format!(
+                "*[ {} ]*\n#{} - {} - *{}*\n{}\n\n",
+                i + 1,
+                assignment.course_name,
+                assignment.title,
+                deadline,
+                desc
+            ));
+        }
+        
+        response.push_str("\n_Gunakan #tugas <id> | #<id> untuk lihat detail lengkap_");
+        CommandResponse::Text(response)
     }
 }
 
