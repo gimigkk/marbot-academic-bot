@@ -13,6 +13,7 @@ pub async fn create_assignment(
     pool: &PgPool,
     new_assignment: NewAssignment,
 ) -> Result<String, sqlx::Error> {
+    let mut tx = pool.begin().await?;
     
     // A. Cari Course (ILIKE)
     let course = sqlx::query!(
@@ -24,17 +25,24 @@ pub async fn create_assignment(
         "#,
         new_assignment.course_id
     )
-    .fetch_optional(pool)
+    .fetch_optional(&mut *tx)  // ✅ Use transaction
     .await?;
 
     // Validasi Course
     let real_course_name = match course {
         Some(c) => c.name,
         None => match new_assignment.course_id {
-            Some(id) => return Ok(format!("Gagal: Mata kuliah dengan ID '{}' tidak ditemukan", id)),
-            None => return Ok("Gagal: Mata kuliah tidak ditemukan (ID tidak ada)".to_string()),
+            Some(id) => {
+                tx.commit().await?;  // Commit before returning
+                return Ok(format!("Gagal: Mata kuliah dengan ID '{}' tidak ditemukan", id));
+            }
+            None => {
+                tx.commit().await?;  // Commit before returning
+                return Ok("Gagal: Mata kuliah tidak ditemukan (ID tidak ada)".to_string());
+            }
         }
     };
+    
     // kode paralel (huruf kecil)
     let clean_parallel = new_assignment.parallel_code.as_ref().map(|p| p.to_lowercase());
 
@@ -55,11 +63,14 @@ pub async fn create_assignment(
         new_assignment.sender_id,
         new_assignment.message_id
     )
-    .execute(pool)
+    .execute(&mut *tx)  // ✅ Use transaction
     .await?;
 
+    tx.commit().await?;
     Ok(format!("Sukses! Tugas '{}' berhasil disimpan ke matkul '{}'", new_assignment.title, real_course_name))
 }
+
+
 
 // ========================================
 // READ OPERATIONS
@@ -93,24 +104,23 @@ pub async fn get_assignments(pool: &PgPool) -> Result<Vec<AssignmentDisplay>, sq
 pub async fn get_assignment_by_title_and_course(
     pool: &PgPool,
     title: &str,
-    course_id: Uuid,
-) -> Result<Option<Assignment>, String> {
-    sqlx::query_as::<_, Assignment>(
+    course_id: uuid::Uuid,
+) -> Result<Option<Assignment>, sqlx::Error> {
+    let mut tx = pool.begin().await?;  // ✅ Start transaction
+    
+    let result = sqlx::query_as::<_, Assignment>(
         r#"
-        SELECT id, course_id, title, description, deadline, parallel_code, 
-               created_at, sender_id, message_id
-        FROM assignments
-        WHERE course_id = $1 
-          AND LOWER(TRIM(title)) = LOWER(TRIM($2))
-        ORDER BY created_at DESC
-        LIMIT 1
+        SELECT * FROM assignments
+        WHERE title = $1 AND course_id = $2
         "#
     )
-    .bind(course_id)
     .bind(title)
-    .fetch_optional(pool)
-    .await
-    .map_err(|e| format!("Database error: {}", e))
+    .bind(course_id)
+    .fetch_optional(&mut *tx)  // ✅ Use transaction instead of pool
+    .await?;
+    
+    tx.commit().await?;  // ✅ Commit transaction
+    Ok(result)
 }
 
 /// Get active assignments (not past deadline) with course info
@@ -401,6 +411,8 @@ pub async fn update_assignment_fields(
     println!("🔄 Updating assignment {} with deadline: {:?}, description: {:?}", 
         id, new_deadline, new_description);
     
+    let mut tx = pool.begin().await?;
+    
     // Build dynamic query based on what changed
     let assignment = match (new_deadline, &new_description) {
         (Some(dl), Some(desc)) => {
@@ -416,7 +428,7 @@ pub async fn update_assignment_fields(
             .bind(id)
             .bind(dl)
             .bind(desc)
-            .fetch_one(pool)
+            .fetch_one(&mut *tx)  // ✅ Use transaction
             .await?
         }
         (Some(dl), None) => {
@@ -431,7 +443,7 @@ pub async fn update_assignment_fields(
             )
             .bind(id)
             .bind(dl)
-            .fetch_one(pool)
+            .fetch_one(&mut *tx)  // ✅ Use transaction
             .await?
         }
         (None, Some(desc)) => {
@@ -446,7 +458,7 @@ pub async fn update_assignment_fields(
             )
             .bind(id)
             .bind(desc)
-            .fetch_one(pool)
+            .fetch_one(&mut *tx)  // ✅ Use transaction
             .await?
         }
         (None, None) => {
@@ -455,10 +467,12 @@ pub async fn update_assignment_fields(
                 "SELECT * FROM assignments WHERE id = $1"
             )
             .bind(id)
-            .fetch_one(pool)
+            .fetch_one(&mut *tx)  // ✅ Use transaction
             .await?
         }
     };
+    
+    tx.commit().await?;
     
     println!("✅ Successfully updated assignment: {}", assignment.title);
     
