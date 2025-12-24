@@ -2,7 +2,7 @@ use sqlx::{PgPool, Result};
 use uuid::Uuid;
 use chrono::{DateTime, Utc, NaiveDate};
 
-use crate::models::{Assignment, NewAssignment, Course, AssignmentDisplay};
+use crate::models::{Assignment, NewAssignment, Course, AssignmentDisplay, AssignmentWithCourse};
 
 // ========================================
 // CREATE OPERATIONS
@@ -127,6 +127,38 @@ pub async fn get_active_assignments(pool: &PgPool) -> Result<Vec<Assignment>> {
         "#
     )
     .bind(now)
+    .fetch_all(pool)
+    .await?;
+    
+    println!("✅ Found {} active assignments", assignments.len());
+    
+    Ok(assignments)
+}
+
+/// Yang ini versi sorted dari yang di atas, dipake di #tugas
+/// Get active assignments sorted by deadline, then course name
+pub async fn get_active_assignments_sorted(pool: &PgPool) -> Result<Vec<AssignmentWithCourse>, sqlx::Error> {
+    let now = Utc::now();
+    
+    let assignments = sqlx::query_as!(
+        AssignmentWithCourse,
+        r#"
+        SELECT 
+            a.id,
+            c.name as course_name,
+            a.parallel_code,
+            a.title,
+            a.description,
+            a.deadline as "deadline!",
+            a.message_id as "message_id!",
+            a.sender_id as "sender_id!"
+        FROM assignments a
+        JOIN courses c ON a.course_id = c.id
+        WHERE a.deadline >= $1 AND a.deadline IS NOT NULL
+        ORDER BY a.deadline ASC, c.name ASC
+        "#,
+        now
+    )
     .fetch_all(pool)
     .await?;
     
