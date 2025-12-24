@@ -27,28 +27,51 @@ pub fn classify_message(text: &str) -> MessageType {
 }
 
 fn parse_command(text: &str) -> Option<BotCommand> {
-    let text_lower = text.trim().to_lowercase();
+    let trimmed = text.trim();
     
-    match text_lower.as_str() {
-        "#ping" => Some(BotCommand::Ping),
-        "#tugas" => Some(BotCommand::Tugas),
-        "#today" => Some(BotCommand::Today),
-        "#week" => Some(BotCommand::Week),
-        "#help" => Some(BotCommand::Help),
-        _ if text_lower.starts_with("#done ") => {
-            let id = text_lower.strip_prefix("#done ")?.trim().parse().ok()?;
-            Some(BotCommand::Done(id))
+    // Remove # and any spaces after it, then lowercase
+    let without_hash = trimmed.strip_prefix('#')?.trim();
+    let parts: Vec<&str> = without_hash.split_whitespace().collect();
+    
+    if parts.is_empty() {
+        return None;
+    }
+    
+    let command = parts[0].to_lowercase();
+    
+    match command.as_str() {
+        "ping" => Some(BotCommand::Ping),
+        "tugas" => {
+            // Handle both "#tugas" alone and "#tugas 123"
+            if parts.len() > 1 {
+                if let Ok(id) = parts[1].parse() {
+                    return Some(BotCommand::Expand(id));
+                }
+            }
+            Some(BotCommand::Tugas)
         }
-        _ if text_lower.starts_with("#expand ") => {
-            let id = text_lower.strip_prefix("#expand ")?.trim().parse().ok()?;
-            Some(BotCommand::Expand(id))
+        "today" => Some(BotCommand::Today),
+        "week" => Some(BotCommand::Week),
+        "help" => Some(BotCommand::Help),
+        "done" => {
+            if parts.len() > 1 {
+                let id = parts[1].parse().ok()?;
+                Some(BotCommand::Done(id))
+            } else {
+                None
+            }
         }
-        _ if text_lower.starts_with("#tugas ") => {
-            let id = text_lower.strip_prefix("#tugas ")?.trim().parse().ok()?;
-            Some(BotCommand::Expand(id))
+        "expand" => {
+            if parts.len() > 1 {
+                let id = parts[1].parse().ok()?;
+                Some(BotCommand::Expand(id))
+            } else {
+                None
+            }
         }
-        _ if text_lower.len() > 1 && text_lower.chars().skip(1).all(|c| c.is_numeric()) => {
-            let id = text_lower.strip_prefix('#')?.trim().parse().ok()?;
+        // Handle numeric-only commands like "# 123" or "#123"
+        _ if command.chars().all(|c| c.is_numeric()) => {
+            let id = command.parse().ok()?;
             Some(BotCommand::Expand(id))
         }
         _ => None,
