@@ -55,46 +55,7 @@ pub async fn handle_command(cmd: BotCommand, user_phone: &str, pool: &PgPool) ->
         
         BotCommand::Expand(id) => {
             println!("🔍 Expand command for assignment {} from {}", id, user_phone);
-            
-            // Get assignments to find the one at position 'id'
-            match get_active_assignments_sorted(pool).await {
-                Ok(assignments) => {
-                    // id is 1-indexed (from user's perspective), convert to usize for array indexing
-                    let index = (id as usize).saturating_sub(1);
-                    
-                    if index >= assignments.len() {
-                        format!("❌ Assignment #{} tidak ditemukan.\n\nGunakan #tugas untuk melihat daftar.", id)
-                    } else {
-                        let assignment = &assignments[index];
-                        
-                        // Format full assignment details
-                        let deadline = format_deadline_date(&assignment.deadline);
-                        let desc = assignment.description
-                            .as_ref()
-                            .map(|d| d.as_str())
-                            .unwrap_or("Tidak ada deskripsi");
-                        
-                        let response = format!(
-                            "📋 *Detail Tugas*\n\n\
-                            📚 Mata Kuliah: {}\n\
-                            📝 Judul: {}\n\
-                            📅 Deadline: {}\n\n\
-                            📄 Deskripsi:\n{}\n\n\
-                            ⚠️ _Ketentuan tugas mungkin berubah. Tolong cek info terbaru dari dosen/asisten._",
-                            assignment.course_name,
-                            assignment.title,
-                            deadline,
-                            desc
-                        );
-                        
-                        response
-                    }
-                }
-                Err(e) => {
-                    eprintln!("❌ Error fetching assignments: {}", e);
-                    "❌ Gagal mengambil data tugas.".to_string()
-                }
-            }
+            "⚠️ Command ini sedang dalam pengembangan dan belum tersedia.".to_string()
         }
         
         BotCommand::Done(id) => {
