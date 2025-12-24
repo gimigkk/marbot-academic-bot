@@ -1,6 +1,6 @@
 use sqlx::{PgPool, Result};
 use uuid::Uuid;
-use chrono::{DateTime, Utc, NaiveDate};
+use chrono::{DateTime, Utc};
 
 use crate::models::{Assignment, NewAssignment, Course, AssignmentDisplay, AssignmentWithCourse};
 
@@ -9,6 +9,7 @@ use crate::models::{Assignment, NewAssignment, Course, AssignmentDisplay, Assign
 // ========================================
 
 /// Create a new assignment in the database
+#[allow(non_snake_case)]
 pub async fn create_assignment(
     pool: &PgPool,
     new_assignment: NewAssignment,
@@ -398,6 +399,7 @@ pub async fn find_assignment_by_keywords(
 // ========================================
 
 /// Update specific fields of an assignment
+#[allow(non_snake_case)]
 pub async fn update_assignment_fields(
     pool: &PgPool,
     id: Uuid,

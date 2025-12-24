@@ -1,6 +1,6 @@
 use crate::models::{AIClassification, Assignment};  
 use uuid::Uuid;  
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize};
 use serde_json::json;
 use chrono::{Utc, FixedOffset};
 
