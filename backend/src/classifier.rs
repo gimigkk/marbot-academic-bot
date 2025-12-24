@@ -1,6 +1,7 @@
 use crate::models::{MessageType, BotCommand};
 
 // Check if message is a bot command
+#[allow(non_snake_case)]
 pub fn classify_message(text: &str) -> MessageType {
     let trimmed = text.trim();
     
