@@ -202,6 +202,7 @@ async fn forward_message(chat_id: &str, message_id: &str) -> Result<(), String> 
     Ok(())
 }
 
+#[allow(non_snake_case)]
 async fn handle_ai_classification(
     pool: PgPool,
     classification: AIClassification, 
@@ -510,7 +511,7 @@ async fn send_reply(chat_id: &str, text: &str) -> Result<(), String> {
         Ok(())
     } else {
         let body = response.text().await.unwrap_or_default();
-        Err(format!("WAHA API error: {}", status))
+        Err(format!("WAHA API error: {} - {}", status, body))
     }
 }
 
