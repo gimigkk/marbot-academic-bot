@@ -63,6 +63,8 @@ pub enum MessageType {
 pub enum BotCommand {
     Ping,
     Tugas,
+    Today,
+    Week,
     Expand(u32),
     Done(u32),
     Help,
