@@ -147,6 +147,20 @@ pub struct NewAssignment {
     pub message_id: String,
 }
 
+/// Struct to hold assignment data with course name for display
+#[derive(Debug)]
+pub struct AssignmentWithCourse {
+    pub id: uuid::Uuid,
+    pub course_name: String,
+    pub parallel_code: Option<String>,
+    pub title: String,
+    pub description: Option<String>,
+    pub deadline: DateTime<Utc>,
+    pub message_id: String,
+    pub sender_id: String,
+}
+
+
 #[derive(Debug, Clone, FromRow, Serialize, Deserialize)]
 pub struct WaLog {
     pub id: Uuid,

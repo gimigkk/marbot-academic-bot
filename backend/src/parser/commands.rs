@@ -1,7 +1,9 @@
 use crate::models::BotCommand;
+use crate::database::crud::get_active_assignments_sorted;
+use sqlx::PgPool;
 
 /// Handle bot commands and return response text
-pub fn handle_command(cmd: BotCommand, user_phone: &str) -> String {
+pub async fn handle_command(cmd: BotCommand, user_phone: &str, pool: &PgPool) -> String {
     match cmd {
         BotCommand::Ping => {
             println!("🏓 Ping command received from {}", user_phone);
@@ -10,24 +12,89 @@ pub fn handle_command(cmd: BotCommand, user_phone: &str) -> String {
         
         BotCommand::Tugas => {
             println!("📋 Tugas command received from {}", user_phone);
-            // TODO: Fetch from database
-            "📋 *Daftar Tugas*\n\n\
-            Belum ada tugas tersimpan.\n\n\
-            Kirim info tugas dan saya akan simpan otomatis!\n\
-            Contoh: \"Tugas matematika dikumpulkan Jumat\"".to_string()
+            
+            match get_active_assignments_sorted(pool).await {
+                Ok(assignments) => {
+                    if assignments.is_empty() {
+                        "📋 *Daftar Tugas*\n\n\
+                        Belum ada tugas tersimpan.\n\n\
+                        Kirim info tugas dan saya akan simpan otomatis!\n\
+                        Contoh: \"Tugas matematika dikumpulkan Jumat\"".to_string()
+                    } else {
+                        let mut response = "📋 *Daftar Tugas*\n\n".to_string();
+                        
+                        for (i, assignment) in assignments.iter().enumerate() {
+                            let deadline = format_deadline_date(&assignment.deadline);
+                            
+                            let desc = assignment.description
+                                .as_ref()
+                                .map(|d| d.as_str())
+                                .unwrap_or("Tidak ada deskripsi");
+                            
+                            response.push_str(&format!(
+                                "*[ {} ]*\n#{} - {} - *{}*\n{}\n\n",
+                                i + 1,
+                                assignment.course_name,
+                                assignment.title,
+                                deadline,
+                                desc
+                            ));
+                        }
+                        
+                        response.push_str("💡 _Gunakan #expand <id> untuk lihat detail lengkap_");
+                        response
+                    }
+                }
+                Err(e) => {
+                    eprintln!("❌ Error fetching assignments: {}", e);
+                    "❌ Maaf, terjadi kesalahan saat mengambil data tugas.\n\
+                    Silakan coba lagi nanti.".to_string()
+                }
+            }
         }
         
         BotCommand::Expand(id) => {
             println!("🔍 Expand command for assignment {} from {}", id, user_phone);
-            // TODO: Fetch from database
-            // SELECT message_id FROM assignments WHERE id = ?
-            // Then call forward_message(user_phone, message_id)
-            format!(
-                "🔍 *Assignment #{}*\n\n\
-                (Database not connected yet)\n\n\
-                Once connected, the original message from the academic channel will be forwarded to you here.",
-                id
-            )
+            
+            // Get assignments to find the one at position 'id'
+            match get_active_assignments_sorted(pool).await {
+                Ok(assignments) => {
+                    // id is 1-indexed (from user's perspective), convert to usize for array indexing
+                    let index = (id as usize).saturating_sub(1);
+                    
+                    if index >= assignments.len() {
+                        format!("❌ Assignment #{} tidak ditemukan.\n\nGunakan #tugas untuk melihat daftar.", id)
+                    } else {
+                        let assignment = &assignments[index];
+                        
+                        // Format full assignment details
+                        let deadline = format_deadline_date(&assignment.deadline);
+                        let desc = assignment.description
+                            .as_ref()
+                            .map(|d| d.as_str())
+                            .unwrap_or("Tidak ada deskripsi");
+                        
+                        let response = format!(
+                            "📋 *Detail Tugas*\n\n\
+                            📚 Mata Kuliah: {}\n\
+                            📝 Judul: {}\n\
+                            📅 Deadline: {}\n\n\
+                            📄 Deskripsi:\n{}\n\n\
+                            ⚠️ _Ketentuan tugas mungkin berubah. Tolong cek info terbaru dari dosen/asisten._",
+                            assignment.course_name,
+                            assignment.title,
+                            deadline,
+                            desc
+                        );
+                        
+                        response
+                    }
+                }
+                Err(e) => {
+                    eprintln!("❌ Error fetching assignments: {}", e);
+                    "❌ Gagal mengambil data tugas.".to_string()
+                }
+            }
         }
         
         BotCommand::Done(id) => {
@@ -63,4 +130,9 @@ pub fn handle_command(cmd: BotCommand, user_phone: &str) -> String {
             )
         }
     }
+}
+
+/// Format deadline as YY/MM/DD
+fn format_deadline_date(deadline: &chrono::DateTime<chrono::Utc>) -> String {
+    deadline.format("%y/%m/%d").to_string()
 }
