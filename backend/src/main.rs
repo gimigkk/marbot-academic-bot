@@ -203,7 +203,7 @@ fn handle_ai_classification(
                     None
                 };
                 
-                // **NEW: Check for existing assignment with same title**
+                
                 if let Some(cid) = course_id {
                     match crud::get_assignment_by_title_and_course(&pool_clone, &title_clone, cid).await {
                         Ok(Some(existing)) => {
@@ -215,7 +215,8 @@ fn handle_ai_classification(
                                 &pool_clone,
                                 existing.id,
                                 deadline_parsed,
-                                Some(description_clone.clone()),
+                                None,  // new_title
+                                Some(description_clone.clone()),  // new_description
                             ).await {
                                 Ok(updated) => {
                                     println!("✅ Successfully updated assignment: {}", updated.title);
@@ -291,11 +292,12 @@ fn handle_ai_classification(
             None
         }
         
-        AIClassification::AssignmentUpdate { reference_keywords, changes, new_deadline, new_description, .. } => {
+        AIClassification::AssignmentUpdate { reference_keywords, changes, new_deadline, new_title, new_description, .. } => {
             println!("🔄 UPDATE DETECTED");
             println!("   Keywords: {:?}", reference_keywords);
             
             let new_deadline_clone = new_deadline.clone();
+            let new_title_clone = new_title.clone();
             let changes_clone = changes.clone();
             let reference_keywords_clone = reference_keywords.clone();
             let new_description_clone = new_description.clone();
@@ -366,6 +368,7 @@ fn handle_ai_classification(
                                     &pool_clone,
                                     assignment_id,
                                     parsed_deadline,
+                                    new_title_clone.clone(),  // Add this
                                     new_description_clone.clone(),
                                 ).await {
                                     Ok(updated) => {

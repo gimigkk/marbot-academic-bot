@@ -250,7 +250,7 @@ NEW assignment:
 {{"type":"assignment_info","course_name":"Pemrograman","title":"Tugas Bab 2","deadline":"2025-12-31","description":"Brief description","parallel_code":"K1"}}
 
 UPDATE to existing assignment:
-{{"type":"assignment_update","reference_keywords":["pemrograman","bab 2"],"changes":"deadline moved to 2025-12-05","new_deadline":"2025-12-05","new_description":null}}
+{{"type":"assignment_update","reference_keywords":["pemrograman","bab 2"],"changes":"deadline moved to 2025-12-05","new_deadline":"2025-12-05","new_title":null,"new_description":null}}
 
 Other/unclear:
 {{"type":"unrecognized"}}
@@ -271,6 +271,9 @@ RULES:
   * "reference_keywords" must include course name/alias AND specific assignment identifiers
   * Example: ["pemrograman", "bab 2"] or ["GKV", "matriks"]
   * Use 2-4 keywords that uniquely identify the assignment
+  * If the update provides specific details that would make a better title than the existing generic one (e.g., "Tugas baru"), set "new_title" to a descriptive title
+  * Example: existing title "Tugas baru" + update mentions "figma prototype pertemuan 4" → new_title: "Figma Prototype Pertemuan 4"
+  * Only set "new_title" if current title is too generic (like "Tugas baru", "Assignment", "Tugas") AND update provides specific details
 - "changes" field should briefly describe what changed
 - All dates in YYYY-MM-DD format
 - Use null for unchanged fields
@@ -283,8 +286,12 @@ RULES:
     )
 }
 
-/// Build the matching prompt for Gemini
-fn build_matching_prompt(changes: &str, keywords: &[String], assignments: &[Assignment]) -> String {
+/// Build the matching prompt with temporal context
+fn build_matching_prompt(
+    changes: &str, 
+    keywords: &[String], 
+    assignments: &[Assignment]
+) -> String {
     let assignments_list = assignments
         .iter()
         .enumerate()
@@ -297,57 +304,89 @@ fn build_matching_prompt(changes: &str, keywords: &[String], assignments: &[Assi
                 .as_deref()
                 .unwrap_or("N/A");
             
+            // Calculate how long ago this assignment was created
+            let created_ago = Utc::now().signed_duration_since(a.created_at);
+            let time_ago = if created_ago.num_minutes() < 60 {
+                format!("{} minutes ago", created_ago.num_minutes())
+            } else if created_ago.num_hours() < 24 {
+                format!("{} hours ago", created_ago.num_hours())
+            } else {
+                format!("{} days ago", created_ago.num_days())
+            };
+            
             format!(
-                "Assignment #{}:\n  ID: {}\n  Title: \"{}\"\n  Description: \"{}\"\n  Deadline: {}\n  Parallel: {}",
+                "Assignment #{}:\n  ID: {}\n  Title: \"{}\"\n  Description: \"{}\"\n  Deadline: {}\n  Parallel: {}\n  ⏱️ Created: {} ({})",
                 i + 1,
                 a.id,
                 a.title,
                 a.description,
                 deadline_str,
-                parallel_str
+                parallel_str,
+                a.created_at.format("%Y-%m-%d %H:%M:%S"),
+                time_ago
             )
         })
         .collect::<Vec<_>>()
         .join("\n\n");
     
+    // Get current time for context
+    let gmt7 = FixedOffset::east_opt(7 * 3600).unwrap();
+    let now = Utc::now().with_timezone(&gmt7);
+    let current_time = now.format("%Y-%m-%d %H:%M:%S").to_string();
+    
     format!(
         r#"You are helping match an update message to the correct assignment in a database.
+
+CURRENT TIME (GMT+7): {}
 
 UPDATE MESSAGE: "{}"
 REFERENCE KEYWORDS: {:?}
 
-AVAILABLE ASSIGNMENTS:
+AVAILABLE ASSIGNMENTS (sorted by recency, newest first):
 {}
 
 TASK:
-Look at the keywords and the update message. Find which assignment is being updated.
+Match this update to the most likely assignment. Consider TEMPORAL CONTEXT as a key factor.
 
 MATCHING CRITERIA (in order of importance):
-1. Keywords mention course name AND assignment topic (e.g., "pemrograman" + "bab 2")
-2. Assignment title/description contains the topic mentioned in keywords
-3. Parallel code matches if mentioned in update
-4. Context makes sense (e.g., deadline change mentions date)
+1. TEMPORAL PROXIMITY: If an assignment was created minutes/hours ago, it's very likely the one being updated
+   - Messages sent within hours of assignment creation are HIGHLY likely to be updates
+   - Example: Assignment created 5 minutes ago + update message → VERY HIGH probability it's the same assignment
+2. KEYWORD MATCH: Keywords mention course name AND assignment topic
+3. CONTENT MATCH: Title/description contains topics from keywords
+4. PARALLEL CODE: Matches if mentioned in update
+5. DEADLINE CONTEXT: Makes sense with any deadline changes mentioned
+
+IMPORTANT TEMPORAL RULES:
+- If update message is sent within 30 minutes of assignment creation → HIGH confidence match (user is clarifying)
+- Recent assignments (< 1 hour old) should be prioritized over older ones
+- Generic titles like "Tugas baru" + recent creation time = likely match for clarification messages
 
 RESPONSE FORMAT:
 Return JSON with:
 - "assignment_id": the UUID if confident match found, null otherwise
 - "confidence": "high" or "low"
-- "reason": explain why you matched or didn't match
+- "reason": explain your reasoning (mention temporal context if relevant)
 
 EXAMPLES:
-✅ HIGH confidence:
+✅ HIGH confidence (temporal):
+- Assignment created 5 minutes ago + Keywords ["pertemuan 4"] + changes clarify description → MATCH (user is adding details)
+- Generic title "Tugas baru" created recently + specific update → MATCH (clarification of vague initial message)
+
+✅ HIGH confidence (keyword):
 - Keywords ["pemrograman", "bab 2"] + Assignment Title "Tugas Bab 2" → MATCH
 - Keywords ["GKV", "matriks"] + Assignment Description contains "matriks" → MATCH
 
 ❌ LOW confidence:
 - Keywords too generic, multiple assignments match
-- No assignment contains the keywords
-- Ambiguous which assignment is meant
+- Assignment is old (> 1 week) and keywords don't match well
+- No clear connection between update and available assignments
 
 Return ONLY valid JSON, no markdown:
-{{"assignment_id": "uuid-here", "confidence": "high", "reason": "title matches 'Tugas Bab 2'"}}
+{{"assignment_id": "uuid-here", "confidence": "high", "reason": "Assignment created 5 minutes ago, user is clarifying 'pertemuan 4' detail"}}
 or
-{{"assignment_id": null, "confidence": "low", "reason": "multiple assignments match keywords"}}"#,
+{{"assignment_id": null, "confidence": "low", "reason": "No recent assignments match the keywords"}}"#,
+        current_time,
         changes, 
         keywords, 
         assignments_list
