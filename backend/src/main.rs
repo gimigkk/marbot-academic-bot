@@ -13,6 +13,7 @@ use sqlx::PgPool;
 use chrono::{DateTime, Utc, NaiveDate};
 
 pub mod models;
+pub mod scheduler;
 pub mod classifier;
 pub mod parser;
 pub mod whitelist;
@@ -634,6 +635,15 @@ async fn main() {
     
     let whitelist = Arc::new(Whitelist::new());
     let cache = Arc::new(Mutex::new(HashSet::new()));
+
+    
+    let pool_for_scheduler = pool.clone(); 
+    tokio::spawn(async move {
+    println!("⏳ Menjalankan Scheduler (Background Job)...");
+    if let Err(e) = scheduler::start_scheduler(pool_for_scheduler).await {
+        eprintln!("❌ Gagal menjalankan scheduler: {:?}", e);
+    }
+    });
     
     let state = AppState { 
         cache, 
@@ -652,5 +662,6 @@ async fn main() {
     println!("\n{}\n", separator);
 
     let listener = TcpListener::bind(addr).await.unwrap();
+
     axum::serve(listener, app).await.unwrap();
 }
