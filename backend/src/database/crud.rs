@@ -147,6 +147,7 @@ pub async fn get_active_assignments(pool: &PgPool) -> Result<Vec<Assignment>> {
 
 /// Yang ini versi sorted dari yang di atas, dipake di #tugas
 /// Get active assignments sorted by deadline, then course name
+/// Get active assignments sorted by deadline, then course name
 pub async fn get_active_assignments_sorted(pool: &PgPool) -> Result<Vec<AssignmentWithCourse>, sqlx::Error> {
     let now = Utc::now();
     
@@ -158,10 +159,10 @@ pub async fn get_active_assignments_sorted(pool: &PgPool) -> Result<Vec<Assignme
             c.name as course_name,
             a.parallel_code,
             a.title,
-            a.description,
+            a.description,  
             a.deadline as "deadline!",
-            a.message_id as "message_id!",
-            a.sender_id as "sender_id!"
+            a.message_id,
+            a.sender_id
         FROM assignments a
         JOIN courses c ON a.course_id = c.id
         WHERE a.deadline >= $1 AND a.deadline IS NOT NULL

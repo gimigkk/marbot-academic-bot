@@ -99,7 +99,7 @@ pub async fn handle_command(
                     } else {
                         let assignment = &assignments[idx];
                         CommandResponse::ForwardMessage {
-                            message_id: assignment.message_id.clone(),
+                            message_id: assignment.message_id.clone().unwrap_or_else(|| "Unknown".to_string()),
                             warning: "_Ada kemungkinan info tugas telah berubah, mohon crosscheck lagi!_".to_string(),
                         }
                     }
