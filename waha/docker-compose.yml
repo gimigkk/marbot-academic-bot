@@ -12,4 +12,3 @@ services:
       - WHATSAPP_HOOK_EVENTS=message
     volumes:
       - ./.waha:/app/.waha
-
