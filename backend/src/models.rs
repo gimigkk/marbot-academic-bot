@@ -88,6 +88,7 @@ pub enum AIClassification {
     AssignmentUpdate {
         reference_keywords: Vec<String>,
         changes: String,
+        new_title: Option<String>,
         new_deadline: Option<String>,
         new_description: Option<String>,
         #[serde(default)]
