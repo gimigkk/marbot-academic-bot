@@ -7,7 +7,8 @@ use axum::{
 use axum::http::StatusCode;
 use std::collections::HashSet;
 use std::net::SocketAddr;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;  
+use tokio::sync::Mutex;  
 use tokio::net::TcpListener;
 use sqlx::PgPool;
 use chrono::{DateTime, Utc, NaiveDate};
@@ -22,7 +23,7 @@ pub mod database;
 use crate::database::crud;
 use crate::parser::commands::CommandResponse;
 
-use models::{MessageType, AIClassification, WebhookPayload, SendTextRequest, NewAssignment, ForwardMessageRequest};
+use models::{MessageType, AIClassification, WebhookPayload, SendTextRequest, NewAssignment};
 use classifier::classify_message;
 use parser::commands::handle_command;
 use parser::ai_extractor::{extract_with_ai}; 
@@ -41,13 +42,12 @@ async fn webhook(
     State(state): State<AppState>,
     Json(payload): Json<WebhookPayload>,
 ) -> StatusCode {
-    // For now we only get from "message.any"
+    // Only process "message.any" events
     if payload.event != "message.any" {
         return StatusCode::OK;
     }
 
-    // this is for handling when WAHA sends duplicate messages
-    // don't know why it does that
+    // Deduplication
     let dedup_key = format!(
         "{}:{}:{}",
         payload.payload.id,
@@ -56,9 +56,8 @@ async fn webhook(
     );
 
     {
-        let mut cache = state.cache.lock().unwrap();
+        let mut cache = state.cache.lock().await;
         if cache.contains(&dedup_key) {
-            println!("⏭️  Skipping duplicate message");
             return StatusCode::OK;
         }
 
@@ -69,53 +68,43 @@ async fn webhook(
         }
     }
 
-    // for some reason messages that's sent by the bot is being read also.
+    // Ignore messages from the bot itself
     if payload.payload.from_me {
-        println!("⏭️  Ignoring bot's own message");
         return StatusCode::OK;
     }
 
-    // for debuggin in the terminal
-    let separator = "=".repeat(60);
-    println!("\n{}", separator);
-    println!("📨 NEW MESSAGE");
-    println!("{}", separator);
-    println!("From: {}", payload.payload.from);
-
-    if payload.payload.from.ends_with("@newsletter") {
-        println!("   📢 Type: WhatsApp Channel/Newsletter");
-    } else if payload.payload.from.ends_with("@g.us") {
-        println!("   👥 Type: WhatsApp Group");
-    } else {
-        println!("   💬 Type: Direct Message");
+    // Ignore messages from debug group to prevent infinite loop
+    let debug_group_id = std::env::var("DEBUG_GROUP_ID").ok();
+    if let Some(debug_id) = &debug_group_id {
+        if payload.payload.from == *debug_id {
+            return StatusCode::OK;
+        }
     }
 
-    println!("Message ID: {}", payload.payload.id);
-    println!("Body: {}", payload.payload.body);
-    println!("From Me: {}", payload.payload.from_me);
-    println!("{}\n", separator);
+    // Terminal logging for server monitoring
+    println!("📨 Message from: {}", payload.payload.from);
+    println!("   Body: {}", payload.payload.body);
 
     // STEP 1: CLASSIFY MESSAGE
     let message_type = classify_message(&payload.payload.body);
     let is_command = matches!(message_type, MessageType::Command(_));
 
-    println!("🔍 Classification: {:?}", message_type);
-
-    // STEP 2: CHECK WHITELIST (for academic info)
+    // STEP 2: CHECK WHITELIST
     let (should_process, reason) =
         state.whitelist.should_process(&payload.payload.from, is_command);
 
     if !should_process {
-        println!("🚫 Ignoring message: {} (from: {})", reason, payload.payload.from);
+        println!("🚫 Ignoring: {} (from: {})", reason, payload.payload.from);
         return StatusCode::OK;
     }
 
-    // Get chat_id from payload (it's the 'from' field)
     let chat_id = &payload.payload.from;
 
-    // STEP 3: RUN COMMAND (if it's a bot command)
+    // STEP 3: HANDLE MESSAGE BASED ON TYPE
     match message_type {
         MessageType::Command(cmd) => {
+            println!("⚙️  Processing command: {:?}", cmd);
+            
             let response = handle_command(cmd, chat_id, chat_id, &state.pool).await;
             
             match response {
@@ -125,7 +114,6 @@ async fn webhook(
                     }
                 }
                 CommandResponse::ForwardMessage { message_id, warning } => {
-                    // Forward the original message
                     if let Err(e) = forward_message(chat_id, &message_id).await {
                         eprintln!("❌ Failed to forward message: {}", e);
                     } else {
@@ -138,28 +126,32 @@ async fn webhook(
             }
         }
 
-        // STEP 4: DATA EXTRACT WITH AI
+        // STEP 4: AI EXTRACTION
         MessageType::NeedsAI(text) => {
-            // Fetch available courses from database
+            println!("🤖 Processing with AI...");
+            
+            // Fetch available courses
             let courses_result = crud::get_all_courses_formatted(&state.pool).await;
             
             match courses_result {
                 Ok(courses_list) => {
-                    println!("📚 Available courses: {}", courses_list);
-                    
-                    // Pass courses to AI extraction
+                    // Extract with AI
                     match extract_with_ai(&text, &courses_list).await {
                         Ok(classification) => {
-                            // Call the async function and await it
+                            println!("✅ AI Classification: {:?}", classification);
+                            
+                            // Handle classification and send to debug group
                             handle_ai_classification(
                                 state.pool.clone(),
                                 classification,
                                 &payload.payload.id,
                                 &payload.payload.from,
+                                debug_group_id.clone(),
                             ).await;
                         }
                         Err(e) => {
                             eprintln!("❌ AI extraction failed: {}", e);
+                            
                             let error_msg = "❌ Failed to process message".to_string();
                             if let Err(e) = send_reply(chat_id, &error_msg).await {
                                 eprintln!("❌ Failed to send error reply: {}", e);
@@ -169,6 +161,7 @@ async fn webhook(
                 }
                 Err(e) => {
                     eprintln!("❌ Failed to fetch courses: {}", e);
+                    
                     let error_msg = "❌ Failed to fetch course list".to_string();
                     if let Err(e) = send_reply(chat_id, &error_msg).await {
                         eprintln!("❌ Failed to send error reply: {}", e);
@@ -181,11 +174,10 @@ async fn webhook(
     StatusCode::OK
 }
 
-async fn forward_message(chat_id: &str, message_id: &str) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+async fn forward_message(chat_id: &str, message_id: &str) -> Result<(), String> {
     let waha_url = std::env::var("WAHA_URL").unwrap_or_else(|_| "http://localhost:3001".to_string());
-    let api_key = std::env::var("WAHA_API_KEY")?;
+    let api_key = std::env::var("WAHA_API_KEY").map_err(|e| e.to_string())?;
     
-    // WAHA's correct forward endpoint
     let forward_payload = serde_json::json!({
         "session": "default",
         "chatId": chat_id,
@@ -199,34 +191,30 @@ async fn forward_message(chat_id: &str, message_id: &str) -> Result<(), Box<dyn 
         .header("Content-Type", "application/json")
         .json(&forward_payload)
         .send()
-        .await?;
+        .await
+        .map_err(|e| e.to_string())?;
     
     if !response.status().is_success() {
-        let error_text = response.text().await?;
-        return Err(format!("Failed to forward message: {}", error_text).into());
+        let error_text = response.text().await.unwrap_or_default();
+        return Err(format!("Failed to forward message: {}", error_text));
     }
     
-    println!("✅ Message forwarded successfully");
     Ok(())
 }
 
-/// After classifying the message by AI,
-/// business logic.
 async fn handle_ai_classification(
     pool: PgPool,
     classification: AIClassification, 
     message_id: &str,
     sender_id: &str,
-) -> Option<String> {
-    println!("\n🤖 AI Classification: {:?}", classification);
-    
+    debug_group_id: Option<String>,
+) {
     let message_id = message_id.to_string();
     let sender_id = sender_id.to_string();
     
     match classification {
         AIClassification::AssignmentInfo { course_name, title, deadline, description, .. } => {
             println!("📚 NEW ASSIGNMENT DETECTED");
-            println!("   Course: {}", course_name.as_ref().unwrap_or(&"Unknown".to_string()));
             
             let pool_clone = pool.clone();
             let course_name_for_lookup = course_name.clone();
@@ -237,19 +225,12 @@ async fn handle_ai_classification(
             let deadline_for_response = deadline.clone();
             let course_name_for_response = course_name.clone();
             
-            // Spawn async database work in background
             tokio::spawn(async move {
                 // Look up course_id by name
                 let course_id = if let Some(name) = &course_name_for_lookup {
                     match crud::get_course_by_name(&pool_clone, name).await {
-                        Ok(Some(course)) => {
-                            println!("✅ Found course: {} (ID: {})", course.name, course.id);
-                            Some(course.id)
-                        }
-                        Ok(None) => {
-                            println!("⚠️ Course '{}' not found in database", name);
-                            None
-                        }
+                        Ok(Some(course)) => Some(course.id),
+                        Ok(None) => None,
                         Err(e) => {
                             eprintln!("❌ Error looking up course: {}", e);
                             None
@@ -259,24 +240,20 @@ async fn handle_ai_classification(
                     None
                 };
                 
-                
+                // Check for duplicates
                 if let Some(cid) = course_id {
                     match crud::get_assignment_by_title_and_course(&pool_clone, &title_clone, cid).await {
                         Ok(Some(existing)) => {
-                            println!("⚠️ Assignment '{}' already exists (ID: {})", title_clone, existing.id);
-                            println!("🔄 Updating existing assignment instead of creating duplicate...");
+                            println!("⚠️ Duplicate found, updating...");
                             
-                            // Update the existing assignment instead of creating duplicate
                             match crud::update_assignment_fields(
                                 &pool_clone,
                                 existing.id,
                                 deadline_parsed,
-                                None,  // new_title
-                                Some(description_clone.clone()),  // new_description
+                                None,
+                                Some(description_clone.clone()),
                             ).await {
                                 Ok(updated) => {
-                                    println!("✅ Successfully updated assignment: {}", updated.title);
-                                    
                                     let response = format!(
                                         "🔄 *Assignment Updated!*\n\n\
                                         📝 {}\n\
@@ -287,26 +264,27 @@ async fn handle_ai_classification(
                                         description_clone
                                     );
                                     
-                                    if let Err(e) = send_reply(&sender_id, &response).await {
-                                        eprintln!("❌ Failed to send update confirmation: {}", e);
+                                    // Send to debug group instead
+                                    if let Some(debug_id) = &debug_group_id {
+                                        if let Err(e) = send_reply(debug_id, &response).await {
+                                            eprintln!("❌ Failed to send to debug group: {}", e);
+                                        }
                                     }
                                 }
                                 Err(e) => {
                                     eprintln!("❌ Database update failed: {}", e);
                                 }
                             }
-                            return; // Exit early, don't create new
+                            return;
                         }
-                        Ok(None) => {
-                            println!("✅ No duplicate found, proceeding with creation");
-                        }
+                        Ok(None) => {}
                         Err(e) => {
                             eprintln!("❌ Error checking for duplicates: {}", e);
                         }
                     }
                 }
                 
-                // Original creation code continues...
+                // Create new assignment
                 let new_assignment = NewAssignment {
                     course_id,
                     title: title_clone.clone(),
@@ -321,7 +299,6 @@ async fn handle_ai_classification(
                     Ok(message) => {
                         println!("✅ {}", message);
                         
-                        // Send creation confirmation
                         let response = format!(
                             "✅ *Assignment Saved!*\n\n\
                             📚 Course: {}\n\
@@ -334,8 +311,11 @@ async fn handle_ai_classification(
                             description_clone
                         );
                         
-                        if let Err(e) = send_reply(&sender_id, &response).await {
-                            eprintln!("❌ Failed to send creation confirmation: {}", e);
+                        // Send to debug group instead
+                        if let Some(debug_id) = &debug_group_id {
+                            if let Err(e) = send_reply(debug_id, &response).await {
+                                eprintln!("❌ Failed to send to debug group: {}", e);
+                            }
                         }
                     }
                     Err(e) => {
@@ -343,14 +323,10 @@ async fn handle_ai_classification(
                     }
                 }
             });
-            
-            // Return None since we're sending replies inside the tokio::spawn
-            None
         }
         
         AIClassification::AssignmentUpdate { reference_keywords, changes, new_deadline, new_title, new_description, .. } => {
             println!("🔄 UPDATE DETECTED");
-            println!("   Keywords: {:?}", reference_keywords);
             
             let new_deadline_clone = new_deadline.clone();
             let new_title_clone = new_title.clone();
@@ -359,80 +335,48 @@ async fn handle_ai_classification(
             let new_description_clone = new_description.clone();
             let pool_clone = pool.clone();
             
-            // Clone for response - we'll determine the response type inside the spawn
-            let sender_id_for_response = sender_id.to_string();
-            
             tokio::spawn(async move {
                 // Try to identify course from keywords
                 let mut course_id: Option<uuid::Uuid> = None;
                 let mut course_name: Option<String> = None;
                 
                 for keyword in &reference_keywords_clone {
-                    println!("🔍 Checking if '{}' is a course name/alias...", keyword);
                     match crud::get_course_by_name_or_alias(&pool_clone, keyword).await {
                         Ok(Some(course)) => {
-                            println!("✅ Found course: {} (ID: {})", course.name, course.id);
                             course_id = Some(course.id);
                             course_name = Some(course.name.clone());
                             break;
                         }
-                        Ok(None) => {
-                            println!("   '{}' is not a course", keyword);
-                        }
+                        Ok(None) => {}
                         Err(e) => {
                             eprintln!("❌ Error looking up course: {}", e);
                         }
                     }
                 }
                 
-                // Get recent assignments
+                // Get recent assignments and try to match
                 match crud::get_recent_assignments_for_update(&pool_clone, course_id).await {
                     Ok(assignments) if !assignments.is_empty() => {
-                        println!("📋 Found {} assignments to check for matching", assignments.len());
-                        println!("📋 Assignments being sent to AI:");
-                        for (i, a) in assignments.iter().enumerate() {
-                            println!("   {}. Title: '{}', Description: '{}'", i + 1, a.title, a.description);
-                        }
-                        
-                        // Ask AI to match
                         match parser::ai_extractor::match_update_to_assignment(
                             &changes_clone,
                             &reference_keywords_clone,
                             &assignments
                         ).await {
                             Ok(Some(assignment_id)) => {
-                                println!("✅ AI matched to assignment ID: {}", assignment_id);
-                                
-                                // Parse the new deadline if provided
                                 let parsed_deadline = if let Some(ref deadline_str) = new_deadline_clone {
-                                    match crud::parse_deadline(deadline_str) {
-                                        Ok(dt) => {
-                                            println!("✅ Parsed deadline: {}", dt);
-                                            Some(dt)
-                                        }
-                                        Err(e) => {
-                                            eprintln!("❌ Failed to parse deadline '{}': {}", deadline_str, e);
-                                            None
-                                        }
-                                    }
+                                    crud::parse_deadline(deadline_str).ok()
                                 } else {
                                     None
                                 };
                                 
-                                // Update the matched assignment
                                 match crud::update_assignment_fields(
                                     &pool_clone,
                                     assignment_id,
                                     parsed_deadline,
-                                    new_title_clone.clone(),  // Add this
+                                    new_title_clone.clone(),
                                     new_description_clone.clone(),
                                 ).await {
                                     Ok(updated) => {
-                                        println!("✅ Successfully updated assignment: {}", updated.title);
-                                        println!("   New deadline: {:?}", updated.deadline);
-                                        println!("   Description: {}", updated.description);
-                                        
-                                        // Send update confirmation
                                         let response = format!(
                                             "🔄 *Assignment Updated!*\n\n\
                                             📝 {}\n\
@@ -443,8 +387,11 @@ async fn handle_ai_classification(
                                             new_deadline_clone.unwrap_or("Unchanged".to_string())
                                         );
                                         
-                                        if let Err(e) = send_reply(&sender_id_for_response, &response).await {
-                                            eprintln!("❌ Failed to send update confirmation: {}", e);
+                                        // Send to debug group
+                                        if let Some(debug_id) = &debug_group_id {
+                                            if let Err(e) = send_reply(debug_id, &response).await {
+                                                eprintln!("❌ Failed to send to debug group: {}", e);
+                                            }
                                         }
                                     }
                                     Err(e) => {
@@ -453,7 +400,7 @@ async fn handle_ai_classification(
                                 }
                             }
                             Ok(None) => {
-                                println!("⚠️ AI couldn't confidently match to any assignment");
+                                println!("⚠️ AI couldn't match to any assignment");
                             }
                             Err(e) => {
                                 eprintln!("❌ AI matching failed: {}", e);
@@ -461,114 +408,83 @@ async fn handle_ai_classification(
                         }
                     }
                     Ok(_) => {
-                        println!("⚠️ No assignments found in database");
-                        if let Some(cid) = course_id {
-                            println!("   (searched in course ID: {})", cid);
-                        } else {
-                            println!("   (searched across all courses)");
-                        }
+                        println!("⚠️ No assignments found - trying fallback creation");
                         
                         // FALLBACK: Create new assignment
-                        if let Some(cid) = course_id {
-                            if let Some(ref deadline_str) = new_deadline_clone {
-                                println!("💡 Converting update to new assignment creation...");
+                        if let (Some(cid), Some(ref deadline_str)) = (course_id, &new_deadline_clone) {
+                            let title = reference_keywords_clone
+                                .iter()
+                                .find(|k| {
+                                    let lower = k.to_lowercase();
+                                    lower.contains("lkp") || 
+                                    lower.contains("tugas") || 
+                                    lower.contains("quiz") ||
+                                    lower.contains("uts") ||
+                                    lower.contains("uas") ||
+                                    lower.starts_with("bab ")
+                                })
+                                .cloned()
+                                .unwrap_or_else(|| "Assignment".to_string());
+                            
+                            let parallel_code = reference_keywords_clone
+                                .iter()
+                                .find(|k| k.to_uppercase().starts_with('K') && k.len() == 2)
+                                .map(|k| k.to_lowercase());
+                            
+                            if let Ok(parsed_deadline) = crud::parse_deadline(deadline_str) {
+                                let description = new_description_clone
+                                    .unwrap_or_else(|| changes_clone.clone());
                                 
-                                // Extract title
-                                let title = reference_keywords_clone
-                                    .iter()
-                                    .find(|k| {
-                                        let lower = k.to_lowercase();
-                                        lower.contains("lkp") || 
-                                        lower.contains("tugas") || 
-                                        lower.contains("quiz") ||
-                                        lower.contains("uts") ||
-                                        lower.contains("uas") ||
-                                        lower.starts_with("bab ")
-                                    })
-                                    .cloned()
-                                    .unwrap_or_else(|| "Assignment".to_string());
+                                let new_assignment = NewAssignment {
+                                    course_id: Some(cid),
+                                    title: title.clone(),
+                                    description: description.clone(),
+                                    deadline: Some(parsed_deadline),
+                                    parallel_code: parallel_code.clone(),
+                                    sender_id: None,
+                                    message_id: String::new(),
+                                };
                                 
-                                println!("   Title: {}", title);
-                                println!("   Deadline: {}", deadline_str);
-                                
-                                // Extract parallel code
-                                let parallel_code = reference_keywords_clone
-                                    .iter()
-                                    .find(|k| k.to_uppercase().starts_with('K') && k.len() == 2)
-                                    .map(|k| k.to_lowercase());
-                                
-                                if let Some(ref pc) = parallel_code {
-                                    println!("   Parallel: {}", pc);
-                                }
-                                
-                                // Parse deadline
-                                match crud::parse_deadline(deadline_str) {
-                                    Ok(parsed_deadline) => {
-                                        let description = new_description_clone
-                                            .unwrap_or_else(|| changes_clone.clone());
+                                match crud::create_assignment(&pool_clone, new_assignment).await {
+                                    Ok(_) => {
+                                        let response = format!(
+                                            "✅ *New Assignment Saved!*\n\n\
+                                            📚 {}\n\
+                                            📝 {}\n\
+                                            📅 {}\n\
+                                            📄 {}",
+                                            course_name.unwrap_or("Unknown".to_string()),
+                                            title,
+                                            deadline_str,
+                                            description
+                                        );
                                         
-                                        let new_assignment = NewAssignment {
-                                            course_id: Some(cid),
-                                            title: title.clone(),
-                                            description: description.clone(),
-                                            deadline: Some(parsed_deadline),
-                                            parallel_code: parallel_code.clone(),
-                                            sender_id: None,
-                                            message_id: String::new(),
-                                        };
-                                        
-                                        match crud::create_assignment(&pool_clone, new_assignment).await {
-                                            Ok(success_msg) => {
-                                                println!("✅ {}", success_msg);
-                                                
-                                                // Send creation confirmation
-                                                let response = format!(
-                                                    "✅ *New Assignment Saved!*\n\n\
-                                                    📚 {}\n\
-                                                    📝 {}\n\
-                                                    📅 {}\n\
-                                                    📄 {}",
-                                                    course_name.unwrap_or("Unknown".to_string()),
-                                                    title,
-                                                    deadline_str,
-                                                    description
-                                                );
-                                                
-                                                if let Err(e) = send_reply(&sender_id_for_response, &response).await {
-                                                    eprintln!("❌ Failed to send creation confirmation: {}", e);
-                                                }
-                                            }
-                                            Err(e) => {
-                                                eprintln!("❌ Failed to create assignment: {}", e);
+                                        // Send to debug group
+                                        if let Some(debug_id) = &debug_group_id {
+                                            if let Err(e) = send_reply(debug_id, &response).await {
+                                                eprintln!("❌ Failed to send to debug group: {}", e);
                                             }
                                         }
                                     }
                                     Err(e) => {
-                                        eprintln!("❌ Failed to parse deadline '{}': {}", deadline_str, e);
+                                        eprintln!("❌ Failed to create assignment: {}", e);
                                     }
                                 }
-                            } else {
-                                println!("   ⚠️ Cannot create assignment - no deadline provided");
                             }
-                        } else {
-                            println!("   ⚠️ Cannot create assignment - course not identified");
                         }
                     }
                     Err(e) => {
-                        eprintln!("❌ Failed to fetch assignments from database: {}", e);
+                        eprintln!("❌ Failed to fetch assignments: {}", e);
                     }
                 }
             });
-            
-            // Return None since we're sending replies inside the tokio::spawn
-            None
         }
         
-        AIClassification::Unrecognized => None,
+        AIClassification::Unrecognized => {}
     }
 }
 
-async fn send_reply(chat_id: &str, text: &str) -> Result<(), Box<dyn std::error::Error>> {
+async fn send_reply(chat_id: &str, text: &str) -> Result<(), String> {
     let waha_url = "http://localhost:3001/api/sendText";
     let api_key = std::env::var("WAHA_API_KEY")
         .unwrap_or_else(|_| "devkey123".to_string());
@@ -579,25 +495,22 @@ async fn send_reply(chat_id: &str, text: &str) -> Result<(), Box<dyn std::error:
         session: "default".to_string(),
     };
 
-    println!("📤 Sending to WAHA: {} -> '{}'", chat_id, text);
-
     let client = reqwest::Client::new();
     let response = client
         .post(waha_url)
         .header("X-Api-Key", api_key)
         .json(&payload)
         .send()
-        .await?;
+        .await
+        .map_err(|e| e.to_string())?;
 
     let status = response.status();
     
     if status.is_success() {
-        println!("✅ WAHA API responded successfully");
         Ok(())
     } else {
-        let body = response.text().await?;
-        eprintln!("❌ WAHA API error: {} - {}", status, body);
-        Err(format!("WAHA API error: {}", status).into())
+        let body = response.text().await.unwrap_or_default();
+        Err(format!("WAHA API error: {}", status))
     }
 }
 
@@ -656,10 +569,9 @@ async fn main() {
         .with_state(state);
 
     let addr = SocketAddr::from(([0, 0, 0, 0], 3000));
-    let separator = "=".repeat(60);
     println!("👂 Listening on {}", addr);
     println!("📍 Webhook endpoint: http://localhost:3000/webhook");
-    println!("\n{}\n", separator);
+    println!("\n{}\n", "=".repeat(60));
 
     let listener = TcpListener::bind(addr).await.unwrap();
 
