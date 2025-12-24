@@ -118,7 +118,7 @@ Commands can be sent from **any chat** (DM, group, or channel):
 |---------|-------------|---------|
 | `#ping` | Check if bot is alive | `#ping` |
 | `#tugas` | List all assignments | `#tugas` |
-| `#expand <id>` | View assignment details | `#expand 1` |
+| `#tugas <id> or #<id>` | Forward original assignment details | `#tugas 1 or just #1` |
 | `#done <id>` | Mark assignment complete | `#done 1` |
 | `#help` | Show help message | `#help` |
 
