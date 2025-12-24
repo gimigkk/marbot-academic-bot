@@ -4,6 +4,7 @@ use axum::{
     Json,
     Router,
 };
+use axum::http::StatusCode;
 use std::collections::HashSet;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
@@ -18,11 +19,12 @@ pub mod whitelist;
 pub mod database;
 
 use crate::database::crud;
+use crate::parser::commands::CommandResponse;
 
-use models::{MessageType, AIClassification, WebhookPayload, SendTextRequest, NewAssignment};
+use models::{MessageType, AIClassification, WebhookPayload, SendTextRequest, NewAssignment, ForwardMessageRequest};
 use classifier::classify_message;
 use parser::commands::handle_command;
-use parser::ai_extractor::{extract_with_ai, match_update_to_assignment}; 
+use parser::ai_extractor::{extract_with_ai}; 
 use whitelist::Whitelist;
 
 type MessageCache = Arc<Mutex<HashSet<String>>>;
@@ -37,10 +39,10 @@ struct AppState {
 async fn webhook(
     State(state): State<AppState>,
     Json(payload): Json<WebhookPayload>,
-) {
+) -> StatusCode {
     // For now we only get from "message.any"
     if payload.event != "message.any" {
-        return;
+        return StatusCode::OK;
     }
 
     // this is for handling when WAHA sends duplicate messages
@@ -56,7 +58,7 @@ async fn webhook(
         let mut cache = state.cache.lock().unwrap();
         if cache.contains(&dedup_key) {
             println!("⏭️  Skipping duplicate message");
-            return;
+            return StatusCode::OK;
         }
 
         cache.insert(dedup_key);
@@ -69,7 +71,7 @@ async fn webhook(
     // for some reason messages that's sent by the bot is being read also.
     if payload.payload.from_me {
         println!("⏭️  Ignoring bot's own message");
-        return;
+        return StatusCode::OK;
     }
 
     // for debuggin in the terminal
@@ -104,59 +106,112 @@ async fn webhook(
 
     if !should_process {
         println!("🚫 Ignoring message: {} (from: {})", reason, payload.payload.from);
-        return;
+        return StatusCode::OK;
     }
+
+    // Get chat_id from payload (it's the 'from' field)
+    let chat_id = &payload.payload.from;
 
     // STEP 3: RUN COMMAND (if it's a bot command)
-    let response_text = match message_type {
-    MessageType::Command(cmd) => {
-        Some(handle_command(cmd, &payload.payload.from, &state.pool).await)
-    }
-
-    // STEP 4: DATA EXTRACT WITH AI
-    MessageType::NeedsAI(text) => {
-        // Fetch available courses from database
-        let courses_result = crud::get_all_courses_formatted(&state.pool).await;
-        
-        match courses_result {
-            Ok(courses_list) => {
-                println!("📚 Available courses: {}", courses_list);
-                
-                // Pass courses to AI extraction
-                match extract_with_ai(&text, &courses_list).await {
-                    Ok(classification) => {
-                        handle_ai_classification(
-                            state.pool.clone(),
-                            classification,
-                            &payload.payload.id,
-                            &payload.payload.from,
-                        )
+    match message_type {
+        MessageType::Command(cmd) => {
+            let response = handle_command(cmd, chat_id, chat_id, &state.pool).await;
+            
+            match response {
+                CommandResponse::Text(text) => {
+                    if let Err(e) = send_reply(chat_id, &text).await {
+                        eprintln!("❌ Failed to send reply: {}", e);
                     }
-                    Err(e) => {
-                        eprintln!("❌ AI extraction failed: {}", e);
-                        Some("❌ Failed to process message".to_string())
+                }
+                CommandResponse::ForwardMessage { message_id, warning } => {
+                    // Forward the original message
+                    if let Err(e) = forward_message(chat_id, &message_id).await {
+                        eprintln!("❌ Failed to forward message: {}", e);
+                    } else {
+                        // Send warning after forwarding
+                        if let Err(e) = send_reply(chat_id, &warning).await {
+                            eprintln!("❌ Failed to send warning: {}", e);
+                        }
                     }
                 }
             }
-            Err(e) => {
-                eprintln!("❌ Failed to fetch courses: {}", e);
-                Some("❌ Failed to fetch course list".to_string())
+        }
+
+        // STEP 4: DATA EXTRACT WITH AI
+        MessageType::NeedsAI(text) => {
+            // Fetch available courses from database
+            let courses_result = crud::get_all_courses_formatted(&state.pool).await;
+            
+            match courses_result {
+                Ok(courses_list) => {
+                    println!("📚 Available courses: {}", courses_list);
+                    
+                    // Pass courses to AI extraction
+                    match extract_with_ai(&text, &courses_list).await {
+                        Ok(classification) => {
+                            // Call the async function and await it
+                            handle_ai_classification(
+                                state.pool.clone(),
+                                classification,
+                                &payload.payload.id,
+                                &payload.payload.from,
+                            ).await;
+                        }
+                        Err(e) => {
+                            eprintln!("❌ AI extraction failed: {}", e);
+                            let error_msg = "❌ Failed to process message".to_string();
+                            if let Err(e) = send_reply(chat_id, &error_msg).await {
+                                eprintln!("❌ Failed to send error reply: {}", e);
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    eprintln!("❌ Failed to fetch courses: {}", e);
+                    let error_msg = "❌ Failed to fetch course list".to_string();
+                    if let Err(e) = send_reply(chat_id, &error_msg).await {
+                        eprintln!("❌ Failed to send error reply: {}", e);
+                    }
+                }
             }
         }
     }
-};
+    
+    StatusCode::OK
+}
 
-    // STEP 5: SEND REPLY
-    if let Some(text) = response_text {
-        if let Err(e) = send_reply(&payload.payload.from, &text).await {
-            eprintln!("❌ Failed to send reply: {}", e);
-        }
+async fn forward_message(chat_id: &str, message_id: &str) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let waha_url = std::env::var("WAHA_URL").unwrap_or_else(|_| "http://localhost:3001".to_string());
+    let api_key = std::env::var("WAHA_API_KEY")?;
+    
+    // WAHA's correct forward endpoint
+    let forward_payload = serde_json::json!({
+        "session": "default",
+        "chatId": chat_id,
+        "messageId": message_id
+    });
+    
+    let client = reqwest::Client::new();
+    let response = client
+        .post(format!("{}/api/forwardMessage", waha_url))
+        .header("X-Api-Key", api_key)
+        .header("Content-Type", "application/json")
+        .json(&forward_payload)
+        .send()
+        .await?;
+    
+    if !response.status().is_success() {
+        let error_text = response.text().await?;
+        return Err(format!("Failed to forward message: {}", error_text).into());
     }
+    
+    println!("✅ Message forwarded successfully");
+    Ok(())
 }
 
 /// After classifying the message by AI,
 /// business logic.
-fn handle_ai_classification(
+async fn handle_ai_classification(
     pool: PgPool,
     classification: AIClassification, 
     message_id: &str,
