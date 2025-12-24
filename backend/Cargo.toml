@@ -15,3 +15,4 @@ serde_json = "1"
 uuid = { version = "1", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
 tokio-cron-scheduler = "0.9"
+anyhow = "1.0"
