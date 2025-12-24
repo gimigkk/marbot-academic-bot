@@ -157,10 +157,9 @@ pub struct AssignmentWithCourse {
     pub title: String,
     pub description: Option<String>,
     pub deadline: DateTime<Utc>,
-    pub message_id: String,
-    pub sender_id: String,
+    pub message_id: Option<String>,   
+    pub sender_id: Option<String>,    
 }
-
 
 #[derive(Debug, Clone, FromRow, Serialize, Deserialize)]
 pub struct WaLog {
