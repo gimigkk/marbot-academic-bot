@@ -51,10 +51,10 @@ marbot-academic-bot/
 │   │   │   ├── crud.rs         # Database queries and mutations
 │   │   │   └── mod.rs
 │   │   │
-│   │   ├── parser/             # Message parsing layer
-│   │   │   ├── commands.rs     # Deterministic command parsing (#done, #expand, etc.)
-│   │   │   ├── ai_extractor.rs # AI-assisted extraction from free-form messages
-│   │   │   └── mod.rs
+│   │   └── parser/             # Message parsing layer
+│   │       ├── commands.rs     # Deterministic command parsing (#done, #expand, etc.)
+│   │       ├── ai_extractor.rs # AI-assisted extraction from free-form messages
+│   │       └── mod.rs
 │   │
 │   ├── .env                    # Local environment variables (not committed)
 │   ├── Cargo.toml              # Rust project manifest
