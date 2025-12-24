@@ -27,33 +27,30 @@ pub fn classify_message(text: &str) -> MessageType {
 }
 
 fn parse_command(text: &str) -> Option<BotCommand> {
-    // Convert to lowercase for case-insensitive matching
     let text_lower = text.trim().to_lowercase();
     
     match text_lower.as_str() {
         "#ping" => Some(BotCommand::Ping),
         "#tugas" => Some(BotCommand::Tugas),
+        "#today" => Some(BotCommand::Today),
+        "#week" => Some(BotCommand::Week),
         "#help" => Some(BotCommand::Help),
         _ if text_lower.starts_with("#done ") => {
-            // Parse "#done 1" or "#DONE 1"
             let id = text_lower.strip_prefix("#done ")?.trim().parse().ok()?;
             Some(BotCommand::Done(id))
         }
         _ if text_lower.starts_with("#expand ") => {
-            // Parse "#expand 1" or "#EXPAND 1"
             let id = text_lower.strip_prefix("#expand ")?.trim().parse().ok()?;
             Some(BotCommand::Expand(id))
         }
         _ if text_lower.starts_with("#tugas ") => {
-            // Parse "#tugas 1" or "#TUGAS 1" - treat as expand/detail command
             let id = text_lower.strip_prefix("#tugas ")?.trim().parse().ok()?;
             Some(BotCommand::Expand(id))
         }
         _ if text_lower.len() > 1 && text_lower.chars().skip(1).all(|c| c.is_numeric()) => {
-            // Parse "#1", "#2", etc - just # followed by digits
             let id = text_lower.strip_prefix('#')?.trim().parse().ok()?;
             Some(BotCommand::Expand(id))
         }
-        _ => None, // Unrecognized command starting with #
+        _ => None,
     }
 }
