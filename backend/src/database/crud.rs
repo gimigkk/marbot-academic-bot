@@ -178,47 +178,42 @@ pub async fn get_active_assignments_sorted(pool: &PgPool) -> Result<Vec<Assignme
 }
 
 /// Get recent assignments for update matching (doesn't filter by deadline)
+/// Returns assignments sorted by recency (newest first)
 pub async fn get_recent_assignments_for_update(
     pool: &PgPool,
-    course_id: Option<Uuid>,
-) -> Result<Vec<Assignment>> {
+    course_id: Option<uuid::Uuid>,
+) -> Result<Vec<Assignment>, sqlx::Error> {
+    let mut tx = pool.begin().await?;
+    
     let assignments = if let Some(cid) = course_id {
-        // Get last 5 assignments from specific course
-        println!("🔍 Fetching last 5 assignments from course: {}", cid);
+        // Get assignments from specific course, prioritize recent ones
         sqlx::query_as::<_, Assignment>(
             r#"
-            SELECT a.* 
-            FROM assignments a
-            WHERE a.course_id = $1
-            ORDER BY a.created_at DESC
-            LIMIT 5
+            SELECT * FROM assignments
+            WHERE course_id = $1 
+            AND deadline >= NOW() - INTERVAL '7 days'  -- Include assignments from last week
+            ORDER BY created_at DESC  -- Most recent first
+            LIMIT 10
             "#
         )
         .bind(cid)
-        .fetch_all(pool)
+        .fetch_all(&mut *tx)
         .await?
     } else {
-        // Get last 3 assignments from each course (broader search)
-        println!("🔍 Fetching last 3 assignments from each course");
+        // Get assignments across all courses
         sqlx::query_as::<_, Assignment>(
             r#"
-            WITH ranked_assignments AS (
-                SELECT a.*, 
-                       ROW_NUMBER() OVER (PARTITION BY a.course_id ORDER BY a.created_at DESC) as rn
-                FROM assignments a
-            )
-            SELECT id, created_at, course_id, title, description, deadline, parallel_code, sender_id, message_id
-            FROM ranked_assignments
-            WHERE rn <= 3
+            SELECT * FROM assignments
+            WHERE deadline >= NOW() - INTERVAL '7 days'
             ORDER BY created_at DESC
+            LIMIT 10
             "#
         )
-        .fetch_all(pool)
+        .fetch_all(&mut *tx)
         .await?
     };
     
-    println!("✅ Found {} assignments for matching", assignments.len());
-    
+    tx.commit().await?;
     Ok(assignments)
 }
 
@@ -406,17 +401,51 @@ pub async fn update_assignment_fields(
     pool: &PgPool,
     id: Uuid,
     new_deadline: Option<DateTime<Utc>>,
+    new_title: Option<String>,
     new_description: Option<String>,
 ) -> Result<Assignment> {
-    println!("🔄 Updating assignment {} with deadline: {:?}, description: {:?}", 
-        id, new_deadline, new_description);
+    println!("🔄 Updating assignment {} with deadline: {:?}, title: {:?}, description: {:?}", 
+        id, new_deadline, new_title, new_description);
     
     let mut tx = pool.begin().await?;
     
     // Build dynamic query based on what changed
-    let assignment = match (new_deadline, &new_description) {
-        (Some(dl), Some(desc)) => {
-            // Update both deadline and description
+    let assignment = match (new_deadline, &new_title, &new_description) {
+        // All three fields
+        (Some(dl), Some(title), Some(desc)) => {
+            sqlx::query_as::<_, Assignment>(
+                r#"
+                UPDATE assignments
+                SET deadline = $2, title = $3, description = $4
+                WHERE id = $1
+                RETURNING *
+                "#
+            )
+            .bind(id)
+            .bind(dl)
+            .bind(title)
+            .bind(desc)
+            .fetch_one(&mut *tx)
+            .await?
+        }
+        // Deadline + Title
+        (Some(dl), Some(title), None) => {
+            sqlx::query_as::<_, Assignment>(
+                r#"
+                UPDATE assignments
+                SET deadline = $2, title = $3
+                WHERE id = $1
+                RETURNING *
+                "#
+            )
+            .bind(id)
+            .bind(dl)
+            .bind(title)
+            .fetch_one(&mut *tx)
+            .await?
+        }
+        // Deadline + Description
+        (Some(dl), None, Some(desc)) => {
             sqlx::query_as::<_, Assignment>(
                 r#"
                 UPDATE assignments
@@ -428,11 +457,27 @@ pub async fn update_assignment_fields(
             .bind(id)
             .bind(dl)
             .bind(desc)
-            .fetch_one(&mut *tx)  // ✅ Use transaction
+            .fetch_one(&mut *tx)
             .await?
         }
-        (Some(dl), None) => {
-            // Update only deadline
+        // Title + Description
+        (None, Some(title), Some(desc)) => {
+            sqlx::query_as::<_, Assignment>(
+                r#"
+                UPDATE assignments
+                SET title = $2, description = $3
+                WHERE id = $1
+                RETURNING *
+                "#
+            )
+            .bind(id)
+            .bind(title)
+            .bind(desc)
+            .fetch_one(&mut *tx)
+            .await?
+        }
+        // Only Deadline
+        (Some(dl), None, None) => {
             sqlx::query_as::<_, Assignment>(
                 r#"
                 UPDATE assignments
@@ -443,11 +488,26 @@ pub async fn update_assignment_fields(
             )
             .bind(id)
             .bind(dl)
-            .fetch_one(&mut *tx)  // ✅ Use transaction
+            .fetch_one(&mut *tx)
             .await?
         }
-        (None, Some(desc)) => {
-            // Update only description
+        // Only Title
+        (None, Some(title), None) => {
+            sqlx::query_as::<_, Assignment>(
+                r#"
+                UPDATE assignments
+                SET title = $2
+                WHERE id = $1
+                RETURNING *
+                "#
+            )
+            .bind(id)
+            .bind(title)
+            .fetch_one(&mut *tx)
+            .await?
+        }
+        // Only Description
+        (None, None, Some(desc)) => {
             sqlx::query_as::<_, Assignment>(
                 r#"
                 UPDATE assignments
@@ -458,16 +518,16 @@ pub async fn update_assignment_fields(
             )
             .bind(id)
             .bind(desc)
-            .fetch_one(&mut *tx)  // ✅ Use transaction
+            .fetch_one(&mut *tx)
             .await?
         }
-        (None, None) => {
-            // Nothing to update, just fetch the assignment
+        // Nothing to update
+        (None, None, None) => {
             sqlx::query_as::<_, Assignment>(
                 "SELECT * FROM assignments WHERE id = $1"
             )
             .bind(id)
-            .fetch_one(&mut *tx)  // ✅ Use transaction
+            .fetch_one(&mut *tx)
             .await?
         }
     };
