@@ -31,6 +31,43 @@ Gemini AI           Execute
              │
       [Reply via WAHA]
 ```
+```
+marbot-academic-bot/
+├── backend/                    # Core Rust backend service
+│   ├── migrations/             # SQL database migrations
+│   │   ├── *_init_schema.up.sql
+│   │   └── *_init_schema.down.sql
+│   │
+│   ├── src/
+│   │   ├── main.rs             # Application entry point & wiring
+│   │   │
+│   │   ├── classifier.rs       # Message type classification (command, task, ignore, etc.)
+│   │   ├── models.rs           # Domain models shared across the application
+│   │   ├── scheduler.rs        # Background jobs (reminders, periodic tasks)
+│   │   ├── whitelist.rs        # Access control for users / groups
+│   │   │
+│   │   ├── database/           # Database access layer
+│   │   │   ├── pool.rs         # PostgreSQL connection pool setup
+│   │   │   ├── crud.rs         # Database queries and mutations
+│   │   │   └── mod.rs
+│   │   │
+│   │   ├── parser/             # Message parsing layer
+│   │   │   ├── commands.rs     # Deterministic command parsing (#done, #expand, etc.)
+│   │   │   ├── ai_extractor.rs # AI-assisted extraction from free-form messages
+│   │   │   └── mod.rs
+│   │
+│   ├── .env                    # Local environment variables (not committed)
+│   ├── Cargo.toml              # Rust project manifest
+│   ├── Cargo.lock
+│   └── README.md               # Backend-specific notes (if any)
+│
+├── waha/                       # WhatsApp HTTP API (external dependency)
+│   ├── .waha/                  # WAHA session data (not committed)
+│   └── waha_data/              # Runtime data / volumes
+│
+├── .gitignore
+└── README.md                   # Project documentation (this file)
+```
 
 ## Quick Start
 
