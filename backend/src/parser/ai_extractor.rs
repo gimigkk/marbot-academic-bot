@@ -4,6 +4,14 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use chrono::{Utc, FixedOffset};
 
+// ===== GEMINI MODEL CONFIGURATION =====
+
+const GEMINI_MODELS: &[&str] = &[
+    "gemini-3-flash-preview",
+    "gemini-2.5-flash",
+    "gemini-2.5-flash-lite",
+];
+
 // ===== GEMINI API RESPONSE STRUCTURES =====
 
 #[derive(Debug, Deserialize)]
@@ -28,18 +36,13 @@ struct Part {
 
 // ===== MAIN AI EXTRACTION FUNCTION =====
 
-/// Extract structured info from WhatsApp message using Gemini AI
+/// Extract structured info from WhatsApp message using Gemini AI with model fallback
 pub async fn extract_with_ai(
     text: &str,
     available_courses: &str,
 ) -> Result<AIClassification, String> {
     let api_key = std::env::var("GEMINI_API_KEY")
         .map_err(|_| "GEMINI_API_KEY not set in .env".to_string())?;
-    
-    let url = format!(
-        "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={}",
-        api_key
-    );
     
     // Get current datetime in GMT+7
     let gmt7 = FixedOffset::east_opt(7 * 3600).unwrap();
@@ -49,63 +52,99 @@ pub async fn extract_with_ai(
     
     let prompt = build_classification_prompt(text, available_courses, &current_datetime, &current_date);
     
-    let request_body = json!({
-        "contents": [{
-            "parts": [{
-                "text": prompt
-            }]
-        }],
-        "generationConfig": {
-            "temperature": 0.2,
-            "maxOutputTokens": 4096,
-            "responseMimeType": "application/json"
-        }
-    });
-    
     println!("🤖 Sending to Gemini AI...");
     println!("📝 Message: {}", truncate_for_log(text, 100));
     println!("📅 Current time (GMT+7): {}", current_datetime);
     
-    let client = reqwest::Client::new();
-    let response = client
-        .post(&url)
-        .json(&request_body)
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
-    
-    let status = response.status();
-    
-    if !status.is_success() {
-        let error_text = response.text().await
-            .unwrap_or_else(|_| "Unknown error".to_string());
+    // Try each model in sequence until one succeeds
+    for (index, model) in GEMINI_MODELS.iter().enumerate() {
+        println!("🔄 Attempting with model: {}", model);
         
+        let url = format!(
+            "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent?key={}",
+            model, api_key
+        );
+        
+        let request_body = json!({
+            "contents": [{
+                "parts": [{
+                    "text": prompt
+                }]
+            }],
+            "generationConfig": {
+                "temperature": 0.2,
+                "maxOutputTokens": 4096,
+                "responseMimeType": "application/json"
+            }
+        });
+        
+        let client = reqwest::Client::new();
+        let response = match client.post(&url).json(&request_body).send().await {
+            Ok(r) => r,
+            Err(e) => {
+                eprintln!("❌ Request failed for {}: {}", model, e);
+                continue;
+            }
+        };
+        
+        let status = response.status();
+        
+        if status.is_success() {
+            println!("✅ Success with model: {}", model);
+            
+            let gemini_response: GeminiResponse = response.json().await
+                .map_err(|e| format!("Failed to deserialize Gemini response: {}", e))?;
+            
+            let ai_text = extract_ai_text(&gemini_response)?;
+            println!("🤖 Gemini response: {}", ai_text);
+            
+            return parse_classification(ai_text);
+        }
+        
+        // Handle rate limit
         if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
-            eprintln!("⚠️  Rate limit exceeded");
+            let error_text = response.text().await
+                .unwrap_or_else(|_| "Unknown error".to_string());
+            
+            eprintln!("⚠️  Rate limit exceeded for model: {}", model);
+            
             if let Ok(error_json) = serde_json::from_str::<serde_json::Value>(&error_text) {
                 if let Some(retry_info) = extract_retry_delay(&error_json) {
                     eprintln!("   Retry after: {}", retry_info);
                 }
             }
-            return Err("Rate limit exceeded. Try again later.".to_string());
+            
+            // If this is not the last model, try the next one
+            if index < GEMINI_MODELS.len() - 1 {
+                println!("🔄 Falling back to next model...");
+                continue;
+            } else {
+                return Err("All models are rate limited. Try again later.".to_string());
+            }
         }
         
-        return Err(format!("Gemini API error {}: {}", status, error_text));
+        // Handle other errors
+        let error_text = response.text().await
+            .unwrap_or_else(|_| "Unknown error".to_string());
+        
+        eprintln!("❌ Error with model {}: {} - {}", model, status, error_text);
+        
+        // Try next model
+        if index < GEMINI_MODELS.len() - 1 {
+            println!("🔄 Trying next model...");
+            continue;
+        } else {
+            return Err(format!("All models failed. Last error: {} - {}", status, error_text));
+        }
     }
     
-    let gemini_response: GeminiResponse = response.json().await
-        .map_err(|e| format!("Failed to deserialize Gemini response: {}", e))?;
-    
-    let ai_text = extract_ai_text(&gemini_response)?;
-    println!("🤖 Gemini response: {}", ai_text);
-    
-    parse_classification(ai_text)
+    Err("No models available".to_string())
 }
 
 
 // ===== MATCH WITH AN EXISTING ASSIGNMENT FOR UPDATE =====
 
-/// Use AI to match an update to a specific assignment
+/// Use AI to match an update to a specific assignment with model fallback
 pub async fn match_update_to_assignment(
     changes: &str,
     keywords: &[String],
@@ -114,43 +153,80 @@ pub async fn match_update_to_assignment(
     let api_key = std::env::var("GEMINI_API_KEY")
         .map_err(|_| "GEMINI_API_KEY not set in .env".to_string())?;
     
-    let url = format!(
-        "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={}",
-        api_key
-    );
-    
     let prompt = build_matching_prompt(changes, keywords, active_assignments);
-    
-    let request_body = json!({
-        "contents": [{
-            "parts": [{
-                "text": prompt
-            }]
-        }],
-        "generationConfig": {
-            "temperature": 0.2,
-            "maxOutputTokens": 4096,
-            "responseMimeType": "application/json"
-        }
-    });
     
     println!("🤖 Asking AI to match update to assignment...");
     
-    let client = reqwest::Client::new();
-    let response = client.post(&url).json(&request_body).send().await
-        .map_err(|e| e.to_string())?;
-    
-    if !response.status().is_success() {
-        return Err(format!("AI matching failed: {}", response.status()));
+    // Try each model in sequence until one succeeds
+    for (index, model) in GEMINI_MODELS.iter().enumerate() {
+        println!("🔄 Attempting match with model: {}", model);
+        
+        let url = format!(
+            "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent?key={}",
+            model, api_key
+        );
+        
+        let request_body = json!({
+            "contents": [{
+                "parts": [{
+                    "text": prompt
+                }]
+            }],
+            "generationConfig": {
+                "temperature": 0.2,
+                "maxOutputTokens": 4096,
+                "responseMimeType": "application/json"
+            }
+        });
+        
+        let client = reqwest::Client::new();
+        let response = match client.post(&url).json(&request_body).send().await {
+            Ok(r) => r,
+            Err(e) => {
+                eprintln!("❌ Request failed for {}: {}", model, e);
+                continue;
+            }
+        };
+        
+        let status = response.status();
+        
+        if status.is_success() {
+            println!("✅ Match success with model: {}", model);
+            
+            let gemini_response: GeminiResponse = response.json().await
+                .map_err(|e| e.to_string())?;
+            let ai_text = extract_ai_text(&gemini_response)?;
+            
+            println!("🤖 AI match result: {}", ai_text);
+            
+            return parse_match_result(ai_text);
+        }
+        
+        // Handle rate limit
+        if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
+            eprintln!("⚠️  Rate limit exceeded for model: {}", model);
+            
+            // If this is not the last model, try the next one
+            if index < GEMINI_MODELS.len() - 1 {
+                println!("🔄 Falling back to next model for matching...");
+                continue;
+            } else {
+                return Err("All models are rate limited for matching. Try again later.".to_string());
+            }
+        }
+        
+        // Handle other errors
+        eprintln!("❌ Matching failed with model {}: {}", model, status);
+        
+        // Try next model
+        if index < GEMINI_MODELS.len() - 1 {
+            continue;
+        } else {
+            return Err(format!("AI matching failed with all models: {}", status));
+        }
     }
     
-    let gemini_response: GeminiResponse = response.json().await
-        .map_err(|e| e.to_string())?;
-    let ai_text = extract_ai_text(&gemini_response)?;
-    
-    println!("🤖 AI match result: {}", ai_text);
-    
-    parse_match_result(ai_text)
+    Err("No models available for matching".to_string())
 }
 
 // ===== HELPER FUNCTIONS =====
@@ -198,10 +274,10 @@ RULES:
 - "changes" field should briefly describe what changed
 - All dates in YYYY-MM-DD format
 - Use null for unchanged fields
-- parallel_code format: K1, K2, K3, etc (uppercase K)"#,
+- parallel_code format: K1, K2, K3, P1, P2, P3 etc (uppercase K/P)"#,
         current_datetime,
         current_date,
-        available_courses,  // ← Added this!
+        available_courses,
         text,
         current_date
     )
