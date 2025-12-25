@@ -30,6 +30,22 @@ pub struct MessagePayload {
     #[serde(flatten)]
     #[allow(dead_code)]
     pub extra: Value,
+
+    #[serde(rename = "hasMedia")]
+    pub has_media: Option<bool>,
+    #[serde(rename = "mediaUrl")]
+    pub media_url: Option<String>,
+    #[serde(rename = "mimeType")]
+    pub mime_type: Option<String>,
+    pub media: Option<MediaInfo>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct MediaInfo {
+    pub url: Option<String>,
+    pub mimetype: Option<String>,
+    pub filename: Option<String>,
+    pub error: Option<String>,
 }
 
 // ===== WAHA API TYPES =====
