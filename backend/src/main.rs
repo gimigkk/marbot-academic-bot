@@ -256,13 +256,14 @@ async fn handle_ai_classification(
                             ).await {
                                 Ok(updated) => {
                                     let response = format!(
-                                        "🔄 *Assignment Updated!*\n\n\
-                                        📝 {}\n\
+                                        "🔄 *INFO TUGAS DIPERBARUI*\n\
+                                        ━━━━━━━━━━━━━━━━━━\n\
+                                        📝 *{}*\n\
+                                        ⚠️ _Terdeteksi duplikat, data diupdate_\n\
                                         📅 Due: {}\n\
-                                        📄 {}",
+                                        ━━━━━━━━━━━━━━━━━━",
                                         updated.title,
-                                        deadline_for_response.unwrap_or("No due date".to_string()),
-                                        description_clone
+                                        deadline_for_response.unwrap_or("No due date".to_string())
                                     );
                                     
                                     // Send to debug group instead
@@ -301,14 +302,16 @@ async fn handle_ai_classification(
                         println!("✅ {}", message);
                         
                         let response = format!(
-                            "✅ *Assignment Saved!*\n\n\
-                            📚 Course: {}\n\
+                            "✨ *TUGAS BARU TERSIMPAN* ✨\n\
+                            ━━━━━━━━━━━━━━━━━━\n\
+                            📚 *{}*\n\
                             📝 {}\n\
-                            📅 Due: {}\n\
-                            📄 {}",
-                            course_name_for_response.unwrap_or("Unknown".to_string()),
+                            📅 Deadline: {}\n\
+                            ━━━━━━━━━━━━━━━━━━\n\
+                            📄 _{}_",
+                            course_name_for_response.unwrap_or("Mata Kuliah Umum".to_string()),
                             title_clone,
-                            deadline_for_response.unwrap_or("No due date".to_string()),
+                            deadline_for_response.unwrap_or("? (Cek lagi)".to_string()),
                             description_clone
                         );
                         
@@ -379,13 +382,15 @@ async fn handle_ai_classification(
                                 ).await {
                                     Ok(updated) => {
                                         let response = format!(
-                                            "🔄 *Assignment Updated!*\n\n\
-                                            📝 {}\n\
-                                            ✏️ {}\n\
-                                            📅 {}",
+                                            "🔄 *INFO TUGAS DIPERBARUI*\n\
+                                            ━━━━━━━━━━━━━━━━━━\n\
+                                            📝 *{}*\n\
+                                            ⚠️ Perubahan: _{}_\n\
+                                            📅 Deadline Baru: {}\n\
+                                            ━━━━━━━━━━━━━━━━━━",
                                             updated.title,
                                             changes_clone,
-                                            new_deadline_clone.unwrap_or("Unchanged".to_string())
+                                            new_deadline_clone.unwrap_or("Tetap".to_string())
                                         );
                                         
                                         // Send to debug group
@@ -449,11 +454,13 @@ async fn handle_ai_classification(
                                 match crud::create_assignment(&pool_clone, new_assignment).await {
                                     Ok(_) => {
                                         let response = format!(
-                                            "✅ *New Assignment Saved!*\n\n\
-                                            📚 {}\n\
+                                            "✨ *TUGAS BARU TERSIMPAN* ✨\n\
+                                            ━━━━━━━━━━━━━━━━━━\n\
+                                            📚 *{}*\n\
                                             📝 {}\n\
-                                            📅 {}\n\
-                                            📄 {}",
+                                            📅 Deadline: {}\n\
+                                            ━━━━━━━━━━━━━━━━━━\n\
+                                            📄 _{}_",
                                             course_name.unwrap_or("Unknown".to_string()),
                                             title,
                                             deadline_str,
