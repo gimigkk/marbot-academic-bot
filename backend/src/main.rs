@@ -36,17 +36,15 @@ type MessageCache = Arc<Mutex<HashSet<String>>>;
 const BANNER: &str = r#"
 \x1b[36m
 
- ██████   ██████   █████████   ███████████   ███████████     ███████    ███████████
-▒▒██████ ██████   ███▒▒▒▒▒███ ▒▒███▒▒▒▒▒███ ▒▒███▒▒▒▒▒███  ███▒▒▒▒▒███ ▒█▒▒▒███▒▒▒█
- ▒███▒█████▒███  ▒███    ▒███  ▒███    ▒███  ▒███    ▒███ ███     ▒▒███▒   ▒███  ▒ 
- ▒███▒▒███ ▒███  ▒███████████  ▒██████████   ▒██████████ ▒███      ▒███    ▒███    
- ▒███ ▒▒▒  ▒███  ▒███▒▒▒▒▒███  ▒███▒▒▒▒▒███  ▒███▒▒▒▒▒███▒███      ▒███    ▒███    
- ▒███      ▒███  ▒███    ▒███  ▒███    ▒███  ▒███    ▒███▒▒███     ███     ▒███    
- █████     █████ █████   █████ █████   █████ ███████████  ▒▒▒███████▒      █████   
-▒▒▒▒▒     ▒▒▒▒▒ ▒▒▒▒▒   ▒▒▒▒▒ ▒▒▒▒▒   ▒▒▒▒▒ ▒▒▒▒▒▒▒▒▒▒▒     ▒▒▒▒▒▒▒       ▒▒▒▒▒    
+███╗   ███╗ █████╗ ██████╗ ██████╗  ██████╗ ████████╗
+████╗ ████║██╔══██╗██╔══██╗██╔══██╗██╔═══██╗╚══██╔══╝
+██╔████╔██║███████║██████╔╝██████╔╝██║   ██║   ██║   
+██║╚██╔╝██║██╔══██║██╔══██╗██╔══██╗██║   ██║   ██║   
+██║ ╚═╝ ██║██║  ██║██║  ██║██████╔╝╚██████╔╝   ██║   
+╚═╝     ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝  ╚═════╝    ╚═╝   
                                                                                                                                                                                                                               
-                    [🤖 WhatsApp Academic Assistant v1.0]
-                              by Gilang & Arya
+         [WhatsApp Academic Assistant v1.0]           
+              Created by Gilang & Arya     
 \x1b[0m"#;
 
 #[derive(Clone)]
@@ -243,14 +241,11 @@ async fn webhook(
                             .unwrap_or(false);
                         
                         if is_image {
-                            
                             let api_key = std::env::var("WAHA_API_KEY")
                                 .unwrap_or_else(|_| "devkey123".to_string());
                             
                             match fetch_image_from_url(media_url, &api_key).await {
-                                Ok(base64) => {
-                                    Some(base64)
-                                }
+                                Ok(base64) => Some(base64),
                                 Err(e) => {
                                     eprintln!("❌ Failed to download image: {}", e);
                                     None
@@ -271,29 +266,72 @@ async fn webhook(
                 None
             };
             
-            // Fetch available courses
+            // Fetch available courses (formatted for AI)
             let courses_result = crud::get_all_courses_formatted(&state.pool).await;
             
             match courses_result {
                 Ok(courses_list) => {
-                    // Extract with AI (now with optional image)
-                    match extract_with_ai(&text, &courses_list, image_base64.as_deref()).await {
-                        Ok(classification) => {
-                            println!("✅ AI Classification: {:?}", classification);
+                    // Fetch active assignments for context
+                    let active_assignments_result = crud::get_active_assignments(&state.pool).await;
+                    
+                    match active_assignments_result {
+                        Ok(active_assignments) => {
+                            // Build course map (simple query: id -> name)
+                            let course_map_result = sqlx::query_as::<_, (uuid::Uuid, String)>(
+                                "SELECT id, name FROM courses"
+                            )
+                            .fetch_all(&state.pool)
+                            .await;
                             
-                            // Handle classification and send to debug group
-                            handle_ai_classification(
-                                state.pool.clone(),
-                                classification,
-                                &payload.payload.id,
-                                &payload.payload.from,
-                                debug_group_id.clone(),
-                            ).await;
+                            match course_map_result {
+                                Ok(courses) => {
+                                    let course_map: std::collections::HashMap<uuid::Uuid, String> = 
+                                        courses.into_iter().collect();
+                                    
+                                    // Extract with AI (now with context)
+                                    match extract_with_ai(
+                                        &text, 
+                                        &courses_list, 
+                                        &active_assignments,
+                                        &course_map,
+                                        image_base64.as_deref()
+                                    ).await {
+                                        Ok(classification) => {
+                                            println!("✅ AI Classification: {:?}\n", classification);
+                                            
+                                            // Handle classification and send to debug group
+                                            handle_ai_classification(
+                                                state.pool.clone(),
+                                                classification,
+                                                &payload.payload.id,
+                                                &payload.payload.from,
+                                                debug_group_id.clone(),
+                                            ).await;
+                                        }
+                                        Err(e) => {
+                                            eprintln!("❌ AI extraction failed: {}", e);
+                                            
+                                            let error_msg = "❌ Failed to process message".to_string();
+                                            if let Err(e) = send_reply(chat_id, &error_msg).await {
+                                                eprintln!("❌ Failed to send error reply: {}", e);
+                                            }
+                                        }
+                                    }
+                                }
+                                Err(e) => {
+                                    eprintln!("❌ Failed to fetch course map: {}", e);
+                                    
+                                    let error_msg = "❌ Failed to fetch course data".to_string();
+                                    if let Err(e) = send_reply(chat_id, &error_msg).await {
+                                        eprintln!("❌ Failed to send error reply: {}", e);
+                                    }
+                                }
+                            }
                         }
                         Err(e) => {
-                            eprintln!("❌ AI extraction failed: {}", e);
+                            eprintln!("❌ Failed to fetch active assignments: {}", e);
                             
-                            let error_msg = "❌ Failed to process message".to_string();
+                            let error_msg = "❌ Failed to fetch assignment context".to_string();
                             if let Err(e) = send_reply(chat_id, &error_msg).await {
                                 eprintln!("❌ Failed to send error reply: {}", e);
                             }
@@ -394,6 +432,7 @@ async fn handle_ai_classification(
                                 deadline_parsed,
                                 None,
                                 Some(description_clone.clone()),
+                                None,
                             ).await {
                                 Ok(updated) => {
                                     let response = format!(
@@ -470,7 +509,7 @@ async fn handle_ai_classification(
             });
         }
         
-        AIClassification::AssignmentUpdate { reference_keywords, changes, new_deadline, new_title, new_description, .. } => {
+        AIClassification::AssignmentUpdate { reference_keywords, changes, new_deadline, new_title, new_description, parallel_code, .. } => {
             println!("🔄 UPDATE DETECTED");
             
             let new_deadline_clone = new_deadline.clone();
@@ -479,8 +518,25 @@ async fn handle_ai_classification(
             let reference_keywords_clone = reference_keywords.clone();
             let new_description_clone = new_description.clone();
             let pool_clone = pool.clone();
+            let parallel_code_clone = parallel_code.clone();
+
+            // Fetch course_map BEFORE spawning
+            let course_map_result = sqlx::query_as::<_, (uuid::Uuid, String)>(
+                "SELECT id, name FROM courses"
+            )
+            .fetch_all(&pool_clone)
+            .await;
             
             tokio::spawn(async move {
+                // Build course_map from the fetched data
+                let course_map: std::collections::HashMap<uuid::Uuid, String> = match course_map_result {
+                    Ok(courses) => courses.into_iter().collect(),
+                    Err(e) => {
+                        eprintln!("❌ Failed to fetch course map: {}", e);
+                        return;
+                    }
+                };
+                
                 // Try to identify course from keywords
                 let mut course_id: Option<uuid::Uuid> = None;
                 let mut course_name: Option<String> = None;
@@ -505,7 +561,8 @@ async fn handle_ai_classification(
                         match parser::ai_extractor::match_update_to_assignment(
                             &changes_clone,
                             &reference_keywords_clone,
-                            &assignments
+                            &assignments,
+                            &course_map
                         ).await {
                             Ok(Some(assignment_id)) => {
                                 let parsed_deadline = if let Some(ref deadline_str) = new_deadline_clone {
@@ -520,6 +577,7 @@ async fn handle_ai_classification(
                                     parsed_deadline,
                                     new_title_clone.clone(),
                                     new_description_clone.clone(),
+                                    parallel_code_clone,
                                 ).await {
                                     Ok(updated) => {
                                         let response = format!(
