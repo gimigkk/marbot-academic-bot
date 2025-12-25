@@ -3,25 +3,37 @@ use uuid::Uuid;
 use serde::Deserialize;
 use serde_json::json;
 use chrono::{Utc, FixedOffset};
+use std::collections::HashMap;
+
+/// Helper to build course_map from assignments and a course lookup
+/// This is a convenience function - you can also pass the map directly
+pub fn build_course_map_from_db_results(
+    courses: &[(Uuid, String)]  // List of (course_id, course_name) tuples
+) -> HashMap<Uuid, String> {
+    courses.iter()
+        .map(|(id, name)| (*id, name.clone()))
+        .collect()
+}
 
 // ===== MODEL CONFIGURATION =====
 
 // Groq models (frontline - fast, vision-capable, high rate limits)
+// Context windows: Scout 128K, Maverick 128K, Llama 3.3 128K, Mixtral 32K
 const GROQ_VISION_MODELS: &[&str] = &[
-    "meta-llama/llama-4-scout-17b-16e-instruct",      // NEW: Llama 4 Scout (fast, multimodal)
-    "meta-llama/llama-4-maverick-17b-128e-instruct",  // NEW: Llama 4 Maverick (powerful)
+    "meta-llama/llama-4-scout-17b-16e-instruct",      // 128K context, fast multimodal
+    "meta-llama/llama-4-maverick-17b-128e-instruct",  // 128K context, powerful
 ];
 
 const GROQ_TEXT_MODELS: &[&str] = &[
-    "llama-3.3-70b-versatile",
-    "mixtral-8x7b-32768",
+    "llama-3.3-70b-versatile",  // 128K context
+    "mixtral-8x7b-32768",       // 32K context
 ];
 
-// Gemini models (fallback - reliable, good for structured data)
+// Gemini models (fallback - reliable, 1M context window for complex reasoning)
 const GEMINI_MODELS: &[&str] = &[
-    "gemini-3-flash-preview",
-    "gemini-2.5-flash",
-    "gemini-2.5-flash-lite",
+    "gemini-3-flash-preview",   // 1M context
+    "gemini-2.5-flash",         // 1M context
+    "gemini-2.5-flash-lite",    // 1M context
 ];
 
 // ===== API RESPONSE STRUCTURES =====
@@ -66,24 +78,35 @@ struct Part {
 // ===== MAIN AI EXTRACTION FUNCTION =====
 
 /// Extract structured info from WhatsApp message
-/// Uses Groq (vision/text) as frontline, Gemini as fallback
+/// Strategy: Groq first (fast, good context), Gemini fallback (huge context, strong reasoning)
 pub async fn extract_with_ai(
     text: &str,
     available_courses: &str,
-    image_base64: Option<&str>, // Base64 encoded image (if present)
+    active_assignments: &[Assignment],
+    course_map: &HashMap<Uuid, String>,  // Map course_id -> course_name
+    image_base64: Option<&str>,
 ) -> Result<AIClassification, String> {
     let current_datetime = get_current_datetime();
     let current_date = get_current_date();
-    let prompt = build_classification_prompt(text, available_courses, &current_datetime, &current_date);
+    let prompt = build_classification_prompt(
+        text, 
+        available_courses, 
+        active_assignments,
+        course_map,
+        &current_datetime, 
+        &current_date
+    );
     
     println!("\x1b[1;30m┌── 🤖 AI PROCESSING ──────────────────────────\x1b[0m");
     println!("│ 📝 Message  : \x1b[36m\"{}\"\x1b[0m", truncate_for_log(text, 60));
     if image_base64.is_some() {
         println!("│ 🖼️  Image   : Detected");
     }
+    println!("│ 📊 Context  : {} active assignments", active_assignments.len());
     println!("│ 📅 Time     : {}", current_datetime);
     
     // TIER 1: Try Groq first (vision if image, text otherwise)
+    // Groq has 128K context - plenty for assignments list
     if let Some(img) = image_base64 {
         match try_groq_vision(&prompt, img).await {
             Ok(classification) => {
@@ -108,7 +131,7 @@ pub async fn extract_with_ai(
         }
     }
     
-    // TIER 2: Fallback to Gemini models
+    // TIER 2: Fallback to Gemini (1M context - overkill but reliable)
     for (index, model) in GEMINI_MODELS.iter().enumerate() {
         println!("│ 🔄 Model    : {} (Gemini Fallback {}/{})", model, index + 1, GEMINI_MODELS.len());
         
@@ -186,7 +209,7 @@ async fn try_groq_vision(prompt: &str, image_base64: &str) -> Result<AIClassific
         let status = response.status();
         
         if status.is_success() {
-            println!("│ \x1b[32m✅ SUCCESS\x1b[0m  : Groq Vision response");
+            println!("│ \x1b[32m✅ SUCCESS\x1b[0m    : Groq Vision response");
             
             let groq_response: GroqResponse = response.json().await
                 .map_err(|e| format!("Failed to deserialize Groq response: {}", e))?;
@@ -269,7 +292,7 @@ async fn try_groq_text(prompt: &str) -> Result<AIClassification, String> {
         let status = response.status();
         
         if status.is_success() {
-            println!("│ \x1b[32m✅ SUCCESS\x1b[0m  : Groq Text response");
+            println!("│ \x1b[32m✅ SUCCESS\x1b[0m    : Groq Text response");
             
             let groq_response: GroqResponse = response.json().await
                 .map_err(|e| format!("Failed to deserialize Groq response: {}", e))?;
@@ -351,7 +374,7 @@ async fn try_gemini_model(model: &str, prompt: &str) -> Result<AIClassification,
         return Err(format!("Status {}: {}", status, truncate_for_log(&error_text, 60)));
     }
     
-    println!("│ \x1b[32m✅ SUCCESS\x1b[0m  : Gemini response");
+    println!("│ \x1b[32m✅ SUCCESS\x1b[0m    : Gemini response");
     
     let gemini_response: GeminiResponse = response.json().await
         .map_err(|e| format!("Failed to deserialize: {}", e))?;
@@ -367,23 +390,24 @@ async fn try_gemini_model(model: &str, prompt: &str) -> Result<AIClassification,
 // for complex reasoning about temporal context and semantic matching
 
 /// Use AI to match an update to a specific assignment
-/// Uses ONLY Gemini models (needs the bigger brain for complex matching)
+/// Uses ONLY Gemini models (needs the 1M context for complex matching logic)
 pub async fn match_update_to_assignment(
     changes: &str,
     keywords: &[String],
     active_assignments: &[Assignment],
+    course_map: &HashMap<Uuid, String>,
 ) -> Result<Option<Uuid>, String> {
     let api_key = std::env::var("GEMINI_API_KEY")
         .map_err(|_| "GEMINI_API_KEY not set in .env".to_string())?;
     
-    let prompt = build_matching_prompt(changes, keywords, active_assignments);
+    let prompt = build_matching_prompt(changes, keywords, active_assignments, course_map);
     
     println!("\x1b[1;30m┌── 🤖 AI MATCHING (GEMINI ONLY) ─────────────\x1b[0m");
-    println!("│ 🔍 Keywords : {:?}", keywords);
+    println!("│ 🔍 Keywords   : {:?}", keywords);
     
-    // Use ONLY Gemini for matching (needs better reasoning)
+    // Use ONLY Gemini for matching (needs better reasoning + 1M context)
     for (index, model) in GEMINI_MODELS.iter().enumerate() {
-        println!("│ 🔄 Model    : {} (Attempt {}/{})", model, index + 1, GEMINI_MODELS.len());
+        println!("│ 🔄 Model      : {} (Attempt {}/{})", model, index + 1, GEMINI_MODELS.len());
         
         let url = format!(
             "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent?key={}",
@@ -415,14 +439,19 @@ pub async fn match_update_to_assignment(
         let status = response.status();
         
         if status.is_success() {
-            println!("│ \x1b[32m✅ SUCCESS\x1b[0m  : Match analysis complete");
+            println!("│ \x1b[32m✅ SUCCESS\x1b[0m    : Match analysis complete");
             
             let gemini_response: GeminiResponse = response.json().await
                 .map_err(|e| e.to_string())?;
             let ai_text = extract_ai_text(&gemini_response)?;
             
+            // Parse result BEFORE closing the box (so confidence/reason appear inside)
+            let result = parse_match_result(ai_text)?;
+            
+            // Now close the box after all output
             println!("\x1b[1;30m└──────────────────────────────────────────────\x1b[0m");
-            return parse_match_result(ai_text);
+            
+            return Ok(result);
         }
         
         // Handle rate limit
@@ -451,8 +480,64 @@ pub async fn match_update_to_assignment(
 
 // ===== PROMPT BUILDERS =====
 
+/// Build assignment context list for the prompt
+/// Limit to 100 most recent to stay within token budgets
+fn build_context_assignments_list(
+    active_assignments: &[Assignment],
+    course_map: &HashMap<Uuid, String>
+) -> String {
+    if active_assignments.is_empty() {
+        return "No active assignments in database.".to_string();
+    }
+    
+    // Take up to 100 most recent assignments (sorted by created_at desc in query)
+    let assignments_to_show = active_assignments.iter().take(100);
+    let count = active_assignments.len().min(100);
+    
+    let list = assignments_to_show
+        .map(|a| {
+            let deadline = a.deadline
+                .map(|d| d.format("%Y-%m-%d").to_string())
+                .unwrap_or_else(|| "No deadline".to_string());
+            let parallel = a.parallel_code.as_deref().unwrap_or("N/A");
+            
+            // Get course name from map, fallback to "Unknown Course" if not found
+            let course_name = a.course_id
+                .and_then(|id| course_map.get(&id))
+                .map(|s| s.as_str())
+                .unwrap_or("Unknown Course");
+            
+            format!(
+                "- Course: {}, Title: \"{}\", Deadline: {}, Parallel: {}, Desc: \"{}\"",
+                course_name,
+                a.title,
+                deadline,
+                parallel,
+                truncate_for_log(&a.description, 80)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    
+    if active_assignments.len() > 100 {
+        format!("{}\n(Showing {} most recent out of {} total active assignments)", 
+            list, count, active_assignments.len())
+    } else {
+        list
+    }
+}
+
 /// Build the classification prompt for AI models
-fn build_classification_prompt(text: &str, available_courses: &str, current_datetime: &str, current_date: &str) -> String {
+fn build_classification_prompt(
+    text: &str, 
+    available_courses: &str, 
+    active_assignments: &[Assignment],
+    course_map: &HashMap<Uuid, String>,
+    current_datetime: &str, 
+    current_date: &str
+) -> String {
+    let assignments_context = build_context_assignments_list(active_assignments, course_map);
+    
     format!(
         r#"Classify this WhatsApp academic message. Return ONLY valid JSON, NO markdown.
 
@@ -462,46 +547,87 @@ TODAY'S DATE: {}
 Available courses with their aliases:
 {}
 
+ACTIVE ASSIGNMENTS IN DATABASE (for context - check before classifying as new):
+{}
+
 Message: "{}"
 
 Output ONE of these exact formats:
 
-NEW assignment:
+NEW assignment (ONLY if this is clearly a FIRST mention NOT in database above):
 {{"type":"assignment_info","course_name":"Pemrograman","title":"Tugas Bab 2","deadline":"2025-12-31","description":"Brief description","parallel_code":"K1"}}
 
-UPDATE to existing assignment:
-{{"type":"assignment_update","reference_keywords":["pemrograman","bab 2"],"changes":"deadline moved to 2025-12-05","new_deadline":"2025-12-05","new_title":null,"new_description":null}}
+UPDATE to existing assignment (if referencing an assignment that EXISTS in database above):
+{{"type":"assignment_update","reference_keywords":["pemrograman","bab 2"],"changes":"deadline moved to 2025-12-05","new_deadline":"2025-12-05","new_title":null,"new_description":null,"parallel_code":"K1"}}
 
 Other/unclear:
 {{"type":"unrecognized"}}
 
-RULES:
-- Use FORMAL course name in "course_name" field (e.g., "Pemrograman" not "pemrog")
-- Match course aliases case-insensitively (pemrog → Pemrograman, GKV → Grafika Komputer dan Visualisasi)
-- For relative dates:
-  * "hari ini" (today) = {}
-  * "besok" (tomorrow) = add 1 day
-  * "minggu depan" (next week) = add 7 days
-  * "senin/selasa/etc" = find next occurrence of that day
-- For recurring assignments (LKP, weekly tasks):
-  * If message contains assignment name + deadline but NO prior context, classify as "assignment_info"
-  * Example: "LKP 13 deadline tonight" → assignment_info (could be first mention of LKP 13)
-  * Only use "assignment_update" if message clearly references a change/reminder to existing assignment
-- For "assignment_update":
-  * "reference_keywords" must include course name/alias AND specific assignment identifiers
-  * Example: ["pemrograman", "bab 2"] or ["GKV", "matriks"]
-  * Use 2-4 keywords that uniquely identify the assignment
-  * If the update provides specific details that would make a better title than the existing generic one (e.g., "Tugas baru"), set "new_title" to a descriptive title
-  * Example: existing title "Tugas baru" + update mentions "figma prototype pertemuan 4" → new_title: "Figma Prototype Pertemuan 4"
-  * Only set "new_title" if current title is too generic (like "Tugas baru", "Assignment", "Tugas") AND update provides specific details
-- "changes" field should briefly describe what changed
-- All dates in YYYY-MM-DD format
-- Use null for unchanged fields
-- parallel_code format: K1, K2, K3, P1, P2, P3 etc (uppercase K/P)
-- If message contains an image, extract ALL text from the image and include it in your analysis"#,
+CRITICAL CLASSIFICATION RULES:
+1. **Check ACTIVE ASSIGNMENTS FIRST**: Before classifying as "assignment_info", verify if similar assignment already exists
+   - Match by: course name + assignment title/topic + parallel code
+   - If found → classify as "assignment_update"
+   - If NOT found → classify as "assignment_info"
+
+2. **Reference Keywords for Updates**: Use 2-4 specific keywords that identify the assignment
+   - MUST include: course name/alias
+   - SHOULD include: specific topic/chapter/week number
+   - Example: ["pemrograman", "bab 2"] or ["GKV", "matriks", "pertemuan 4"]
+
+3. **Parallel Code Handling**:
+   - ALWAYS include parallel_code in BOTH assignment_info AND assignment_update responses
+   - Format: K1, K2, K3, P1, P2, P3 (uppercase K/P + number)
+   - If mentioned in message, extract it
+   - If not mentioned but can be inferred from existing assignment, include it
+   - If unknown, set to null
+
+4. **Title Improvements**: If updating generic title + message has specific details
+   - Generic titles: "Tugas baru", "Assignment", "Tugas", "New task"
+   - Set "new_title" to descriptive title from update details
+   - Example: "Tugas baru" + update mentions "figma prototype" → new_title: "Figma Prototype Pertemuan 4"
+
+5. **Recurring Assignments** (LKP, Lab, Weekly tasks):
+   - Check if assignment with same pattern exists (e.g., "LKP 13", "Lab Week 5")
+   - If EXISTS → "assignment_update"
+   - If NOT EXISTS + clear new assignment language → "assignment_info"
+   - If UNCLEAR → prefer "assignment_update" for known recurring patterns
+
+6. **Date Handling**: Convert relative dates to YYYY-MM-DD
+   - "hari ini" (today) = {}
+   - "besok" (tomorrow) = add 1 day
+   - "minggu depan" (next week) = add 7 days
+   - "senin/selasa/rabu/etc" = next occurrence of that weekday
+
+7. **Course Name Normalization**:
+   - Always use FORMAL course name in "course_name" field
+   - Match aliases case-insensitively: pemrog → Pemrograman, GKV → Grafika Komputer dan Visualisasi
+
+8. **Image Handling**: If message has image, extract ALL visible text and integrate into analysis
+
+EXAMPLES:
+Message: "LKP 13 deadline tonight K1"
+- Check database: Found "LKP 13" with deadline 2025-12-30
+- Result: {{"type":"assignment_update","reference_keywords":["pemrograman","LKP 13"],"changes":"deadline changed to tonight","new_deadline":"2025-12-26","new_title":null,"new_description":null,"parallel_code":"K1"}}
+
+Message: "LKP 14 due next Monday K2"  
+- Check database: No "LKP 14" found
+- Result: {{"type":"assignment_info","course_name":"Pemrograman","title":"LKP 14","deadline":"2025-12-29","description":"Weekly programming assignment","parallel_code":"K2"}}
+
+Message: "Tugas baru deadline besok" (existing generic title "Tugas baru" in DB with K1)
+- Check database: Found generic "Tugas baru" with parallel_code K1
+- No specific details to improve title
+- Result: {{"type":"assignment_update","reference_keywords":["pemrograman","tugas"],"changes":"deadline set to tomorrow","new_deadline":"2025-12-27","new_title":null,"new_description":null,"parallel_code":"K1"}}
+
+Message: "Itu figma prototype pertemuan 4 ya K3" (existing title "Tugas baru" in DB)
+- Check database: Found generic "Tugas baru" 
+- Update has specific details and parallel code
+- Result: {{"type":"assignment_update","reference_keywords":["desain","tugas"],"changes":"clarified as figma prototype for meeting 4","new_deadline":null,"new_title":"Figma Prototype Pertemuan 4","new_description":"Figma prototype assignment for meeting 4","parallel_code":"K3"}}
+
+Return ONLY valid JSON, no explanations or markdown formatting."#,
         current_datetime,
         current_date,
         available_courses,
+        assignments_context,
         text,
         current_date
     )
@@ -511,7 +637,8 @@ RULES:
 fn build_matching_prompt(
     changes: &str, 
     keywords: &[String], 
-    assignments: &[Assignment]
+    assignments: &[Assignment],
+    course_map: &HashMap<Uuid, String>
 ) -> String {
     let assignments_list = assignments
         .iter()
@@ -525,6 +652,12 @@ fn build_matching_prompt(
                 .as_deref()
                 .unwrap_or("N/A");
             
+            // Get course name from map
+            let course_name = a.course_id
+                .and_then(|id| course_map.get(&id))
+                .map(|s| s.as_str())
+                .unwrap_or("Unknown Course");
+            
             // Calculate how long ago this assignment was created
             let created_ago = Utc::now().signed_duration_since(a.created_at);
             let time_ago = if created_ago.num_minutes() < 60 {
@@ -536,11 +669,12 @@ fn build_matching_prompt(
             };
             
             format!(
-                "Assignment #{}:\n  ID: {}\n  Title: \"{}\"\n  Description: \"{}\"\n  Deadline: {}\n  Parallel: {}\n  ⏱️ Created: {} ({})",
+                "Assignment #{}:\n  ID: {}\n  Course: {}\n  Title: \"{}\"\n  Description: \"{}\"\n  Deadline: {}\n  Parallel: {}\n  ⏱️ Created: {} ({})",
                 i + 1,
                 a.id,
+                course_name,
                 a.title,
-                a.description,
+                truncate_for_log(&a.description, 100),
                 deadline_str,
                 parallel_str,
                 a.created_at.format("%Y-%m-%d %H:%M:%S"),
