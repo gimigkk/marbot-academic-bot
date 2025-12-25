@@ -17,7 +17,7 @@ impl Whitelist {
                 let trimmed = channel.trim();
                 if !trimmed.is_empty() {
                     academic_channels.insert(trimmed.to_string());
-                    println!("📝 Whitelisted academic channel: {}", trimmed);
+                    //println!("📝 Whitelisted academic channel: {}", trimmed);
                 }
             }
         }

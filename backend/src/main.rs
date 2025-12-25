@@ -8,6 +8,7 @@ use axum::http::StatusCode;
 use std::collections::HashSet;
 use std::net::SocketAddr;
 use std::sync::Arc;  
+use std::io::Write;
 use tokio::sync::Mutex;  
 use tokio::net::TcpListener;
 use sqlx::PgPool;
@@ -82,14 +83,19 @@ async fn main() {
     println!("    ├─ 🔌 WAHA API     : {}", waha_status);
 
     // 3. Koneksi Database
-    print!("    ├─ 🗄️  Database     : ");
+    print!("    ├─ 🗄️  Database     : 🔌 Connecting...");
+    std::io::stdout().flush().unwrap();
+
     let pool = match database::pool::create_pool().await {
         Ok(p) => {
-            println!("\x1b[32m✅ CONNECTED\x1b[0m");
+            // Use \x1b[K to clear from cursor to end of line
+            print!("\r    ├─ 🗄️  Database     : \x1b[32m✅ CONNECTED\x1b[0m\x1b[K\n");
+            std::io::stdout().flush().unwrap();
             p
         }
         Err(e) => {
-            println!("\x1b[31m❌ FAILED\x1b[0m");
+            print!("\r    ├─ 🗄️  Database     : \x1b[31m❌ FAILED\x1b[0m\x1b[K\n");
+            std::io::stdout().flush().unwrap();
             eprintln!("       └─ Error: {}", e);
             return;
         }
@@ -226,13 +232,52 @@ async fn webhook(
         MessageType::NeedsAI(text) => {
             println!("🤖 Processing with AI...");
             
+            // Check if message has media (image)
+            let image_base64 = if payload.payload.has_media.unwrap_or(false) {
+                if let Some(ref media) = payload.payload.media {
+                    if let Some(ref media_url) = media.url {
+                        // Check if it's an image
+                        let is_image = media.mimetype
+                            .as_ref()
+                            .map(|m| m.starts_with("image/"))
+                            .unwrap_or(false);
+                        
+                        if is_image {
+                            
+                            let api_key = std::env::var("WAHA_API_KEY")
+                                .unwrap_or_else(|_| "devkey123".to_string());
+                            
+                            match fetch_image_from_url(media_url, &api_key).await {
+                                Ok(base64) => {
+                                    Some(base64)
+                                }
+                                Err(e) => {
+                                    eprintln!("❌ Failed to download image: {}", e);
+                                    None
+                                }
+                            }
+                        } else {
+                            println!("⚠️  Media is not an image: {:?}", media.mimetype);
+                            None
+                        }
+                    } else {
+                        eprintln!("⚠️  hasMedia=true but no URL (check WHATSAPP_DOWNLOAD_MEDIA config)");
+                        None
+                    }
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+            
             // Fetch available courses
             let courses_result = crud::get_all_courses_formatted(&state.pool).await;
             
             match courses_result {
                 Ok(courses_list) => {
-                    // Extract with AI
-                    match extract_with_ai(&text, &courses_list).await {
+                    // Extract with AI (now with optional image)
+                    match extract_with_ai(&text, &courses_list, image_base64.as_deref()).await {
                         Ok(classification) => {
                             println!("✅ AI Classification: {:?}", classification);
                             
@@ -635,4 +680,63 @@ fn extract_parallel_code(title: &str) -> Option<String> {
         }
     }
     None
+}
+
+async fn fetch_image_from_url(url: &str, api_key: &str) -> Result<String, String> {
+    // Fix URL if needed
+    let corrected_url = url.replace("http://localhost:3000", "http://localhost:3001");
+    
+    println!("   📡 Downloading: {}", corrected_url);
+    
+    let client = reqwest::Client::new();
+    let response = client
+        .get(&corrected_url)
+        .header("X-Api-Key", api_key)
+        .send()
+        .await
+        .map_err(|e| format!("Request failed: {}", e))?;
+    
+    if !response.status().is_success() {
+        return Err(format!("HTTP error: {}", response.status()));
+    }
+    
+    let image_bytes = response.bytes().await
+        .map_err(|e| format!("Failed to read bytes: {}", e))?;
+    
+    // Check size and compress if needed
+    let base64_size_mb = (image_bytes.len() * 4 / 3) as f64 / 1_000_000.0;
+    
+    
+    if base64_size_mb > 3.5 {
+        println!("   🔄 Compressing image (too large for Groq)...");
+        
+        // Use the older, more compatible image loading API
+        use image::io::Reader as ImageReader;
+        use std::io::Cursor;
+        
+        let img = ImageReader::new(Cursor::new(&image_bytes))
+            .with_guessed_format()
+            .map_err(|e| format!("Failed to guess format: {}", e))?
+            .decode()
+            .map_err(|e| format!("Failed to decode image: {}", e))?;
+        
+        // Resize to max 2048px on longest side
+        let img = img.thumbnail(2048, 2048);
+        
+        // Re-encode as JPEG with compression
+        let mut compressed_bytes = Vec::new();
+        let mut cursor = Cursor::new(&mut compressed_bytes);
+        img.write_to(&mut cursor, image::ImageOutputFormat::Jpeg(80))
+            .map_err(|e| format!("Failed to compress: {}", e))?;
+        
+        let compressed_size_mb = (compressed_bytes.len() * 4 / 3) as f64 / 1_000_000.0;
+        println!("   ✅ Compressed to: {:.2} MB", compressed_size_mb);
+        
+        use base64::{Engine as _, engine::general_purpose};
+        Ok(general_purpose::STANDARD.encode(&compressed_bytes))
+    } else {
+        // Image is already small enough
+        use base64::{Engine as _, engine::general_purpose};
+        Ok(general_purpose::STANDARD.encode(&image_bytes))
+    }
 }
