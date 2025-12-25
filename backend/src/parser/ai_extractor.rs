@@ -52,13 +52,14 @@ pub async fn extract_with_ai(
     
     let prompt = build_classification_prompt(text, available_courses, &current_datetime, &current_date);
     
-    println!("🤖 Sending to Gemini AI...");
-    println!("📝 Message: {}", truncate_for_log(text, 100));
-    println!("📅 Current time (GMT+7): {}", current_datetime);
+    // LOGGING KEREN DIMULAI DISINI
+    println!("\x1b[1;30m┌── 🤖 AI PROCESSING ──────────────────────────\x1b[0m");
+    println!("│ 📝 Message  : \x1b[36m\"{}\"\x1b[0m", truncate_for_log(text, 60));
+    println!("│ 📅 Time     : {}", current_datetime);
     
     // Try each model in sequence until one succeeds
     for (index, model) in GEMINI_MODELS.iter().enumerate() {
-        println!("🔄 Attempting with model: {}", model);
+        println!("│ 🔄 Model    : {} (Attempt {}/{})", model, index + 1, GEMINI_MODELS.len());
         
         let url = format!(
             "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent?key={}",
@@ -82,7 +83,7 @@ pub async fn extract_with_ai(
         let response = match client.post(&url).json(&request_body).send().await {
             Ok(r) => r,
             Err(e) => {
-                eprintln!("❌ Request failed for {}: {}", model, e);
+                eprintln!("│ \x1b[31m❌ REQUEST FAILED\x1b[0m : {}", e);
                 continue;
             }
         };
@@ -90,13 +91,14 @@ pub async fn extract_with_ai(
         let status = response.status();
         
         if status.is_success() {
-            println!("✅ Success with model: {}", model);
+            println!("│ \x1b[32m✅ SUCCESS\x1b[0m  : Response received");
             
             let gemini_response: GeminiResponse = response.json().await
                 .map_err(|e| format!("Failed to deserialize Gemini response: {}", e))?;
             
             let ai_text = extract_ai_text(&gemini_response)?;
-            println!("🤖 Gemini response: {}", ai_text);
+            println!("│ 📄 Result   : {}", truncate_for_log(ai_text, 80));
+            println!("\x1b[1;30m└──────────────────────────────────────────────\x1b[0m");
             
             return parse_classification(ai_text);
         }
@@ -106,19 +108,19 @@ pub async fn extract_with_ai(
             let error_text = response.text().await
                 .unwrap_or_else(|_| "Unknown error".to_string());
             
-            eprintln!("⚠️  Rate limit exceeded for model: {}", model);
+            eprintln!("│ ⚠️  RATE LIMIT: {}", model);
             
             if let Ok(error_json) = serde_json::from_str::<serde_json::Value>(&error_text) {
                 if let Some(retry_info) = extract_retry_delay(&error_json) {
-                    eprintln!("   Retry after: {}", retry_info);
+                    eprintln!("│    Retry after: {}", retry_info);
                 }
             }
             
             // If this is not the last model, try the next one
             if index < GEMINI_MODELS.len() - 1 {
-                println!("🔄 Falling back to next model...");
                 continue;
             } else {
+                println!("\x1b[1;30m└──────────────────────────────────────────────\x1b[0m");
                 return Err("All models are rate limited. Try again later.".to_string());
             }
         }
@@ -127,17 +129,18 @@ pub async fn extract_with_ai(
         let error_text = response.text().await
             .unwrap_or_else(|_| "Unknown error".to_string());
         
-        eprintln!("❌ Error with model {}: {} - {}", model, status, error_text);
+        eprintln!("│ ❌ ERROR    : {} - {}", status, error_text);
         
         // Try next model
         if index < GEMINI_MODELS.len() - 1 {
-            println!("🔄 Trying next model...");
             continue;
         } else {
+            println!("\x1b[1;30m└──────────────────────────────────────────────\x1b[0m");
             return Err(format!("All models failed. Last error: {} - {}", status, error_text));
         }
     }
     
+    println!("\x1b[1;30m└──────────────────────────────────────────────\x1b[0m");
     Err("No models available".to_string())
 }
 
@@ -155,11 +158,12 @@ pub async fn match_update_to_assignment(
     
     let prompt = build_matching_prompt(changes, keywords, active_assignments);
     
-    println!("🤖 Asking AI to match update to assignment...");
+    println!("\x1b[1;30m┌── 🤖 AI MATCHING ────────────────────────────\x1b[0m");
+    println!("│ 🔍 Keywords : {:?}", keywords);
     
     // Try each model in sequence until one succeeds
     for (index, model) in GEMINI_MODELS.iter().enumerate() {
-        println!("🔄 Attempting match with model: {}", model);
+        println!("│ 🔄 Model    : {}", model);
         
         let url = format!(
             "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent?key={}",
@@ -183,7 +187,7 @@ pub async fn match_update_to_assignment(
         let response = match client.post(&url).json(&request_body).send().await {
             Ok(r) => r,
             Err(e) => {
-                eprintln!("❌ Request failed for {}: {}", model, e);
+                eprintln!("│ ❌ Failed   : {}", e);
                 continue;
             }
         };
@@ -191,41 +195,37 @@ pub async fn match_update_to_assignment(
         let status = response.status();
         
         if status.is_success() {
-            println!("✅ Match success with model: {}", model);
+            println!("│ \x1b[32m✅ SUCCESS\x1b[0m  : Match Found");
             
             let gemini_response: GeminiResponse = response.json().await
                 .map_err(|e| e.to_string())?;
             let ai_text = extract_ai_text(&gemini_response)?;
             
-            println!("🤖 AI match result: {}", ai_text);
-            
+            println!("\x1b[1;30m└──────────────────────────────────────────────\x1b[0m");
             return parse_match_result(ai_text);
         }
         
         // Handle rate limit
         if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
-            eprintln!("⚠️  Rate limit exceeded for model: {}", model);
-            
             // If this is not the last model, try the next one
             if index < GEMINI_MODELS.len() - 1 {
-                println!("🔄 Falling back to next model for matching...");
                 continue;
             } else {
-                return Err("All models are rate limited for matching. Try again later.".to_string());
+                println!("\x1b[1;30m└──────────────────────────────────────────────\x1b[0m");
+                return Err("All models are rate limited for matching.".to_string());
             }
         }
-        
-        // Handle other errors
-        eprintln!("❌ Matching failed with model {}: {}", model, status);
         
         // Try next model
         if index < GEMINI_MODELS.len() - 1 {
             continue;
         } else {
+            println!("\x1b[1;30m└──────────────────────────────────────────────\x1b[0m");
             return Err(format!("AI matching failed with all models: {}", status));
         }
     }
     
+    println!("\x1b[1;30m└──────────────────────────────────────────────\x1b[0m");
     Err("No models available for matching".to_string())
 }
 
@@ -430,17 +430,17 @@ fn parse_classification(ai_text: &str) -> Result<AIClassification, String> {
         .trim_end_matches("```")
         .trim();
     
-    println!("🧹 Cleaned: {}", cleaned);
+    // println!("🧹 Cleaned: {}", cleaned); // Commented out to reduce noise
     
     if !is_valid_json_object(cleaned) {
         eprintln!("⚠️  Response is not a valid JSON object");
-        eprintln!("   Got: {}", cleaned);
+        // eprintln!("   Got: {}", cleaned);
         return Ok(AIClassification::Unrecognized);
     }
     
     match serde_json::from_str::<AIClassification>(cleaned) {
         Ok(classification) => {
-            println!("✅ Parsed classification: {:?}", classification);
+            // println!("✅ Parsed classification: {:?}", classification);
             Ok(classification)
         }
         Err(e) => {
@@ -469,9 +469,9 @@ fn parse_match_result(ai_text: &str) -> Result<Option<Uuid>, String> {
     
     match serde_json::from_str::<MatchResult>(cleaned) {
         Ok(result) => {
-            println!("🔍 Match confidence: {}", result.confidence);
+            println!("│ 🔍 Confidence : {}", result.confidence);
             if let Some(ref reason) = result.reason {
-                println!("   Reason: {}", reason);
+                println!("│ 📝 Reason     : {}", truncate_for_log(reason, 60));
             }
             
             if result.confidence == "high" {
@@ -481,12 +481,12 @@ fn parse_match_result(ai_text: &str) -> Result<Option<Uuid>, String> {
                     Ok(None)
                 }
             } else {
-                println!("⚠️ AI has low confidence in match");
+                println!("│ ⚠️ Low confidence match");
                 Ok(None)
             }
         }
         Err(e) => {
-            eprintln!("❌ Failed to parse match result: {}", e);
+            eprintln!("│ ❌ Failed to parse match result: {}", e);
             Ok(None)
         }
     }
@@ -501,10 +501,11 @@ fn is_valid_json_object(s: &str) -> bool {
 
 /// Truncate text for logging
 fn truncate_for_log(text: &str, max_len: usize) -> String {
-    if text.len() <= max_len {
-        text.to_string()
+    let clean_text = text.replace('\n', " "); // Remove newlines for cleaner logs
+    if clean_text.len() <= max_len {
+        clean_text
     } else {
-        format!("{}...", &text[..max_len])
+        format!("{}...", &clean_text[..max_len])
     }
 }
 
