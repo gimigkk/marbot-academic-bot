@@ -97,7 +97,7 @@ pub async fn extract_with_ai(
                 .map_err(|e| format!("Failed to deserialize Gemini response: {}", e))?;
             
             let ai_text = extract_ai_text(&gemini_response)?;
-            println!("│ 📄 Result   : {}", truncate_for_log(ai_text, 80));
+            println!("│ 📄 Result   : {}", truncate_for_log(ai_text, 60));
             println!("\x1b[1;30m└──────────────────────────────────────────────\x1b[0m");
             
             return parse_classification(ai_text);

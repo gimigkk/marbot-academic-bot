@@ -68,7 +68,7 @@ pub async fn create_assignment(
     .await?;
 
     tx.commit().await?;
-    Ok(format!("Sukses! Tugas '{}' berhasil disimpan ke matkul '{}'", new_assignment.title, real_course_name))
+    Ok(format!("Sukses! Tugas '{}' berhasil disimpan ke matkul '{}'\n", new_assignment.title, real_course_name))
 }
 
 
@@ -174,7 +174,7 @@ pub async fn get_active_assignments_sorted(pool: &PgPool) -> Result<Vec<Assignme
     .fetch_all(pool)
     .await?;
     
-    println!("✅ Found {} active assignments", assignments.len());
+    println!("✅ Found {} active assignments\n", assignments.len());
     
     Ok(assignments)
 }

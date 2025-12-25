@@ -18,7 +18,7 @@ pub async fn handle_command(
 ) -> CommandResponse {
     match cmd {
         BotCommand::Ping => {
-            println!("🏓 Ping command received from {}", user_phone);
+            println!("🏓 Ping command received from {}\n", user_phone);
             CommandResponse::Text("Ilkom Jaya Jaya Jaya!!!!! ✅".to_string())
         }
 
@@ -173,7 +173,7 @@ pub async fn handle_command(
         }
 
         BotCommand::Done(id) => {
-            println!("✅ Done command for assignment {} from {}", id, user_phone);
+            println!("✅ Done command for assignment {} from {}\n", id, user_phone);
             // TODO: Update database (fitur selesai belum ada di repo ini)
             CommandResponse::Text(format!(
                 "✅ Oke!\nTugas *#{}* akan ditandai selesai setelah fitur penyelesaian tugas diaktifkan.\n\nKetik *#tugas* untuk lihat daftar.",
@@ -182,7 +182,7 @@ pub async fn handle_command(
         }
 
         BotCommand::Help => {
-            println!("❓ Help command received from {}", user_phone);
+            println!("❓ Help command received from {}\n", user_phone);
             CommandResponse::Text(
                 "🤖 *MAA — Academic Bot*\n\n\
 *Perintah penting:*\n\
@@ -199,7 +199,7 @@ _Tips: Kirim info tugas di grup akademik, nanti saya simpan otomatis._"
         }
 
         BotCommand::UnknownCommand(cmd) => {
-            println!("❓ Unknown command '{}' from {}", cmd, user_phone);
+            println!("❓ Unknown command '{}' from {}\n", cmd, user_phone);
             CommandResponse::Text(format!(
                 "❓ Command tidak dikenali: *{}*\n\nKetik *#help* untuk melihat daftar command yang tersedia.",
                 sanitize_wa_md(&cmd)
