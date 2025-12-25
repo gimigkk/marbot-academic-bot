@@ -31,11 +31,101 @@ use whitelist::Whitelist;
 
 type MessageCache = Arc<Mutex<HashSet<String>>>;
 
+
+const BANNER: &str = r#"
+\x1b[36m
+    __  ___  ___    ____   ____   ____  ______
+   /  |/  / / _ |  / __ \ / __ ) / __ \/_  __/
+  / /|_/ / / __ | / /_/ // __  |/ / / / / /   
+ /_/  /_/ /_/ |_|/_, _//____/ \____/ /_/    
+                                              
+      🤖 WhatsApp Academic Assistant v1.0
+\x1b[0m"#;
+
 #[derive(Clone)]
 struct AppState {
     cache: MessageCache,
     whitelist: Arc<Whitelist>,
     pool: PgPool,
+}
+
+#[tokio::main]
+async fn main() {
+    dotenv::dotenv().ok();
+
+    // 1. Tampilan Awal (Clear Screen & Banner)
+    print!("\x1b[2J\x1b[1;1H"); 
+    println!("{}", BANNER);
+    println!("\x1b[1;30m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\x1b[0m");
+
+    // 2. Cek Environment Variables
+    let gemini_status = if std::env::var("GEMINI_API_KEY").is_ok() {
+        "\x1b[32m✅ READY\x1b[0m"
+    } else {
+        "\x1b[31m❌ MISSING\x1b[0m"
+    };
+
+    let waha_status = if std::env::var("WAHA_API_KEY").is_ok() {
+        "\x1b[32m✅ READY\x1b[0m"
+    } else {
+        "\x1b[33m⚠️  DEFAULT\x1b[0m"
+    };
+
+    println!(" 🔧 \x1b[1mSYSTEM CHECK\x1b[0m");
+    println!("    ├─ 🧠 Gemini AI    : {}", gemini_status);
+    println!("    ├─ 🔌 WAHA API     : {}", waha_status);
+
+    // 3. Koneksi Database
+    print!("    ├─ 🗄️  Database     : ");
+    let pool = match database::pool::create_pool().await {
+        Ok(p) => {
+            println!("\x1b[32m✅ CONNECTED\x1b[0m");
+            p
+        }
+        Err(e) => {
+            println!("\x1b[31m❌ FAILED\x1b[0m");
+            eprintln!("       └─ Error: {}", e);
+            return;
+        }
+    };
+
+    let whitelist = Arc::new(Whitelist::new());
+    let cache = Arc::new(Mutex::new(HashSet::new()));
+
+    // 4. Jalankan Scheduler
+    let pool_for_scheduler = pool.clone();
+    tokio::spawn(async move {
+       
+        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+        if let Err(e) = scheduler::start_scheduler(pool_for_scheduler).await {
+            eprintln!("\n\x1b[31m❌ Scheduler Error: {:?}\x1b[0m", e);
+        }
+    });
+    println!("    └─ ⏰ Scheduler    : \x1b[32m✅ RUNNING\x1b[0m");
+
+    let state = AppState { 
+        cache, 
+        whitelist, 
+        pool
+    };
+    
+    let app = Router::new()
+        .route("/webhook", post(webhook))
+        .with_state(state);
+
+    let port = 3000;
+    let addr = SocketAddr::from(([0, 0, 0, 0], port));
+
+    println!("\x1b[1;30m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\x1b[0m");
+    println!(" 🚀 \x1b[1;32mMARBOT IS ONLINE!\x1b[0m");
+    println!("    📡 Listening on   : \x1b[36mhttp://0.0.0.0:{}\x1b[0m", port);
+    println!("    📍 Webhook URL    : \x1b[36mhttp://localhost:{}/webhook\x1b[0m", port);
+    println!("\x1b[1;30m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\x1b[0m");
+    println!("\nWaiting for incoming messages...\n");
+
+    let listener = TcpListener::bind(addr).await.unwrap();
+
+    axum::serve(listener, app).await.unwrap();
 }
 
 async fn webhook(
@@ -256,13 +346,14 @@ async fn handle_ai_classification(
                             ).await {
                                 Ok(updated) => {
                                     let response = format!(
-                                        "🔄 *Assignment Updated!*\n\n\
-                                        📝 {}\n\
+                                        "🔄 *INFO TUGAS DIPERBARUI*\n\
+                                        ━━━━━━━━━━━━━━━━━━\n\
+                                        📝 *{}*\n\
+                                        ⚠️ _Terdeteksi duplikat, data diupdate_\n\
                                         📅 Due: {}\n\
-                                        📄 {}",
+                                        ━━━━━━━━━━━━━━━━━━",
                                         updated.title,
-                                        deadline_for_response.unwrap_or("No due date".to_string()),
-                                        description_clone
+                                        deadline_for_response.unwrap_or("No due date".to_string())
                                     );
                                     
                                     // Send to debug group instead
@@ -301,14 +392,16 @@ async fn handle_ai_classification(
                         println!("✅ {}", message);
                         
                         let response = format!(
-                            "✅ *Assignment Saved!*\n\n\
-                            📚 Course: {}\n\
+                            "✨ *TUGAS BARU TERSIMPAN* ✨\n\
+                            ━━━━━━━━━━━━━━━━━━\n\
+                            📚 *{}*\n\
                             📝 {}\n\
-                            📅 Due: {}\n\
-                            📄 {}",
-                            course_name_for_response.unwrap_or("Unknown".to_string()),
+                            📅 Deadline: {}\n\
+                            ━━━━━━━━━━━━━━━━━━\n\
+                            📄 _{}_",
+                            course_name_for_response.unwrap_or("Mata Kuliah Umum".to_string()),
                             title_clone,
-                            deadline_for_response.unwrap_or("No due date".to_string()),
+                            deadline_for_response.unwrap_or("? (Cek lagi)".to_string()),
                             description_clone
                         );
                         
@@ -379,13 +472,15 @@ async fn handle_ai_classification(
                                 ).await {
                                     Ok(updated) => {
                                         let response = format!(
-                                            "🔄 *Assignment Updated!*\n\n\
-                                            📝 {}\n\
-                                            ✏️ {}\n\
-                                            📅 {}",
+                                            "🔄 *INFO TUGAS DIPERBARUI*\n\
+                                            ━━━━━━━━━━━━━━━━━━\n\
+                                            📝 *{}*\n\
+                                            ⚠️ Perubahan: _{}_\n\
+                                            📅 Deadline Baru: {}\n\
+                                            ━━━━━━━━━━━━━━━━━━",
                                             updated.title,
                                             changes_clone,
-                                            new_deadline_clone.unwrap_or("Unchanged".to_string())
+                                            new_deadline_clone.unwrap_or("Tetap".to_string())
                                         );
                                         
                                         // Send to debug group
@@ -449,11 +544,13 @@ async fn handle_ai_classification(
                                 match crud::create_assignment(&pool_clone, new_assignment).await {
                                     Ok(_) => {
                                         let response = format!(
-                                            "✅ *New Assignment Saved!*\n\n\
-                                            📚 {}\n\
+                                            "✨ *TUGAS BARU TERSIMPAN* ✨\n\
+                                            ━━━━━━━━━━━━━━━━━━\n\
+                                            📚 *{}*\n\
                                             📝 {}\n\
-                                            📅 {}\n\
-                                            📄 {}",
+                                            📅 Deadline: {}\n\
+                                            ━━━━━━━━━━━━━━━━━━\n\
+                                            📄 _{}_",
                                             course_name.unwrap_or("Unknown".to_string()),
                                             title,
                                             deadline_str,
@@ -532,49 +629,4 @@ fn extract_parallel_code(title: &str) -> Option<String> {
         }
     }
     None
-}
-
-#[tokio::main]
-async fn main() {
-    dotenv::dotenv().ok();
-    
-    println!("🚀 Starting WhatsApp Academic Bot");
-    
-    if std::env::var("GEMINI_API_KEY").is_err() {
-        eprintln!("⚠️  WARNING: GEMINI_API_KEY not set!");
-    }
-    
-    let pool = database::pool::create_pool().await
-        .expect("❌ Failed to connect to database");
-    
-    let whitelist = Arc::new(Whitelist::new());
-    let cache = Arc::new(Mutex::new(HashSet::new()));
-
-    
-    let pool_for_scheduler = pool.clone(); 
-    tokio::spawn(async move {
-    println!("⏳ Menjalankan Scheduler (Background Job)...");
-    if let Err(e) = scheduler::start_scheduler(pool_for_scheduler).await {
-        eprintln!("❌ Gagal menjalankan scheduler: {:?}", e);
-    }
-    });
-    
-    let state = AppState { 
-        cache, 
-        whitelist, 
-        pool
-    };
-    
-    let app = Router::new()
-        .route("/webhook", post(webhook))
-        .with_state(state);
-
-    let addr = SocketAddr::from(([0, 0, 0, 0], 3000));
-    println!("👂 Listening on {}", addr);
-    println!("📍 Webhook endpoint: http://localhost:3000/webhook");
-    println!("\n{}\n", "=".repeat(60));
-
-    let listener = TcpListener::bind(addr).await.unwrap();
-
-    axum::serve(listener, app).await.unwrap();
 }
