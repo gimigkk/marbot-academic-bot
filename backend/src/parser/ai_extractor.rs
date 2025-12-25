@@ -1,19 +1,48 @@
 use crate::models::{AIClassification, Assignment};  
 use uuid::Uuid;  
-use serde::{Deserialize};
+use serde::Deserialize;
 use serde_json::json;
 use chrono::{Utc, FixedOffset};
 
-// ===== GEMINI MODEL CONFIGURATION =====
+// ===== MODEL CONFIGURATION =====
 
+// Groq models (frontline - fast, vision-capable, high rate limits)
+const GROQ_VISION_MODELS: &[&str] = &[
+    "meta-llama/llama-4-scout-17b-16e-instruct",      // NEW: Llama 4 Scout (fast, multimodal)
+    "meta-llama/llama-4-maverick-17b-128e-instruct",  // NEW: Llama 4 Maverick (powerful)
+];
+
+const GROQ_TEXT_MODELS: &[&str] = &[
+    "llama-3.3-70b-versatile",
+    "mixtral-8x7b-32768",
+];
+
+// Gemini models (fallback - reliable, good for structured data)
 const GEMINI_MODELS: &[&str] = &[
     "gemini-3-flash-preview",
     "gemini-2.5-flash",
     "gemini-2.5-flash-lite",
 ];
 
-// ===== GEMINI API RESPONSE STRUCTURES =====
+// ===== API RESPONSE STRUCTURES =====
 
+// Groq response structure
+#[derive(Debug, Deserialize)]
+struct GroqResponse {
+    choices: Vec<GroqChoice>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GroqChoice {
+    message: GroqMessage,
+}
+
+#[derive(Debug, Deserialize)]
+struct GroqMessage {
+    content: String,
+}
+
+// Gemini response structure
 #[derive(Debug, Deserialize)]
 struct GeminiResponse {
     candidates: Vec<Candidate>,
@@ -36,51 +65,117 @@ struct Part {
 
 // ===== MAIN AI EXTRACTION FUNCTION =====
 
-/// Extract structured info from WhatsApp message using Gemini AI with model fallback
+/// Extract structured info from WhatsApp message
+/// Uses Groq (vision/text) as frontline, Gemini as fallback
 pub async fn extract_with_ai(
     text: &str,
     available_courses: &str,
+    image_base64: Option<&str>, // Base64 encoded image (if present)
 ) -> Result<AIClassification, String> {
-    let api_key = std::env::var("GEMINI_API_KEY")
-        .map_err(|_| "GEMINI_API_KEY not set in .env".to_string())?;
-    
-    // Get current datetime in GMT+7
-    let gmt7 = FixedOffset::east_opt(7 * 3600).unwrap();
-    let now = Utc::now().with_timezone(&gmt7);
-    let current_datetime = now.format("%Y-%m-%d %H:%M:%S").to_string();
-    let current_date = now.format("%Y-%m-%d").to_string();
-    
+    let current_datetime = get_current_datetime();
+    let current_date = get_current_date();
     let prompt = build_classification_prompt(text, available_courses, &current_datetime, &current_date);
     
-    // LOGGING KEREN DIMULAI DISINI
     println!("\x1b[1;30m┌── 🤖 AI PROCESSING ──────────────────────────\x1b[0m");
     println!("│ 📝 Message  : \x1b[36m\"{}\"\x1b[0m", truncate_for_log(text, 60));
+    if image_base64.is_some() {
+        println!("│ 🖼️  Image   : Detected");
+    }
     println!("│ 📅 Time     : {}", current_datetime);
     
-    // Try each model in sequence until one succeeds
+    // TIER 1: Try Groq first (vision if image, text otherwise)
+    if let Some(img) = image_base64 {
+        match try_groq_vision(&prompt, img).await {
+            Ok(classification) => {
+                println!("\x1b[1;30m└──────────────────────────────────────────────\x1b[0m");
+                return Ok(classification);
+            }
+            Err(e) => {
+                eprintln!("│ ⚠️  Groq Vision failed: {}", e);
+                eprintln!("│ 🔄 Falling back to Gemini...");
+            }
+        }
+    } else {
+        match try_groq_text(&prompt).await {
+            Ok(classification) => {
+                println!("\x1b[1;30m└──────────────────────────────────────────────\x1b[0m");
+                return Ok(classification);
+            }
+            Err(e) => {
+                eprintln!("│ ⚠️  Groq Text failed: {}", e);
+                eprintln!("│ 🔄 Falling back to Gemini...");
+            }
+        }
+    }
+    
+    // TIER 2: Fallback to Gemini models
     for (index, model) in GEMINI_MODELS.iter().enumerate() {
-        println!("│ 🔄 Model    : {} (Attempt {}/{})", model, index + 1, GEMINI_MODELS.len());
+        println!("│ 🔄 Model    : {} (Gemini Fallback {}/{})", model, index + 1, GEMINI_MODELS.len());
         
-        let url = format!(
-            "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent?key={}",
-            model, api_key
-        );
+        match try_gemini_model(model, &prompt).await {
+            Ok(classification) => {
+                println!("\x1b[1;30m└──────────────────────────────────────────────\x1b[0m");
+                return Ok(classification);
+            }
+            Err(e) => {
+                eprintln!("│ ❌ Failed   : {}", e);
+                if index == GEMINI_MODELS.len() - 1 {
+                    println!("\x1b[1;30m└──────────────────────────────────────────────\x1b[0m");
+                    return Err("All models (Groq + Gemini) failed".to_string());
+                }
+            }
+        }
+    }
+    
+    println!("\x1b[1;30m└──────────────────────────────────────────────\x1b[0m");
+    Err("No models available".to_string())
+}
+
+// ===== GROQ IMPLEMENTATION =====
+
+/// Try Groq vision models with fallback
+async fn try_groq_vision(prompt: &str, image_base64: &str) -> Result<AIClassification, String> {
+    let api_key = std::env::var("GROQ_API_KEY")
+        .map_err(|_| "GROQ_API_KEY not set in .env".to_string())?;
+    
+    for (index, model) in GROQ_VISION_MODELS.iter().enumerate() {
+        println!("│ 🔄 Model    : {} (Vision {}/{})", model, index + 1, GROQ_VISION_MODELS.len());
+        
+        let url = "https://api.groq.com/openai/v1/chat/completions";
         
         let request_body = json!({
-            "contents": [{
-                "parts": [{
-                    "text": prompt
-                }]
-            }],
-            "generationConfig": {
-                "temperature": 0.2,
-                "maxOutputTokens": 4096,
-                "responseMimeType": "application/json"
-            }
+            "model": model,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": prompt
+                        },
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": format!("data:image/jpeg;base64,{}", image_base64)
+                            }
+                        }
+                    ]
+                }
+            ],
+            "temperature": 0.2,
+            "max_tokens": 4096,
+            "response_format": { "type": "json_object" }
         });
         
         let client = reqwest::Client::new();
-        let response = match client.post(&url).json(&request_body).send().await {
+        let response = match client
+            .post(url)
+            .header("Authorization", format!("Bearer {}", api_key))
+            .header("Content-Type", "application/json")
+            .json(&request_body)
+            .send()
+            .await
+        {
             Ok(r) => r,
             Err(e) => {
                 eprintln!("│ \x1b[31m❌ REQUEST FAILED\x1b[0m : {}", e);
@@ -91,63 +186,188 @@ pub async fn extract_with_ai(
         let status = response.status();
         
         if status.is_success() {
-            println!("│ \x1b[32m✅ SUCCESS\x1b[0m  : Response received");
+            println!("│ \x1b[32m✅ SUCCESS\x1b[0m  : Groq Vision response");
             
-            let gemini_response: GeminiResponse = response.json().await
-                .map_err(|e| format!("Failed to deserialize Gemini response: {}", e))?;
+            let groq_response: GroqResponse = response.json().await
+                .map_err(|e| format!("Failed to deserialize Groq response: {}", e))?;
             
-            let ai_text = extract_ai_text(&gemini_response)?;
-            println!("│ 📄 Result   : {}", truncate_for_log(ai_text, 60));
-            println!("\x1b[1;30m└──────────────────────────────────────────────\x1b[0m");
+            let ai_text = extract_groq_text(&groq_response)?;
+            println!("│ 📄 Result   : {}", truncate_for_log(&ai_text, 60));
             
-            return parse_classification(ai_text);
+            let classification = parse_classification(&ai_text)?;
+            
+            // Validate JSON quality
+            if matches!(classification, AIClassification::Unrecognized) && !ai_text.contains("unrecognized") {
+                eprintln!("│ ⚠️  Invalid JSON from Groq, trying next model");
+                continue;
+            }
+            
+            return Ok(classification);
         }
         
         // Handle rate limit
         if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
-            let error_text = response.text().await
-                .unwrap_or_else(|_| "Unknown error".to_string());
-            
             eprintln!("│ ⚠️  RATE LIMIT: {}", model);
-            
-            if let Ok(error_json) = serde_json::from_str::<serde_json::Value>(&error_text) {
-                if let Some(retry_info) = extract_retry_delay(&error_json) {
-                    eprintln!("│    Retry after: {}", retry_info);
-                }
-            }
-            
-            // If this is not the last model, try the next one
-            if index < GEMINI_MODELS.len() - 1 {
+            if index < GROQ_VISION_MODELS.len() - 1 {
                 continue;
             } else {
-                println!("\x1b[1;30m└──────────────────────────────────────────────\x1b[0m");
-                return Err("All models are rate limited. Try again later.".to_string());
+                return Err("All Groq vision models rate limited".to_string());
             }
         }
         
-        // Handle other errors
         let error_text = response.text().await
             .unwrap_or_else(|_| "Unknown error".to_string());
+        eprintln!("│ ❌ ERROR    : {} - {}", status, truncate_for_log(&error_text, 60));
         
-        eprintln!("│ ❌ ERROR    : {} - {}", status, error_text);
-        
-        // Try next model
-        if index < GEMINI_MODELS.len() - 1 {
+        if index < GROQ_VISION_MODELS.len() - 1 {
             continue;
-        } else {
-            println!("\x1b[1;30m└──────────────────────────────────────────────\x1b[0m");
-            return Err(format!("All models failed. Last error: {} - {}", status, error_text));
         }
     }
     
-    println!("\x1b[1;30m└──────────────────────────────────────────────\x1b[0m");
-    Err("No models available".to_string())
+    Err("All Groq vision models failed".to_string())
 }
 
+/// Try Groq text models with fallback
+async fn try_groq_text(prompt: &str) -> Result<AIClassification, String> {
+    let api_key = std::env::var("GROQ_API_KEY")
+        .map_err(|_| "GROQ_API_KEY not set in .env".to_string())?;
+    
+    for (index, model) in GROQ_TEXT_MODELS.iter().enumerate() {
+        println!("│ 🔄 Model    : {} (Text {}/{})", model, index + 1, GROQ_TEXT_MODELS.len());
+        
+        let url = "https://api.groq.com/openai/v1/chat/completions";
+        
+        let request_body = json!({
+            "model": model,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": prompt
+                }
+            ],
+            "temperature": 0.2,
+            "max_tokens": 4096,
+            "response_format": { "type": "json_object" }
+        });
+        
+        let client = reqwest::Client::new();
+        let response = match client
+            .post(url)
+            .header("Authorization", format!("Bearer {}", api_key))
+            .header("Content-Type", "application/json")
+            .json(&request_body)
+            .send()
+            .await
+        {
+            Ok(r) => r,
+            Err(e) => {
+                eprintln!("│ \x1b[31m❌ REQUEST FAILED\x1b[0m : {}", e);
+                continue;
+            }
+        };
+        
+        let status = response.status();
+        
+        if status.is_success() {
+            println!("│ \x1b[32m✅ SUCCESS\x1b[0m  : Groq Text response");
+            
+            let groq_response: GroqResponse = response.json().await
+                .map_err(|e| format!("Failed to deserialize Groq response: {}", e))?;
+            
+            let ai_text = extract_groq_text(&groq_response)?;
+            println!("│ 📄 Result   : {}", truncate_for_log(&ai_text, 60));
+            
+            let classification = parse_classification(&ai_text)?;
+            
+            // Validate JSON quality
+            if matches!(classification, AIClassification::Unrecognized) && !ai_text.contains("unrecognized") {
+                eprintln!("│ ⚠️  Invalid JSON from Groq, trying next model");
+                continue;
+            }
+            
+            return Ok(classification);
+        }
+        
+        // Handle rate limit
+        if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
+            eprintln!("│ ⚠️  RATE LIMIT: {}", model);
+            if index < GROQ_TEXT_MODELS.len() - 1 {
+                continue;
+            } else {
+                return Err("All Groq text models rate limited".to_string());
+            }
+        }
+        
+        let error_text = response.text().await
+            .unwrap_or_else(|_| "Unknown error".to_string());
+        eprintln!("│ ❌ ERROR    : {} - {}", status, truncate_for_log(&error_text, 60));
+        
+        if index < GROQ_TEXT_MODELS.len() - 1 {
+            continue;
+        }
+    }
+    
+    Err("All Groq text models failed".to_string())
+}
 
-// ===== MATCH WITH AN EXISTING ASSIGNMENT FOR UPDATE =====
+// ===== GEMINI IMPLEMENTATION =====
 
-/// Use AI to match an update to a specific assignment with model fallback
+/// Try a single Gemini model
+async fn try_gemini_model(model: &str, prompt: &str) -> Result<AIClassification, String> {
+    let api_key = std::env::var("GEMINI_API_KEY")
+        .map_err(|_| "GEMINI_API_KEY not set in .env".to_string())?;
+    
+    let url = format!(
+        "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent?key={}",
+        model, api_key
+    );
+    
+    let request_body = json!({
+        "contents": [{
+            "parts": [{
+                "text": prompt
+            }]
+        }],
+        "generationConfig": {
+            "temperature": 0.2,
+            "maxOutputTokens": 4096,
+            "responseMimeType": "application/json"
+        }
+    });
+    
+    let client = reqwest::Client::new();
+    let response = client.post(&url).json(&request_body).send().await
+        .map_err(|e| format!("Request failed: {}", e))?;
+    
+    let status = response.status();
+    
+    if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
+        return Err("Rate limited".to_string());
+    }
+    
+    if !status.is_success() {
+        let error_text = response.text().await
+            .unwrap_or_else(|_| "Unknown error".to_string());
+        return Err(format!("Status {}: {}", status, truncate_for_log(&error_text, 60)));
+    }
+    
+    println!("│ \x1b[32m✅ SUCCESS\x1b[0m  : Gemini response");
+    
+    let gemini_response: GeminiResponse = response.json().await
+        .map_err(|e| format!("Failed to deserialize: {}", e))?;
+    
+    let ai_text = extract_ai_text(&gemini_response)?;
+    println!("│ 📄 Result   : {}", truncate_for_log(ai_text, 60));
+    
+    parse_classification(ai_text)
+}
+
+// ===== MATCH WITH EXISTING ASSIGNMENT (GEMINI ONLY) =====
+// We keep Gemini-only for matching because it needs the bigger brain
+// for complex reasoning about temporal context and semantic matching
+
+/// Use AI to match an update to a specific assignment
+/// Uses ONLY Gemini models (needs the bigger brain for complex matching)
 pub async fn match_update_to_assignment(
     changes: &str,
     keywords: &[String],
@@ -158,12 +378,12 @@ pub async fn match_update_to_assignment(
     
     let prompt = build_matching_prompt(changes, keywords, active_assignments);
     
-    println!("\x1b[1;30m┌── 🤖 AI MATCHING ────────────────────────────\x1b[0m");
+    println!("\x1b[1;30m┌── 🤖 AI MATCHING (GEMINI ONLY) ─────────────\x1b[0m");
     println!("│ 🔍 Keywords : {:?}", keywords);
     
-    // Try each model in sequence until one succeeds
+    // Use ONLY Gemini for matching (needs better reasoning)
     for (index, model) in GEMINI_MODELS.iter().enumerate() {
-        println!("│ 🔄 Model    : {}", model);
+        println!("│ 🔄 Model    : {} (Attempt {}/{})", model, index + 1, GEMINI_MODELS.len());
         
         let url = format!(
             "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent?key={}",
@@ -195,7 +415,7 @@ pub async fn match_update_to_assignment(
         let status = response.status();
         
         if status.is_success() {
-            println!("│ \x1b[32m✅ SUCCESS\x1b[0m  : Match Found");
+            println!("│ \x1b[32m✅ SUCCESS\x1b[0m  : Match analysis complete");
             
             let gemini_response: GeminiResponse = response.json().await
                 .map_err(|e| e.to_string())?;
@@ -207,12 +427,12 @@ pub async fn match_update_to_assignment(
         
         // Handle rate limit
         if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
-            // If this is not the last model, try the next one
+            eprintln!("│ ⚠️  RATE LIMIT: {}", model);
             if index < GEMINI_MODELS.len() - 1 {
                 continue;
             } else {
                 println!("\x1b[1;30m└──────────────────────────────────────────────\x1b[0m");
-                return Err("All models are rate limited for matching.".to_string());
+                return Err("All Gemini models rate limited for matching.".to_string());
             }
         }
         
@@ -229,9 +449,9 @@ pub async fn match_update_to_assignment(
     Err("No models available for matching".to_string())
 }
 
-// ===== HELPER FUNCTIONS =====
+// ===== PROMPT BUILDERS =====
 
-/// Build the classification prompt for Gemini with current datetime context and course aliases
+/// Build the classification prompt for AI models
 fn build_classification_prompt(text: &str, available_courses: &str, current_datetime: &str, current_date: &str) -> String {
     format!(
         r#"Classify this WhatsApp academic message. Return ONLY valid JSON, NO markdown.
@@ -277,7 +497,8 @@ RULES:
 - "changes" field should briefly describe what changed
 - All dates in YYYY-MM-DD format
 - Use null for unchanged fields
-- parallel_code format: K1, K2, K3, P1, P2, P3 etc (uppercase K/P)"#,
+- parallel_code format: K1, K2, K3, P1, P2, P3 etc (uppercase K/P)
+- If message contains an image, extract ALL text from the image and include it in your analysis"#,
         current_datetime,
         current_date,
         available_courses,
@@ -393,22 +614,15 @@ or
     )
 }
 
+// ===== RESPONSE EXTRACTORS =====
 
-/// Extract retry delay from rate limit error
-fn extract_retry_delay(error_json: &serde_json::Value) -> Option<String> {
-    error_json
-        .get("error")?
-        .get("details")?
-        .as_array()?
-        .iter()
-        .find(|item| {
-            item.get("@type")
-                .and_then(|t| t.as_str())
-                == Some("type.googleapis.com/google.rpc.RetryInfo")
-        })?
-        .get("retryDelay")?
-        .as_str()
-        .map(|s| s.to_string())
+/// Extract text from Groq response
+fn extract_groq_text(groq_response: &GroqResponse) -> Result<String, String> {
+    groq_response
+        .choices
+        .first()
+        .map(|choice| choice.message.content.clone())
+        .ok_or_else(|| "Groq returned empty response".to_string())
 }
 
 /// Extract AI text from Gemini response structure
@@ -421,6 +635,8 @@ fn extract_ai_text(gemini_response: &GeminiResponse) -> Result<&str, String> {
         .ok_or_else(|| "Gemini returned empty response".to_string())
 }
 
+// ===== PARSERS =====
+
 /// Clean and parse the AI classification from text
 fn parse_classification(ai_text: &str) -> Result<AIClassification, String> {
     let cleaned = ai_text
@@ -430,19 +646,13 @@ fn parse_classification(ai_text: &str) -> Result<AIClassification, String> {
         .trim_end_matches("```")
         .trim();
     
-    // println!("🧹 Cleaned: {}", cleaned); // Commented out to reduce noise
-    
     if !is_valid_json_object(cleaned) {
         eprintln!("⚠️  Response is not a valid JSON object");
-        // eprintln!("   Got: {}", cleaned);
         return Ok(AIClassification::Unrecognized);
     }
     
     match serde_json::from_str::<AIClassification>(cleaned) {
-        Ok(classification) => {
-            // println!("✅ Parsed classification: {:?}", classification);
-            Ok(classification)
-        }
+        Ok(classification) => Ok(classification),
         Err(e) => {
             eprintln!("❌ JSON parse error: {}", e);
             eprintln!("   Tried to parse: {}", cleaned);
@@ -492,6 +702,22 @@ fn parse_match_result(ai_text: &str) -> Result<Option<Uuid>, String> {
     }
 }
 
+// ===== HELPERS =====
+
+/// Get current datetime in GMT+7
+fn get_current_datetime() -> String {
+    let gmt7 = FixedOffset::east_opt(7 * 3600).unwrap();
+    let now = Utc::now().with_timezone(&gmt7);
+    now.format("%Y-%m-%d %H:%M:%S").to_string()
+}
+
+/// Get current date in GMT+7
+fn get_current_date() -> String {
+    let gmt7 = FixedOffset::east_opt(7 * 3600).unwrap();
+    let now = Utc::now().with_timezone(&gmt7);
+    now.format("%Y-%m-%d").to_string()
+}
+
 /// Check if string looks like a valid JSON object
 fn is_valid_json_object(s: &str) -> bool {
     s.starts_with('{') 
@@ -501,7 +727,7 @@ fn is_valid_json_object(s: &str) -> bool {
 
 /// Truncate text for logging
 fn truncate_for_log(text: &str, max_len: usize) -> String {
-    let clean_text = text.replace('\n', " "); // Remove newlines for cleaner logs
+    let clean_text = text.replace('\n', " ");
     if clean_text.len() <= max_len {
         clean_text
     } else {
