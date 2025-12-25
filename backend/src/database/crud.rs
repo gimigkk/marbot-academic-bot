@@ -1,6 +1,7 @@
 use sqlx::{PgPool, Result};
 use uuid::Uuid;
 use chrono::{DateTime, Utc};
+use std::collections::HashMap;
 
 use crate::models::{Assignment, NewAssignment, Course, AssignmentDisplay, AssignmentWithCourse};
 
@@ -98,6 +99,17 @@ pub async fn get_assignments(pool: &PgPool) -> Result<Vec<AssignmentDisplay>, sq
     .await?;
 
     Ok(assignments)
+}
+
+/// Get all courses as a HashMap for AI context
+pub async fn get_courses_map(pool: &PgPool) -> Result<HashMap<Uuid, String>, sqlx::Error> {
+    let courses = sqlx::query_as::<_, (Uuid, String)>(
+        "SELECT id, name FROM courses"
+    )
+    .fetch_all(pool)
+    .await?;
+    
+    Ok(courses.into_iter().collect())
 }
 
 /// Check if an assignment with this title already exists for a course
@@ -398,7 +410,7 @@ pub async fn find_assignment_by_keywords(
 // UPDATE OPERATIONS
 // ========================================
 
-/// Update specific fields of an assignment
+/// Update specific fields of an assignment (simplified version)
 #[allow(non_snake_case)]
 pub async fn update_assignment_fields(
     pool: &PgPool,
@@ -406,138 +418,56 @@ pub async fn update_assignment_fields(
     new_deadline: Option<DateTime<Utc>>,
     new_title: Option<String>,
     new_description: Option<String>,
+    new_parallel_code: Option<String>,
 ) -> Result<Assignment> {
-    println!("🔄 Updating assignment {} with deadline: {:?}, title: {:?}, description: {:?}", 
-        id, new_deadline, new_title, new_description);
+    println!("🔄 Updating assignment {}", id);
+    println!("   Deadline: {:?}", new_deadline);
+    println!("   Title: {:?}", new_title);
+    println!("   Description: {:?}", new_description);
+    println!("   Parallel: {:?}", new_parallel_code);
     
     let mut tx = pool.begin().await?;
     
-    // Build dynamic query based on what changed
-    let assignment = match (new_deadline, &new_title, &new_description) {
-        // All three fields
-        (Some(dl), Some(title), Some(desc)) => {
-            sqlx::query_as::<_, Assignment>(
-                r#"
-                UPDATE assignments
-                SET deadline = $2, title = $3, description = $4
-                WHERE id = $1
-                RETURNING *
-                "#
-            )
-            .bind(id)
-            .bind(dl)
-            .bind(title)
-            .bind(desc)
-            .fetch_one(&mut *tx)
-            .await?
-        }
-        // Deadline + Title
-        (Some(dl), Some(title), None) => {
-            sqlx::query_as::<_, Assignment>(
-                r#"
-                UPDATE assignments
-                SET deadline = $2, title = $3
-                WHERE id = $1
-                RETURNING *
-                "#
-            )
-            .bind(id)
-            .bind(dl)
-            .bind(title)
-            .fetch_one(&mut *tx)
-            .await?
-        }
-        // Deadline + Description
-        (Some(dl), None, Some(desc)) => {
-            sqlx::query_as::<_, Assignment>(
-                r#"
-                UPDATE assignments
-                SET deadline = $2, description = $3
-                WHERE id = $1
-                RETURNING *
-                "#
-            )
-            .bind(id)
-            .bind(dl)
-            .bind(desc)
-            .fetch_one(&mut *tx)
-            .await?
-        }
-        // Title + Description
-        (None, Some(title), Some(desc)) => {
-            sqlx::query_as::<_, Assignment>(
-                r#"
-                UPDATE assignments
-                SET title = $2, description = $3
-                WHERE id = $1
-                RETURNING *
-                "#
-            )
-            .bind(id)
-            .bind(title)
-            .bind(desc)
-            .fetch_one(&mut *tx)
-            .await?
-        }
-        // Only Deadline
-        (Some(dl), None, None) => {
-            sqlx::query_as::<_, Assignment>(
-                r#"
-                UPDATE assignments
-                SET deadline = $2
-                WHERE id = $1
-                RETURNING *
-                "#
-            )
-            .bind(id)
-            .bind(dl)
-            .fetch_one(&mut *tx)
-            .await?
-        }
-        // Only Title
-        (None, Some(title), None) => {
-            sqlx::query_as::<_, Assignment>(
-                r#"
-                UPDATE assignments
-                SET title = $2
-                WHERE id = $1
-                RETURNING *
-                "#
-            )
-            .bind(id)
-            .bind(title)
-            .fetch_one(&mut *tx)
-            .await?
-        }
-        // Only Description
-        (None, None, Some(desc)) => {
-            sqlx::query_as::<_, Assignment>(
-                r#"
-                UPDATE assignments
-                SET description = $2
-                WHERE id = $1
-                RETURNING *
-                "#
-            )
-            .bind(id)
-            .bind(desc)
-            .fetch_one(&mut *tx)
-            .await?
-        }
-        // Nothing to update
-        (None, None, None) => {
-            sqlx::query_as::<_, Assignment>(
-                "SELECT * FROM assignments WHERE id = $1"
-            )
-            .bind(id)
-            .fetch_one(&mut *tx)
-            .await?
-        }
-    };
+    // Fetch current assignment
+    let current = sqlx::query_as::<_, Assignment>(
+        "SELECT * FROM assignments WHERE id = $1"
+    )
+    .bind(id)
+    .fetch_one(&mut *tx)
+    .await?;
+    
+    // Use new values if provided, otherwise keep current
+    let final_deadline = new_deadline.or(current.deadline);
+    let final_title = new_title.unwrap_or(current.title);
+    let final_description = new_description.unwrap_or(current.description);
+    // Convert parallel code to lowercase for database constraint
+    let final_parallel = new_parallel_code
+        .map(|p| p.to_lowercase())
+        .or(current.parallel_code);
+    
+    // Single UPDATE query with all fields
+    let assignment = sqlx::query_as::<_, Assignment>(
+        r#"
+        UPDATE assignments
+        SET deadline = $2, 
+            title = $3, 
+            description = $4,
+            parallel_code = $5
+        WHERE id = $1
+        RETURNING *
+        "#
+    )
+    .bind(id)
+    .bind(final_deadline)
+    .bind(&final_title)
+    .bind(&final_description)
+    .bind(final_parallel)
+    .fetch_one(&mut *tx)
+    .await?;
     
     tx.commit().await?;
     
-    println!("✅ Successfully updated assignment: {}", assignment.title);
+    println!("✅ Successfully updated assignment: {}\n", assignment.title);
     
     Ok(assignment)
 }
