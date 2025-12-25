@@ -26,7 +26,7 @@ pub async fn handle_command(
             println!("📋 Tugas command received from {}", user_phone);
 
             match get_active_assignments_sorted(pool).await {
-                Ok(assignments) => format_assignments_list(assignments, "📋 *Daftar Tugas*", true),
+                Ok(assignments) => format_assignments_list(assignments, "📋 *Daftar Tugas*", false),
                 Err(e) => {
                     eprintln!("❌ Error fetching assignments: {}", e);
                     CommandResponse::Text(
@@ -77,7 +77,7 @@ pub async fn handle_command(
                         })
                         .collect();
 
-                    format_assignments_list(week_assignments, "📆 *Tugas Minggu Ini (7 Hari)*", true)
+                    format_assignments_list(week_assignments, "📆 *Tugas Minggu Ini (7 Hari)*", false)
                 }
                 Err(e) => {
                     eprintln!("❌ Error fetching assignments: {}", e);

@@ -109,6 +109,7 @@ pub enum AIClassification {
         new_title: Option<String>,
         new_deadline: Option<String>,
         new_description: Option<String>,
+        parallel_code: Option<String>,  // ✅ ADDED: parallel code for updates too
         #[serde(default)]
         #[serde(skip_serializing_if = "Option::is_none")]
         original_message: Option<String>,
