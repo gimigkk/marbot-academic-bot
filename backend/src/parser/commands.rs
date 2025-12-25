@@ -48,7 +48,7 @@ pub async fn handle_command(
                         .filter(|a| a.deadline.with_timezone(&Local).date_naive() == today)
                         .collect();
 
-                    // TODAY: tanpa keterangan
+        
                     format_assignments_list(today_assignments, "📅 *Tugas Hari Ini*", false)
                 }
                 Err(e) => {
@@ -208,10 +208,6 @@ _Tips: Kirim info tugas di grup akademik, nanti saya simpan otomatis._"
     }
 }
 
-/// Format assignment lists (Style 1: Kartu Rapi, rata kiri, course & judul dipisah)
-/// show_legend:
-/// - true  => tampilkan keterangan (untuk #tugas dan #week)
-/// - false => sembunyikan keterangan (untuk #today)
 fn format_assignments_list(
     assignments: Vec<crate::models::AssignmentWithCourse>,
     header: &str,
@@ -224,7 +220,7 @@ fn format_assignments_list(
                 header
             ));
         } else {
-            // TODAY: tanpa keterangan
+            
             return CommandResponse::Text(format!(
                 "{}\n\n📭 Belum ada tugas untuk hari ini.",
                 header
@@ -276,7 +272,7 @@ fn format_assignments_list(
         response.push('\n');
     }
 
-    response.push_str("_🔎 Detail: ketik #<id> atau #tugas <id> • Selesai: #done <id>_");
+    response.push_str("_🔎 Detail: ketik #<nomor> atau #tugas <nomor> • Selesai: #done <id>_");
     CommandResponse::Text(response)
 }
 
@@ -289,14 +285,14 @@ fn status_dot(deadline_utc: &DateTime<Utc>) -> &'static str {
     }
 }
 
-/// Selisih hari berdasarkan tanggal local (lebih natural untuk user).
+
 fn days_left(deadline_utc: &DateTime<Utc>) -> i64 {
     let now = Local::now().date_naive();
     let due = deadline_utc.with_timezone(&Local).date_naive();
     (due - now).num_days()
 }
 
-/// Humanize deadline: Hari ini/Besok/X hari lagi + (tgl)
+
 fn humanize_deadline(deadline_utc: &DateTime<Utc>) -> String {
     let delta = days_left(deadline_utc);
     let due = deadline_utc.with_timezone(&Local).date_naive();
@@ -305,7 +301,6 @@ fn humanize_deadline(deadline_utc: &DateTime<Utc>) -> String {
     match delta {
         0 => format!("Hari ini ({})", date_str),
         1 => format!("Besok ({})", date_str),
-        // Logic untuk H-2, H-3, dst. digabung di sini
         d if d >= 2 => format!("H-{} ({})", d, date_str), 
         -1 => format!("Kemarin ({})", date_str),
         d => format!("lewat {} hari ({})", d.abs(), date_str),
@@ -334,7 +329,7 @@ fn format_date_id(date: NaiveDate) -> String {
     format!("{} {} {}", day, month, date.year())
 }
 
-/// Potong text biar rapi (untuk preview deskripsi)
+/// Potong text
 fn preview_text(s: &str, max_chars: usize) -> String {
     let one_line = s
         .replace('\n', " ")
@@ -353,8 +348,7 @@ fn preview_text(s: &str, max_chars: usize) -> String {
     out
 }
 
-/// WhatsApp "markdown" gampang rusak kalau ada *, _, ~, `
-/// Jadi kita netralin karakter itu biar output tetap rapi.
+
 fn sanitize_wa_md(s: &str) -> String {
     s.replace('*', "×")
         .replace('_', " ")
