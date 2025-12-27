@@ -120,7 +120,7 @@ pub async fn handle_command(
                     } else {
                         let assignment = &assignments[idx];
 
-                        let Some(message_id) = assignment.message_id.clone() else {
+                        let Some(message_id) = assignment.message_ids.last().cloned() else {
                             return CommandResponse::Text(
                                 "❌ Pesan asli untuk tugas ini belum tersimpan.\nCoba cek daftar dengan *#tugas*."
                                     .to_string(),
