@@ -597,6 +597,7 @@ CRITICAL CLASSIFICATION RULES:
    - "besok" (tomorrow) = add 1 day
    - "minggu depan" (next week) = add 7 days
    - "senin/selasa/rabu/etc" = next occurrence of that weekday
+   - "kemarin" (yesterday) = minus 1 day
 
 7. **Course Name Normalization**:
    - Always use FORMAL course name in "course_name" field
