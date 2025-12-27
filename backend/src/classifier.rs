@@ -51,9 +51,11 @@ fn parse_command(text: &str) -> Option<BotCommand> {
             }
             Some(BotCommand::Tugas)
         }
+        "todo" => Some(BotCommand::Todo),  
         "today" => Some(BotCommand::Today),
         "week" => Some(BotCommand::Week),
         "help" => Some(BotCommand::Help),
+        "undo" => Some(BotCommand::Undo),
         "done" => {
             if parts.len() > 1 {
                 let id = parts[1].parse().ok()?;

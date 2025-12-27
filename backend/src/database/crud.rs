@@ -121,6 +121,39 @@ pub async fn unmark_assignment_complete(
 // READ OPERATIONS
 // ========================================
 
+/// Get the most recently completed assignment for a user
+pub async fn get_last_completed_assignment(
+    pool: &PgPool,
+    user_id: &str
+) -> Result<Option<AssignmentWithCourse>, sqlx::Error> {
+    let assignment = sqlx::query_as!(
+        AssignmentWithCourse,
+        r#"
+        SELECT 
+            a.id,
+            c.name as course_name,
+            a.parallel_code,
+            a.title,
+            a.description,  
+            a.deadline as "deadline!",
+            a.message_ids,
+            a.sender_id,
+            true as "is_completed!"
+        FROM assignments a
+        JOIN courses c ON a.course_id = c.id
+        JOIN user_completions uc ON uc.assignment_id = a.id
+        WHERE uc.user_id = $1
+        ORDER BY uc.completed_at DESC
+        LIMIT 1
+        "#,
+        user_id
+    )
+    .fetch_optional(pool)
+    .await?;
+    
+    Ok(assignment)
+}
+
 // 2. READ (Melihat SEMUA Tugas)
 pub async fn get_assignments(pool: &PgPool) -> Result<Vec<AssignmentDisplay>, sqlx::Error> {
     let assignments = sqlx::query_as!(
@@ -238,7 +271,9 @@ pub async fn get_active_assignments_for_user(
 ) -> Result<Vec<AssignmentWithCourse>, sqlx::Error> {
     let now = Utc::now();
     
-    // LEFT JOIN untuk cek status 'is_completed'
+    println!("🔍 Fetching assignments for user: {}", user_id);
+    
+    // LEFT JOIN to check completion status for THIS specific user only
     let assignments = sqlx::query_as!(
         AssignmentWithCourse,
         r#"
@@ -251,21 +286,29 @@ pub async fn get_active_assignments_for_user(
             a.deadline as "deadline!",
             a.message_ids,
             a.sender_id,
-            -- Cek apakah ada di tabel completions
-            (uc.id IS NOT NULL) as "is_completed!" 
+            -- ✅ Check if THIS user has completed it
+            EXISTS(
+                SELECT 1 FROM user_completions uc 
+                WHERE uc.assignment_id = a.id 
+                AND uc.user_id = $2
+            ) as "is_completed!" 
         FROM assignments a
         JOIN courses c ON a.course_id = c.id
-        LEFT JOIN user_completions uc ON a.id = uc.assignment_id AND uc.user_id = $2
         WHERE a.deadline >= $1 AND a.deadline IS NOT NULL
         ORDER BY a.deadline ASC, c.name ASC
         "#,
         now,
-        user_id // Bind parameter user_id
+        user_id
     )
     .fetch_all(pool)
     .await?;
     
-    println!("✅ Found {} active assignments for user {}\n", assignments.len(), user_id);
+    println!("✅ Found {} assignments for user {}", assignments.len(), user_id);
+    
+    // Debug: Print completion status
+    for (i, a) in assignments.iter().enumerate() {
+        println!("  {}. {} - Completed: {}", i + 1, a.title, a.is_completed);
+    }
     
     Ok(assignments)
 }

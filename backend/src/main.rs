@@ -142,6 +142,10 @@ async fn webhook(
     State(state): State<AppState>,
     Json(payload): Json<WebhookPayload>,
 ) -> StatusCode {
+
+    /// Check message payload
+    //println!("🔍 DEBUG Raw payload: {:#?}", payload);
+
     // Only process "message.any" events
     if payload.event != "message.any" {
         return StatusCode::OK;
@@ -181,8 +185,35 @@ async fn webhook(
         }
     }
 
+    // ✅ EXTRACT SENDER AND CHAT IDs CORRECTLY
+    let chat_id = &payload.payload.from;  // Where to send reply (group or personal chat)
+    
+    // Extract sender's actual phone number
+    // For group messages: 'participant' field contains the actual sender
+    // For personal chats: 'from' field IS the sender
+    let sender_phone = if chat_id.ends_with("@g.us") {
+        // Group message - use participant field for sender ID
+        payload.payload.participant
+            .as_ref()
+            .unwrap_or(chat_id)
+    } else {
+        // Personal chat - 'from' field is the sender
+        chat_id
+    };
+    
+    // ✅ Extract WhatsApp display name (pushName) from _data field
+    let sender_name = payload.payload.data
+        .as_ref()
+        .and_then(|data| data.push_name.as_ref())
+        .map(|name| name.as_str())
+        .unwrap_or_else(|| {
+            // Fallback: extract phone number from sender_phone (remove @c.us or @g.us)
+            sender_phone.split('@').next().unwrap_or(sender_phone)
+        });
+
     // Terminal logging for server monitoring
-    println!("📨 Message from: {}", payload.payload.from);
+    println!("📨 Message from: {}", chat_id);
+    println!("   Sender: {} ({})", sender_name, sender_phone);
     println!("   Body: {}", payload.payload.body);
 
     // STEP 1: CLASSIFY MESSAGE
@@ -191,21 +222,21 @@ async fn webhook(
 
     // STEP 2: CHECK WHITELIST
     let (should_process, reason) =
-        state.whitelist.should_process(&payload.payload.from, is_command);
+        state.whitelist.should_process(chat_id, is_command);
 
     if !should_process {
-        println!("🚫 Ignoring: {} (from: {})", reason, payload.payload.from);
+        println!("🚫 Ignoring: {} (from: {})", reason, chat_id);
         return StatusCode::OK;
     }
-
-    let chat_id = &payload.payload.from;
 
     // STEP 3: HANDLE MESSAGE BASED ON TYPE
     match message_type {
         MessageType::Command(cmd) => {
             println!("⚙️  Processing command: {:?}", cmd);
             
-            let response = handle_command(cmd, chat_id, chat_id, &state.pool).await;
+            // ✅ FIXED: Pass sender_phone (not chat_id) as user identifier
+            // ✅ Pass sender_name for display in responses
+            let response = handle_command(cmd, sender_phone, sender_name, chat_id, &state.pool).await;
             
             match response {
                 CommandResponse::Text(text) => {
@@ -304,7 +335,7 @@ async fn webhook(
                                                 state.pool.clone(),
                                                 classification,
                                                 &payload.payload.id,
-                                                &payload.payload.from,
+                                                sender_phone,  // ✅ FIXED: Use sender_phone instead of chat_id
                                                 debug_group_id.clone(),
                                             ).await;
                                         }
