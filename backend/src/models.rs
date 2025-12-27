@@ -177,7 +177,15 @@ pub struct AssignmentWithCourse {
     pub description: Option<String>,
     pub deadline: DateTime<Utc>,
     pub message_ids: Vec<String>,   
-    pub sender_id: Option<String>,    
+    pub sender_id: Option<String>, 
+    pub is_completed: bool,
+}
+
+// Struct baru untuk insert completion (opsional, tapi rapi)
+#[derive(Debug, Serialize, Deserialize)]
+pub struct UserCompletion {
+    pub user_id: String,
+    pub assignment_id: Uuid,
 }
 
 #[derive(Debug, Clone, FromRow, Serialize, Deserialize)]
