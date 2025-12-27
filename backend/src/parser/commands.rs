@@ -267,11 +267,11 @@ fn format_assignments_list(
     }
 
     for (i, a) in assignments.iter().enumerate() {
-        // LOGIKA TAMPILAN BARU (Cek Status)
+        // CEK STATUS DONE
         let status_emoji = if a.is_completed { 
-            "✅" // Kalau sudah selesai
+            "✅" 
         } else {
-            status_dot(&a.deadline) // Kalau belum, pakai dot merah/hijau
+            status_dot(&a.deadline) 
         };
         
         // Coret judul jika selesai

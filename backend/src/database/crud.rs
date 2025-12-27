@@ -200,8 +200,6 @@ pub async fn get_active_assignments(pool: &PgPool) -> Result<Vec<Assignment>> {
     Ok(assignments)
 }
 
-/// Yang ini versi original (digunakan oleh SCHEDULER)
-/// Tidak memedulikan status 'DONE' user, jadi default is_completed = false
 pub async fn get_active_assignments_sorted(pool: &PgPool) -> Result<Vec<AssignmentWithCourse>, sqlx::Error> {
     let now = Utc::now();
     
@@ -240,7 +238,7 @@ pub async fn get_active_assignments_for_user(
 ) -> Result<Vec<AssignmentWithCourse>, sqlx::Error> {
     let now = Utc::now();
     
-    // Query dengan LEFT JOIN untuk cek status 'is_completed'
+    // LEFT JOIN untuk cek status 'is_completed'
     let assignments = sqlx::query_as!(
         AssignmentWithCourse,
         r#"
