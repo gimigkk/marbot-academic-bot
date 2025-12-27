@@ -25,6 +25,10 @@ pub struct MessagePayload {
     #[serde(default)]
     #[serde(rename = "fromMe")]
     pub from_me: bool,
+
+    pub participant: Option<String>,
+
+
     #[serde(default)]
     #[serde(rename = "chatId")]
     #[serde(flatten)]
@@ -38,6 +42,16 @@ pub struct MessagePayload {
     #[serde(rename = "mimeType")]
     pub mime_type: Option<String>,
     pub media: Option<MediaInfo>,
+
+    #[serde(rename = "_data")]
+    pub data: Option<MessageData>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct MessageData {
+    #[serde(rename = "pushName")]
+    pub push_name: Option<String>,
+    // Add other fields as needed
 }
 
 #[derive(Debug, Deserialize)]
@@ -82,7 +96,9 @@ pub enum BotCommand {
     Today,
     Week,
     Expand(u32),
+    Todo,
     Done(u32),
+    Undo,
     Help,
     UnknownCommand(String),
 }
