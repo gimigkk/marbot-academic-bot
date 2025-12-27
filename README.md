@@ -171,7 +171,9 @@ Commands can be sent from **any chat** (DM, group, or channel):
 | `#today` | List today assignments | `#today` |
 | `#week` | List this week assignments | `#week` |
 | `#tugas <id> or #<id>` | Forward original assignment details | `#tugas 1 or just #1` |
+| `#todo` | Show user specific list | `#todo` |
 | `#done <id>` | Mark assignment complete | `#done 1` |
+| `#undo` | removes the #done marker | `#undo` |
 | `#help` | Show help message | `#help` |
 
 ### Natural Language Messages
