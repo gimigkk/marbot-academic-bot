@@ -102,17 +102,21 @@ sqlx migrate run
 ```bash
 cd ../waha
 
+cd ~/Desktop/Projects/Academic\ Bot/waha
+
 sudo docker run -d \
-  --name waha \
-  -p 3001:3000 \
-  -e WAHA_API_KEY=devkey123 \
-  -e WHATSAPP_HOOK_URL=http://172.17.0.1:3000/webhook \
-  -e WHATSAPP_HOOK_EVENTS=message.any \
-  -v "$(pwd)/.waha:/app/.waha" \
-  devlikeapro/waha
+--name waha \
+-p 3001:3000 \
+-e WAHA_API_KEY=devkey123 \
+-e WHATSAPP_HOOK_URL=http://172.17.0.1:3000/webhook \
+-e WHATSAPP_HOOK_EVENTS=message.any \
+-e WHATSAPP_HOOK_MEDIA=true \
+-e WHATSAPP_DOWNLOAD_MEDIA=true \
+-v "$HOME/Desktop/Projects/Academic Bot/waha/.waha:/app/.waha" \
+devlikeapro/waha
 ```
 
-### 3. Create WhatsApp Session & Scan QR
+### 3. Create WhatsApp Session & Authenticate WhatsApp
 
 ```bash
 curl -X POST http://localhost:3001/api/sessions \
@@ -166,6 +170,8 @@ Commands can be sent from **any chat** (DM, group, or channel):
 |---------|-------------|---------|
 | `#ping` | Check if bot is alive | `#ping` |
 | `#tugas` | List all assignments | `#tugas` |
+| `#today` | List today assignments | `#today` |
+| `#week` | List this week assignments | `#week` |
 | `#tugas <id> or #<id>` | Forward original assignment details | `#tugas 1 or just #1` |
 | `#done <id>` | Mark assignment complete | `#done 1` |
 | `#help` | Show help message | `#help` |
