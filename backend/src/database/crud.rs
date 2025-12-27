@@ -309,6 +309,8 @@ pub async fn get_active_assignments_for_user(
     for (i, a) in assignments.iter().enumerate() {
         println!("  {}. {} - Completed: {}", i + 1, a.title, a.is_completed);
     }
+
+    println!("");
     
     Ok(assignments)
 }

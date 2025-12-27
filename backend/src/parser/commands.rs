@@ -21,7 +21,7 @@ pub async fn handle_command(
     match cmd {
         BotCommand::Ping => {
             println!("🏓 Ping command received from {}\n", user_phone);
-            CommandResponse::Text("Ilkom Jaya Jaya Jaya!!!!! ✅".to_string())
+            CommandResponse::Text("SIAP! SEMANGAT! DASHYAT!".to_string())
         }
 
         BotCommand::Tugas => {
@@ -29,7 +29,7 @@ pub async fn handle_command(
 
             // Show ALL active assignments (global view)
             match get_active_assignments_sorted(pool).await {
-                Ok(assignments) => format_assignments_list(assignments, "📋 *Daftar Tugas*", false, false),
+                Ok(assignments) => format_assignments_list(assignments, "*[Daftar Tugas Aktif]*", false, false),
                 Err(e) => {
                     eprintln!("❌ Error fetching assignments: {}", e);
                     CommandResponse::Text(
@@ -46,7 +46,7 @@ pub async fn handle_command(
             // Show user-specific todo list (respects #done status)
             match get_active_assignments_for_user(pool, user_phone).await {
                 Ok(assignments) => {
-                    let header = format!("✅ *To-Do {}*", user_name);
+                    let header = format!("*[To-Do] User ID: {}*", user_name);
                     format_assignments_list(assignments, &header, false, true)
                 }
                 Err(e) => {
@@ -70,7 +70,7 @@ pub async fn handle_command(
                         .filter(|a| a.deadline.with_timezone(&Local).date_naive() == today)
                         .collect();
 
-                    format_assignments_list(today_assignments, "📅 *Tugas Hari Ini*", false, true)
+                    format_assignments_list(today_assignments, "*[Tugas Hari Ini]*", false, true)
                 }
                 Err(e) => {
                     eprintln!("❌ Error fetching assignments: {}", e);
@@ -112,7 +112,7 @@ pub async fn handle_command(
 
         BotCommand::Expand(index) => {
             println!(
-                "🔍 Expand command for assignment {} from {} in chat {}",
+                "🔍 Expand command for assignment {} from {} in chat {}\n",
                 index, user_phone, chat_id
             );
 
@@ -251,7 +251,7 @@ pub async fn handle_command(
         }
 
         BotCommand::Undo => {
-            println!("↩️ Undo command from {}\n", user_phone);
+            println!("↩️  Undo command from {}\n", user_phone);
             
             // Get user's recently completed assignments (ordered by completion time)
             match get_last_completed_assignment(pool, user_phone).await {
@@ -286,19 +286,19 @@ pub async fn handle_command(
         BotCommand::Help => {
             println!("❓ Help command received from {}\n", user_phone);
             CommandResponse::Text(
-                "🤖 *MAA — Academic Bot*\n\n\
-*Perintah penting:*\n\
+                "*[MABOT — Academic Bot]*\n\n\
+*Perintah Umum:*\n\
 • #ping — cek bot hidup\n\
 • #tugas — lihat semua tugas (global)\n\
-• #todo — lihat tugas pribadi kamu\n\
 • #today — tugas deadline hari ini\n\
 • #week — tugas 7 hari ke depan\n\
+• #help — bantuan\n\n\
+*Perintah Personal:*
+• #todo — lihat tugas pribadi kamu\n\
 • #<id> — lihat detail tugas dari #todo\n\
 • #done <id> — tandai selesai\n\
-• #undo — batalkan #done terakhir\n\
-• #help — bantuan\n\n\
-⚠️ *Penting:* #<id> dan #done selalu pakai nomor dari *#todo*\n\n\
-_Tips: Kirim info tugas di grup akademik, bot simpan otomatis._"
+• #undo — batalkan #done terakhir\n\n\
+*Penting:* #<id> dan #done selalu pakai nomor dari *#todo*. _Info tugas akan otomatis tersimpan via grup info akademik, tidak dari chat lain._"
                     .to_string(),
             )
         }
@@ -358,7 +358,7 @@ fn format_assignments_list(
 
     for (i, a) in filtered_assignments.iter().enumerate() {
         let status_emoji = status_dot(&a.deadline);
-        let title_fmt = format!("*{}*", sanitize_wa_md(&a.title));
+        let title_fmt = format!("_{}_", preview_text(&sanitize_wa_md(&a.title),25));
         let due_text = humanize_deadline(&a.deadline);
         let course = sanitize_wa_md(&a.course_name);
 
@@ -368,7 +368,7 @@ fn format_assignments_list(
             .map(|d| sanitize_wa_md(d))
             .map(|d| d.trim().to_string())
             .filter(|d| !d.is_empty())
-            .map(|d| format!("📝 {}", preview_text(&d, 120)))
+            .map(|d| format!("📝 {}", preview_text(&d, 25)))
             .unwrap_or_default();
 
         let code_line = a
@@ -377,7 +377,7 @@ fn format_assignments_list(
             .map(|c| format!("🧩 Kode: {}", sanitize_wa_md(c)))
             .unwrap_or_default();
 
-        response.push_str(&format!("{}) {} {}\n", i + 1, status_emoji, course));
+        response.push_str(&format!("{} *[{}. {}]*\n", status_emoji, i + 1, course));
         response.push_str(&format!("📌 {}\n", title_fmt));
         response.push_str(&format!("⏰ Deadline: {}\n", due_text));
         
@@ -393,10 +393,10 @@ fn format_assignments_list(
     // ✅ Different footers based on list type
     if user_specific {
         // For #todo, #today, #week - these use personal numbering
-        response.push_str("_🔎 Detail: #<nomor> • ✅ Selesai: #done <nomor>_");
+        response.push_str("\n_🔎 Detail: #<nomor> • ✅ Selesai: #done <nomor>_");
     } else {
         // For #tugas - this is global view only
-        response.push_str("_💡 Gunakan #todo untuk checklist personal_");
+        response.push_str("\n_💡 Gunakan #todo untuk checklist personal_");
     }
     
     CommandResponse::Text(response)
