@@ -143,7 +143,7 @@ pub struct Assignment {
     pub deadline: Option<DateTime<Utc>>,
     pub parallel_code: Option<String>,  // k1, k2, k3, p1, p2, p3
     pub sender_id: Option<String>,      // WhatsApp sender number
-    pub message_id: String,             // WhatsApp message ID
+    pub message_ids: Vec<String>,             // WhatsApp message ID
 }
 
 #[derive(Debug, Clone, FromRow, Serialize, Deserialize)]
@@ -176,8 +176,16 @@ pub struct AssignmentWithCourse {
     pub title: String,
     pub description: Option<String>,
     pub deadline: DateTime<Utc>,
-    pub message_id: Option<String>,   
-    pub sender_id: Option<String>,    
+    pub message_ids: Vec<String>,   
+    pub sender_id: Option<String>, 
+    pub is_completed: bool,
+}
+
+// Struct baru untuk insert completion (opsional, tapi rapi)
+#[derive(Debug, Serialize, Deserialize)]
+pub struct UserCompletion {
+    pub user_id: String,
+    pub assignment_id: Uuid,
 }
 
 #[derive(Debug, Clone, FromRow, Serialize, Deserialize)]
