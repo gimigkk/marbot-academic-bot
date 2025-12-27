@@ -53,9 +53,9 @@ pub async fn create_assignment(
         r#"
         INSERT INTO assignments (
             course_id, parallel_code, title, description, 
-            deadline, sender_id, message_id
+            deadline, sender_id, message_ids
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7)
+        VALUES ($1, $2, $3, $4, $5, $6, ARRAY[$7])
         "#,
         new_assignment.course_id,
         clean_parallel,
@@ -142,8 +142,7 @@ pub async fn get_active_assignments(pool: &PgPool) -> Result<Vec<Assignment>> {
     
     let assignments = sqlx::query_as::<_, Assignment>(
         r#"
-        SELECT a.* 
-        FROM assignments a
+        SELECT a.* FROM assignments a
         WHERE a.deadline > $1 OR a.deadline IS NULL
         ORDER BY a.created_at DESC
         LIMIT 20
@@ -174,7 +173,7 @@ pub async fn get_active_assignments_sorted(pool: &PgPool) -> Result<Vec<Assignme
             a.title,
             a.description,  
             a.deadline as "deadline!",
-            a.message_id,
+            a.message_ids,
             a.sender_id
         FROM assignments a
         JOIN courses c ON a.course_id = c.id
@@ -306,7 +305,7 @@ pub async fn get_assignment_by_message_id(
     message_id: &str,
 ) -> Result<Option<Assignment>> {
     let assignment = sqlx::query_as::<_, Assignment>(
-        "SELECT * FROM assignments WHERE message_id = $1"
+        "SELECT * FROM assignments WHERE $1 = ANY(message_ids)"
     )
     .bind(message_id)
     .fetch_optional(pool)
@@ -419,6 +418,7 @@ pub async fn update_assignment_fields(
     new_title: Option<String>,
     new_description: Option<String>,
     new_parallel_code: Option<String>,
+    incoming_message_id: Option<String>,
 ) -> Result<Assignment> {
     println!("🔄 Updating assignment {}", id);
     println!("   Deadline: {:?}", new_deadline);
@@ -452,7 +452,11 @@ pub async fn update_assignment_fields(
         SET deadline = $2, 
             title = $3, 
             description = $4,
-            parallel_code = $5
+            parallel_code = $5,
+            message_ids = CASE 
+                            WHEN $6::text IS NOT NULL THEN array_append(message_ids, $6)
+                            ELSE message_ids 
+                          END
         WHERE id = $1
         RETURNING *
         "#
@@ -462,6 +466,7 @@ pub async fn update_assignment_fields(
     .bind(&final_title)
     .bind(&final_description)
     .bind(final_parallel)
+    .bind(incoming_message_id)
     .fetch_one(&mut *tx)
     .await?;
     

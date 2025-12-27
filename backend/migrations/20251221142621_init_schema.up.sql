@@ -39,7 +39,7 @@ create table public.assignments (
 
   -- Sumber Chat
   sender_id text,           -- Nomor Pengirim
-  message_id text not null 
+  message_ids text[] not null 
 );
 
 -- TABEL 3: WA LOGS (Debugging Purpose Only)
@@ -60,4 +60,3 @@ alter table public.wa_logs enable row level security;
 create policy "Enable access to all users" on public.courses for all using (true) with check (true);
 create policy "Enable access to all users" on public.assignments for all using (true) with check (true);
 create policy "Enable access to all users" on public.wa_logs for all using (true) with check (true);
-
