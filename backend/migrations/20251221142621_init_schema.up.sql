@@ -6,19 +6,19 @@ create extension if not exists "uuid-ossp";
 create table public.courses (
   id uuid default uuid_generate_v4() primary key,
   name text not null unique,   -- Nama Matkul (Unique Value)
+  aliases text[],           
   created_at timestamp with time zone default timezone('utc'::text, now()) not null
 );
 
 -- INPUT Mata Kuliah
-insert into public.courses (name) values 
-  ('Pro Gaming'),
-  ('Struktur Data'),
-  ('Rekayasa Perangkat Lunak'),
-  ('Organisasi dan Arsitektur Komputer'),
-  ('Metode Kuantitatif'),
-  ('Grafika Komputer dan Visualisasi'),
-  ('User Experience Design');
-
+insert into public.courses (name, aliases) values 
+  ('Pemrograman', ARRAY['pemrog']),
+  ('Struktur Data', ARRAY['Ssrukdat', 'sd']),
+  ('Rekayasa Perangkat Lunak', ARRAY['rpl']),
+  ('Organisasi dan Arsitektur Komputer', ARRAY['orkom', 'oak']),
+  ('Metode Kuantitatif', ARRAY['metkun', 'mk', 'metcuan']),
+  ('Grafika Komputer dan Visualisasi', ARRAY['grafkom', 'gkv', 'gk']),
+  ('User Experience Design', ARRAY['ux', 'uxd']);
 
 
 -- TABEL 2: ASSIGNMENTS (Tugas)
@@ -58,7 +58,7 @@ CREATE TABLE IF NOT EXISTS public.user_completions (
     assignment_id UUID NOT NULL REFERENCES public.assignments(id) ON DELETE CASCADE,
     completed_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
     
-    -- Mencegah duplikat 
+    -- Mencegah duplikat (User tidak bisa menyelesaikan tugas yang sama 2x)
     UNIQUE(user_id, assignment_id)
 );
 
