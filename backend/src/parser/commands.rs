@@ -298,7 +298,10 @@ pub async fn handle_command(
 • #<id> — lihat detail tugas dari #todo\n\
 • #done <id> — tandai selesai\n\
 • #undo — batalkan #done terakhir\n\n\
-*Penting:* #<id> dan #done selalu pakai nomor dari *#todo*. _Info tugas akan otomatis tersimpan via grup info akademik, tidak dari chat lain._"
+*Penting:* #<id> dan #done selalu pakai nomor dari *#todo*. _Info tugas akan otomatis tersimpan via grup info akademik, tidak dari chat lain._
+
+*Want to Contribute?*
+github.com/gimigkk/marbot-academic-bot"
                     .to_string(),
             )
         }
@@ -396,7 +399,7 @@ fn format_assignments_list(
         response.push_str("\n_🔎 Detail: #<nomor> • ✅ Selesai: #done <nomor>_");
     } else {
         // For #tugas - this is global view only
-        response.push_str("\n_💡 Gunakan #todo untuk checklist personal_");
+        response.push_str("\n_💡 Gunakan #todo untuk list personal_");
     }
     
     CommandResponse::Text(response)
