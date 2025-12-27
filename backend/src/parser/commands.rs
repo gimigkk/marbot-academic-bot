@@ -10,6 +10,7 @@ pub enum CommandResponse {
 }
 
 /// Handle bot commands and return response
+#[allow(non_snake_case)]
 pub async fn handle_command(
     cmd: BotCommand,
     user_phone: &str,
