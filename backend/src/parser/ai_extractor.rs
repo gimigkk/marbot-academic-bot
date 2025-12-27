@@ -209,7 +209,7 @@ async fn try_groq_vision(prompt: &str, image_base64: &str) -> Result<AIClassific
         let status = response.status();
         
         if status.is_success() {
-            println!("│ \x1b[32m✅ SUCCESS\x1b[0m    : Groq Vision response");
+            println!("│ \x1b[32m✅ SUCCESS\x1b[0m   : Groq Vision response");
             
             let groq_response: GroqResponse = response.json().await
                 .map_err(|e| format!("Failed to deserialize Groq response: {}", e))?;
@@ -292,7 +292,7 @@ async fn try_groq_text(prompt: &str) -> Result<AIClassification, String> {
         let status = response.status();
         
         if status.is_success() {
-            println!("│ \x1b[32m✅ SUCCESS\x1b[0m    : Groq Text response");
+            println!("│ \x1b[32m✅ SUCCESS\x1b[0m   : Groq Text response");
             
             let groq_response: GroqResponse = response.json().await
                 .map_err(|e| format!("Failed to deserialize Groq response: {}", e))?;
@@ -581,7 +581,7 @@ CRITICAL CLASSIFICATION RULES:
    - If not mentioned but can be inferred from existing assignment, include it
    - If unknown, set to null
 
-4. **Title Improvements**: If updating generic title + message has specific details
+4. **Title Improvements**: If updating generic title + message has specific details + current title contradicts the update
    - Generic titles: "Tugas baru", "Assignment", "Tugas", "New task"
    - Set "new_title" to descriptive title from update details
    - Example: "Tugas baru" + update mentions "figma prototype" → new_title: "Figma Prototype Pertemuan 4"
