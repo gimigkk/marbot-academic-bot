@@ -100,9 +100,7 @@ sqlx migrate run
 ### 2. Start WAHA Container
 
 ```bash
-cd ../waha
-
-cd ~/Desktop/Projects/Academic\ Bot/waha
+cd ~/Academic\ Bot/waha
 
 sudo docker run -d \
 --name waha \
