@@ -433,6 +433,7 @@ async fn handle_ai_classification(
                                 None,
                                 Some(description_clone.clone()),
                                 None,
+                                Some(message_id.clone()),
                             ).await {
                                 Ok(updated) => {
                                     let response = format!(
@@ -519,6 +520,7 @@ async fn handle_ai_classification(
             let new_description_clone = new_description.clone();
             let pool_clone = pool.clone();
             let parallel_code_clone = parallel_code.clone();
+            let update_msg_id = message_id.clone();
 
             // Fetch course_map BEFORE spawning
             let course_map_result = sqlx::query_as::<_, (uuid::Uuid, String)>(
@@ -578,6 +580,7 @@ async fn handle_ai_classification(
                                     new_title_clone.clone(),
                                     new_description_clone.clone(),
                                     parallel_code_clone,
+                                    Some(update_msg_id),
                                 ).await {
                                     Ok(updated) => {
                                         let response = format!(
@@ -647,7 +650,7 @@ async fn handle_ai_classification(
                                     deadline: Some(parsed_deadline),
                                     parallel_code: parallel_code.clone(),
                                     sender_id: None,
-                                    message_id: String::new(),
+                                    message_id: update_msg_id,
                                 };
                                 
                                 match crud::create_assignment(&pool_clone, new_assignment).await {

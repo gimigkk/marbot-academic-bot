@@ -1,4 +1,4 @@
-use crate::database::crud::get_active_assignments_sorted;
+use crate::database::crud::{get_active_assignments_for_user, mark_assignment_complete, unmark_assignment_complete};
 use crate::models::BotCommand;
 use chrono::{DateTime, Datelike, Duration, Local, NaiveDate, Utc};
 use sqlx::PgPool;
@@ -25,7 +25,8 @@ pub async fn handle_command(
         BotCommand::Tugas => {
             println!("📋 Tugas command received from {}", user_phone);
 
-            match get_active_assignments_sorted(pool).await {
+            // Menggunakan fungsi BARU yang mengecek status 'Done' user
+            match get_active_assignments_for_user(pool, user_phone).await {
                 Ok(assignments) => format_assignments_list(assignments, "📋 *Daftar Tugas*", false),
                 Err(e) => {
                     eprintln!("❌ Error fetching assignments: {}", e);
@@ -40,7 +41,7 @@ pub async fn handle_command(
         BotCommand::Today => {
             println!("📅 Today command received from {}", user_phone);
 
-            match get_active_assignments_sorted(pool).await {
+            match get_active_assignments_for_user(pool, user_phone).await {
                 Ok(assignments) => {
                     let today = Local::now().date_naive();
                     let today_assignments: Vec<_> = assignments
@@ -64,7 +65,7 @@ pub async fn handle_command(
         BotCommand::Week => {
             println!("📆 Week command received from {}", user_phone);
 
-            match get_active_assignments_sorted(pool).await {
+            match get_active_assignments_for_user(pool, user_phone).await {
                 Ok(assignments) => {
                     let now = Local::now();
                     let week_end = now + Duration::days(7);
@@ -108,7 +109,8 @@ pub async fn handle_command(
                 );
             }
 
-            match get_active_assignments_sorted(pool).await {
+            // Gunakan get_active_assignments_for_user untuk konsistensi index
+            match get_active_assignments_for_user(pool, user_phone).await {
                 Ok(assignments) => {
                     let idx = (index as usize).saturating_sub(1);
 
@@ -120,7 +122,7 @@ pub async fn handle_command(
                     } else {
                         let assignment = &assignments[idx];
 
-                        let Some(message_id) = assignment.message_id.clone() else {
+                        let Some(message_id) = assignment.message_ids.last().cloned() else {
                             return CommandResponse::Text(
                                 "❌ Pesan asli untuk tugas ini belum tersimpan.\nCoba cek daftar dengan *#tugas*."
                                     .to_string(),
@@ -128,6 +130,8 @@ pub async fn handle_command(
                         };
 
                         let status = status_dot(&assignment.deadline);
+                        let done_status = if assignment.is_completed { "✅ SUDAH SELESAI" } else { "⬜ BELUM SELESAI" };
+                        
                         let due_text = humanize_deadline(&assignment.deadline);
 
                         let course = sanitize_wa_md(&assignment.course_name);
@@ -150,8 +154,9 @@ pub async fn handle_command(
                         CommandResponse::ForwardMessage {
                             message_id,
                             warning: format!(
-                                "🧾 *Detail Tugas #{}*\n\n{} *{}*\n📌 {}\n⏰ Deadline: {}\n📝 {}{}\n\n_Keterangan: 🔴 deadline 0–2 hari lagi • 🟢 deadline > 2 hari_",
+                                "🧾 *Detail Tugas #{}*\nStatus: {}\n\n{} *{}*\n📌 {}\n⏰ Deadline: {}\n📝 {}{}\n\n_Keterangan: 🔴 deadline 0–2 hari lagi • 🟢 deadline > 2 hari_",
                                 index,
+                                done_status,
                                 status,
                                 course,
                                 title,
@@ -174,11 +179,34 @@ pub async fn handle_command(
 
         BotCommand::Done(id) => {
             println!("✅ Done command for assignment {} from {}\n", id, user_phone);
-            // TODO: Update database (fitur selesai belum ada di repo ini)
-            CommandResponse::Text(format!(
-                "✅ Oke!\nTugas *#{}* akan ditandai selesai setelah fitur penyelesaian tugas diaktifkan.\n\nKetik *#tugas* untuk lihat daftar.",
-                id
-            ))
+            
+            // 1. Ambil daftar tugas user saat ini untuk mapping ID (Index -> UUID)
+            match get_active_assignments_for_user(pool, user_phone).await {
+                Ok(assignments) => {
+                    let idx = (id as usize).saturating_sub(1);
+                    if idx >= assignments.len() {
+                         return CommandResponse::Text(format!("❌ Tugas nomor {} tidak ditemukan.", id));
+                    }
+                    
+                    let assignment = &assignments[idx];
+                    
+                    // 2. Cek status sekarang, lalu Toggle
+                    if assignment.is_completed {
+                        // Kalau sudah selesai -> Undo (Belum)
+                        match unmark_assignment_complete(pool, assignment.id, user_phone).await {
+                            Ok(_) => CommandResponse::Text(format!("↩️ Tugas *{}* ditandai BELUM selesai.", sanitize_wa_md(&assignment.title))),
+                            Err(e) => CommandResponse::Text(format!("❌ Database error: {}", e))
+                        }
+                    } else {
+                        // Kalau belum -> Mark Done
+                        match mark_assignment_complete(pool, assignment.id, user_phone).await {
+                            Ok(_) => CommandResponse::Text(format!("✅ Mantap! Tugas *{}* selesai.", sanitize_wa_md(&assignment.title))),
+                            Err(e) => CommandResponse::Text(format!("❌ Database error: {}", e))
+                        }
+                    }
+                }
+                Err(e) => CommandResponse::Text(format!("❌ Gagal mengambil data: {}", e))
+            }
         }
 
         BotCommand::Help => {
@@ -191,7 +219,7 @@ pub async fn handle_command(
 • #today — tugas deadline hari ini\n\
 • #week — tugas 7 hari ke depan\n\
 • #tugas <id> | #<id> — lihat pesan aslinya\n\
-• #done <id> — tandai selesai (coming soon)\n\
+• #done <id> — tandai selesai (checklist)\n\
 • #help — bantuan\n\n
 _Tips: Kirim info tugas di grup akademik, nanti saya simpan otomatis._"
                     .to_string(),
@@ -239,11 +267,23 @@ fn format_assignments_list(
     }
 
     for (i, a) in assignments.iter().enumerate() {
-        let status = status_dot(&a.deadline);
+        // CEK STATUS DONE
+        let status_emoji = if a.is_completed { 
+            "✅" 
+        } else {
+            status_dot(&a.deadline) 
+        };
+        
+        // Coret judul jika selesai
+        let title_fmt = if a.is_completed {
+            format!("~{}~", sanitize_wa_md(&a.title))
+        } else {
+            format!("*{}*", sanitize_wa_md(&a.title))
+        };
+        
         let due_text = humanize_deadline(&a.deadline);
 
         let course = sanitize_wa_md(&a.course_name);
-        let title = sanitize_wa_md(&a.title);
 
         let desc_line = a
             .description
@@ -260,9 +300,14 @@ fn format_assignments_list(
             .map(|c| format!("🧩 Kode: {}", sanitize_wa_md(c)))
             .unwrap_or_default();
 
-        response.push_str(&format!("{}) {} *{}*\n", i + 1, status, course));
-        response.push_str(&format!("📌 {}\n", title));
-        response.push_str(&format!("⏰ Deadline: {}\n", due_text));
+        response.push_str(&format!("{}) {} {}\n", i + 1, status_emoji, course));
+        response.push_str(&format!("📌 {}\n", title_fmt));
+        
+        // Hanya tampilkan detail deadline jika BELUM selesai agar list lebih rapi
+        if !a.is_completed {
+            response.push_str(&format!("⏰ Deadline: {}\n", due_text));
+        }
+        
         if !desc_line.is_empty() {
             response.push_str(&format!("{}\n", desc_line));
         }

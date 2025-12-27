@@ -53,9 +53,9 @@ pub async fn create_assignment(
         r#"
         INSERT INTO assignments (
             course_id, parallel_code, title, description, 
-            deadline, sender_id, message_id
+            deadline, sender_id, message_ids
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7)
+        VALUES ($1, $2, $3, $4, $5, $6, ARRAY[$7])
         "#,
         new_assignment.course_id,
         clean_parallel,
@@ -72,7 +72,50 @@ pub async fn create_assignment(
     Ok(format!("Sukses! Tugas '{}' berhasil disimpan ke matkul '{}'\n", new_assignment.title, real_course_name))
 }
 
+// ========================================
+// COMPLETION OPERATIONS (NEW)
+// ========================================
 
+/// Tandai tugas selesai
+pub async fn mark_assignment_complete(
+    pool: &PgPool,
+    assignment_id: Uuid,
+    user_id: &str
+) -> Result<bool, sqlx::Error> {
+    let result = sqlx::query!(
+        r#"
+        INSERT INTO user_completions (assignment_id, user_id)
+        VALUES ($1, $2)
+        ON CONFLICT (user_id, assignment_id) DO NOTHING
+        "#,
+        assignment_id,
+        user_id
+    )
+    .execute(pool)
+    .await?;
+
+    Ok(result.rows_affected() > 0)
+}
+
+/// Tandai tugas belum selesai (Undo)
+pub async fn unmark_assignment_complete(
+    pool: &PgPool,
+    assignment_id: Uuid,
+    user_id: &str
+) -> Result<bool, sqlx::Error> {
+    let result = sqlx::query!(
+        r#"
+        DELETE FROM user_completions 
+        WHERE assignment_id = $1 AND user_id = $2
+        "#,
+        assignment_id,
+        user_id
+    )
+    .execute(pool)
+    .await?;
+
+    Ok(result.rows_affected() > 0)
+}
 
 // ========================================
 // READ OPERATIONS
@@ -142,8 +185,7 @@ pub async fn get_active_assignments(pool: &PgPool) -> Result<Vec<Assignment>> {
     
     let assignments = sqlx::query_as::<_, Assignment>(
         r#"
-        SELECT a.* 
-        FROM assignments a
+        SELECT a.* FROM assignments a
         WHERE a.deadline > $1 OR a.deadline IS NULL
         ORDER BY a.created_at DESC
         LIMIT 20
@@ -158,9 +200,6 @@ pub async fn get_active_assignments(pool: &PgPool) -> Result<Vec<Assignment>> {
     Ok(assignments)
 }
 
-/// Yang ini versi sorted dari yang di atas, dipake di #tugas
-/// Get active assignments sorted by deadline, then course name
-/// Get active assignments sorted by deadline, then course name
 pub async fn get_active_assignments_sorted(pool: &PgPool) -> Result<Vec<AssignmentWithCourse>, sqlx::Error> {
     let now = Utc::now();
     
@@ -174,8 +213,9 @@ pub async fn get_active_assignments_sorted(pool: &PgPool) -> Result<Vec<Assignme
             a.title,
             a.description,  
             a.deadline as "deadline!",
-            a.message_id,
-            a.sender_id
+            a.message_ids,
+            a.sender_id,
+            false as "is_completed!" -- Default false untuk scheduler
         FROM assignments a
         JOIN courses c ON a.course_id = c.id
         WHERE a.deadline >= $1 AND a.deadline IS NOT NULL
@@ -186,7 +226,46 @@ pub async fn get_active_assignments_sorted(pool: &PgPool) -> Result<Vec<Assignme
     .fetch_all(pool)
     .await?;
     
-    println!("✅ Found {} active assignments\n", assignments.len());
+    println!("✅ Found {} active assignments (scheduler)\n", assignments.len());
+    
+    Ok(assignments)
+}
+
+/// ✅ TODO :(memperhatikan status DONE user)
+pub async fn get_active_assignments_for_user(
+    pool: &PgPool, 
+    user_id: &str
+) -> Result<Vec<AssignmentWithCourse>, sqlx::Error> {
+    let now = Utc::now();
+    
+    // LEFT JOIN untuk cek status 'is_completed'
+    let assignments = sqlx::query_as!(
+        AssignmentWithCourse,
+        r#"
+        SELECT 
+            a.id,
+            c.name as course_name,
+            a.parallel_code,
+            a.title,
+            a.description,  
+            a.deadline as "deadline!",
+            a.message_ids,
+            a.sender_id,
+            -- Cek apakah ada di tabel completions
+            (uc.id IS NOT NULL) as "is_completed!" 
+        FROM assignments a
+        JOIN courses c ON a.course_id = c.id
+        LEFT JOIN user_completions uc ON a.id = uc.assignment_id AND uc.user_id = $2
+        WHERE a.deadline >= $1 AND a.deadline IS NOT NULL
+        ORDER BY a.deadline ASC, c.name ASC
+        "#,
+        now,
+        user_id // Bind parameter user_id
+    )
+    .fetch_all(pool)
+    .await?;
+    
+    println!("✅ Found {} active assignments for user {}\n", assignments.len(), user_id);
     
     Ok(assignments)
 }
@@ -306,7 +385,7 @@ pub async fn get_assignment_by_message_id(
     message_id: &str,
 ) -> Result<Option<Assignment>> {
     let assignment = sqlx::query_as::<_, Assignment>(
-        "SELECT * FROM assignments WHERE message_id = $1"
+        "SELECT * FROM assignments WHERE $1 = ANY(message_ids)"
     )
     .bind(message_id)
     .fetch_optional(pool)
@@ -419,6 +498,7 @@ pub async fn update_assignment_fields(
     new_title: Option<String>,
     new_description: Option<String>,
     new_parallel_code: Option<String>,
+    incoming_message_id: Option<String>,
 ) -> Result<Assignment> {
     println!("🔄 Updating assignment {}", id);
     println!("   Deadline: {:?}", new_deadline);
@@ -452,7 +532,11 @@ pub async fn update_assignment_fields(
         SET deadline = $2, 
             title = $3, 
             description = $4,
-            parallel_code = $5
+            parallel_code = $5,
+            message_ids = CASE 
+                            WHEN $6::text IS NOT NULL THEN array_append(message_ids, $6)
+                            ELSE message_ids 
+                          END
         WHERE id = $1
         RETURNING *
         "#
@@ -462,6 +546,7 @@ pub async fn update_assignment_fields(
     .bind(&final_title)
     .bind(&final_description)
     .bind(final_parallel)
+    .bind(incoming_message_id)
     .fetch_one(&mut *tx)
     .await?;
     
