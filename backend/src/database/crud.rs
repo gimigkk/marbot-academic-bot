@@ -72,7 +72,50 @@ pub async fn create_assignment(
     Ok(format!("Sukses! Tugas '{}' berhasil disimpan ke matkul '{}'\n", new_assignment.title, real_course_name))
 }
 
+// ========================================
+// COMPLETION OPERATIONS (NEW)
+// ========================================
 
+/// Tandai tugas selesai
+pub async fn mark_assignment_complete(
+    pool: &PgPool,
+    assignment_id: Uuid,
+    user_id: &str
+) -> Result<bool, sqlx::Error> {
+    let result = sqlx::query!(
+        r#"
+        INSERT INTO user_completions (assignment_id, user_id)
+        VALUES ($1, $2)
+        ON CONFLICT (user_id, assignment_id) DO NOTHING
+        "#,
+        assignment_id,
+        user_id
+    )
+    .execute(pool)
+    .await?;
+
+    Ok(result.rows_affected() > 0)
+}
+
+/// Tandai tugas belum selesai (Undo)
+pub async fn unmark_assignment_complete(
+    pool: &PgPool,
+    assignment_id: Uuid,
+    user_id: &str
+) -> Result<bool, sqlx::Error> {
+    let result = sqlx::query!(
+        r#"
+        DELETE FROM user_completions 
+        WHERE assignment_id = $1 AND user_id = $2
+        "#,
+        assignment_id,
+        user_id
+    )
+    .execute(pool)
+    .await?;
+
+    Ok(result.rows_affected() > 0)
+}
 
 // ========================================
 // READ OPERATIONS
@@ -157,9 +200,8 @@ pub async fn get_active_assignments(pool: &PgPool) -> Result<Vec<Assignment>> {
     Ok(assignments)
 }
 
-/// Yang ini versi sorted dari yang di atas, dipake di #tugas
-/// Get active assignments sorted by deadline, then course name
-/// Get active assignments sorted by deadline, then course name
+/// Yang ini versi original (digunakan oleh SCHEDULER)
+/// Tidak memedulikan status 'DONE' user, jadi default is_completed = false
 pub async fn get_active_assignments_sorted(pool: &PgPool) -> Result<Vec<AssignmentWithCourse>, sqlx::Error> {
     let now = Utc::now();
     
@@ -174,7 +216,8 @@ pub async fn get_active_assignments_sorted(pool: &PgPool) -> Result<Vec<Assignme
             a.description,  
             a.deadline as "deadline!",
             a.message_ids,
-            a.sender_id
+            a.sender_id,
+            false as "is_completed!" -- Default false untuk scheduler
         FROM assignments a
         JOIN courses c ON a.course_id = c.id
         WHERE a.deadline >= $1 AND a.deadline IS NOT NULL
@@ -185,7 +228,46 @@ pub async fn get_active_assignments_sorted(pool: &PgPool) -> Result<Vec<Assignme
     .fetch_all(pool)
     .await?;
     
-    println!("✅ Found {} active assignments\n", assignments.len());
+    println!("✅ Found {} active assignments (scheduler)\n", assignments.len());
+    
+    Ok(assignments)
+}
+
+/// ✅ TODO :(memperhatikan status DONE user)
+pub async fn get_active_assignments_for_user(
+    pool: &PgPool, 
+    user_id: &str
+) -> Result<Vec<AssignmentWithCourse>, sqlx::Error> {
+    let now = Utc::now();
+    
+    // Query dengan LEFT JOIN untuk cek status 'is_completed'
+    let assignments = sqlx::query_as!(
+        AssignmentWithCourse,
+        r#"
+        SELECT 
+            a.id,
+            c.name as course_name,
+            a.parallel_code,
+            a.title,
+            a.description,  
+            a.deadline as "deadline!",
+            a.message_ids,
+            a.sender_id,
+            -- Cek apakah ada di tabel completions
+            (uc.id IS NOT NULL) as "is_completed!" 
+        FROM assignments a
+        JOIN courses c ON a.course_id = c.id
+        LEFT JOIN user_completions uc ON a.id = uc.assignment_id AND uc.user_id = $2
+        WHERE a.deadline >= $1 AND a.deadline IS NOT NULL
+        ORDER BY a.deadline ASC, c.name ASC
+        "#,
+        now,
+        user_id // Bind parameter user_id
+    )
+    .fetch_all(pool)
+    .await?;
+    
+    println!("✅ Found {} active assignments for user {}\n", assignments.len(), user_id);
     
     Ok(assignments)
 }

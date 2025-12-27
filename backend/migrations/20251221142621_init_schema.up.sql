@@ -51,12 +51,32 @@ create table public.wa_logs (
   processed boolean default false
 );
 
+-- TABEL 4: USER COMPLETIONS (Tracking Tugas Selesai)
+CREATE TABLE IF NOT EXISTS public.user_completions (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id VARCHAR(255) NOT NULL,  -- Nomor WA User
+    assignment_id UUID NOT NULL REFERENCES public.assignments(id) ON DELETE CASCADE,
+    completed_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    
+    -- Mencegah duplikat 
+    UNIQUE(user_id, assignment_id)
+);
+
+-- Indexing untuk Performa Cepat
+CREATE INDEX IF NOT EXISTS idx_user_completions_user 
+ON public.user_completions (user_id, completed_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_user_completions_lookup 
+ON public.user_completions (user_id, assignment_id);
+
 -- Security 
 alter table public.courses enable row level security;
 alter table public.assignments enable row level security;
 alter table public.wa_logs enable row level security;
+alter table public.user_completions enable row level security;
 
 -- Policy
 create policy "Enable access to all users" on public.courses for all using (true) with check (true);
 create policy "Enable access to all users" on public.assignments for all using (true) with check (true);
 create policy "Enable access to all users" on public.wa_logs for all using (true) with check (true);
+create policy "Enable access to all users" on public.user_completions for all using (true) with check (true);
