@@ -439,6 +439,36 @@ pub async fn get_assignment_by_message_id(
     Ok(assignment)
 }
 
+/// Get assignment with course info by assignment ID (for clarification checks)
+pub async fn get_assignment_with_course_by_id(
+    pool: &PgPool,
+    assignment_id: Uuid,
+) -> Result<Option<AssignmentWithCourse>, sqlx::Error> {
+    let assignment = sqlx::query_as!(
+        AssignmentWithCourse,
+        r#"
+        SELECT 
+            a.id,
+            c.name as course_name,
+            a.parallel_code,
+            a.title,
+            a.description,  
+            a.deadline as "deadline!",
+            a.message_ids,
+            a.sender_id,
+            false as "is_completed!"
+        FROM assignments a
+        JOIN courses c ON a.course_id = c.id
+        WHERE a.id = $1
+        "#,
+        assignment_id
+    )
+    .fetch_optional(pool)
+    .await?;
+    
+    Ok(assignment)
+}
+
 /// Find assignments by keywords (for update detection) - IMPROVED VERSION
 pub async fn find_assignment_by_keywords(
     pool: &PgPool,

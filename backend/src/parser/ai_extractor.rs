@@ -610,29 +610,37 @@ Other/unclear:
 {{"type":"unrecognized"}}
 
 CRITICAL CLASSIFICATION RULES:
-1. **Check ACTIVE ASSIGNMENTS FIRST**: Before classifying as "assignment_info", verify if similar assignment already exists
-   - Match by: course name + assignment title/topic + parallel code
-   - If found → classify as "assignment_update"
-   - If NOT found → classify as "assignment_info"
+1. **Identify Message Intent FIRST**: 
+   - Does it say "Tugas BARU" / "NEW assignment" / "ada tugas" → likely NEW
+   - Does it say "UPDATE" / "revisi" / "koreksi" / "ganti deadline" → likely UPDATE
+   - If unclear, ONLY then check database
 
-2. **Reference Keywords for Updates**: Use 2-4 specific keywords that identify the assignment
+2. **Check ACTIVE ASSIGNMENTS** (only if message intent is unclear):
+   - Match by: course name + assignment title/topic + parallel code
+   - If found AND message is clearly about updating → "assignment_update"
+   - If NOT found OR message clearly introduces new task → "assignment_info"
+
+3. **DEFAULT TO NEW for ambiguous cases**: When in doubt, classify as "assignment_info"
+   - Better to create a duplicate (which we can merge) than miss a new assignment
+
+4. **Reference Keywords for Updates**: Use 2-4 specific keywords that identify the assignment
    - MUST include: course name/alias
    - SHOULD include: specific topic/chapter/week number
    - Example: ["pemrograman", "bab 2"] or ["GKV", "matriks", "pertemuan 4"]
 
-3. **Parallel Code Handling**:
+5. **Parallel Code Handling**:
    - ALWAYS include parallel_code in BOTH assignment_info AND assignment_update responses
    - Format: K1, K2, K3, P1, P2, P3 (uppercase K/P + number)
    - If mentioned in message, extract it
    - If not mentioned but can be inferred from existing assignment, include it
    - If unknown, set to null
 
-4. **Title Improvements**: If updating generic title + message has specific details + current title contradicts the update
+6. **Title Improvements**: If updating generic title + message has specific details + current title contradicts the update
    - Generic titles: "Tugas baru", "Assignment", "Tugas", "New task"
    - Set "new_title" to descriptive title from update details
    - Example: "Tugas baru" + update mentions "figma prototype" → new_title: "Figma Prototype Pertemuan 4"
 
-5. **Recurring Assignments** (LKP, Lab, Weekly tasks):
+7. **Recurring Assignments** (LKP, Lab, Weekly tasks):
    - Check if assignment with same pattern exists (e.g., "LKP 13", "Lab Week 5")
    - If EXISTS → "assignment_update"
    - If NOT EXISTS + clear new assignment language → "assignment_info"
@@ -645,11 +653,11 @@ CRITICAL CLASSIFICATION RULES:
    - "senin/selasa/rabu/etc" = next occurrence of that weekday
    - "kemarin" (yesterday) = minus 1 day
 
-7. **Course Name Normalization**:
+8. **Course Name Normalization**:
    - Always use FORMAL course name in "course_name" field
    - Match aliases case-insensitively: pemrog → Pemrograman, GKV → Grafika Komputer dan Visualisasi
 
-8. **Image Handling**: If message has image, extract ALL visible text and integrate into analysis
+9. **Image Handling**: If message has image, extract ALL visible text and integrate into analysis
 
 EXAMPLES:
 Message: "LKP 13 deadline tonight K1"
