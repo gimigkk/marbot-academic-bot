@@ -361,7 +361,7 @@ fn format_assignments_list(
 
     for (i, a) in filtered_assignments.iter().enumerate() {
         let status_emoji = status_dot(&a.deadline);
-        let title_fmt = format!("_{}_", preview_text(&sanitize_wa_md(&a.title),25));
+        let title_fmt = format!("{}", preview_text(&sanitize_wa_md(&a.title),25));
         let due_text = humanize_deadline(&a.deadline);
         let course = sanitize_wa_md(&a.course_name);
 
@@ -380,7 +380,7 @@ fn format_assignments_list(
             .map(|c| format!("🧩 Kode: {}", sanitize_wa_md(c)))
             .unwrap_or_default();
 
-        response.push_str(&format!("{} *[{}. {}]*\n", status_emoji, i + 1, course));
+        response.push_str(&format!("{} *[{}] [{}]*\n", status_emoji, i + 1, course));
         response.push_str(&format!("📌 {}\n", title_fmt));
         response.push_str(&format!("⏰ Deadline: {}\n", due_text));
         
@@ -396,7 +396,7 @@ fn format_assignments_list(
     // ✅ Different footers based on list type
     if user_specific {
         // For #todo, #today, #week - these use personal numbering
-        response.push_str("\n_🔎 Detail: #<nomor> • ✅ Selesai: #done <nomor>_");
+        response.push_str("\n_🔎 Detail: #<nomor>_\n_✅ Selesai: #done <nomor>_");
     } else {
         // For #tugas - this is global view only
         response.push_str("\n_💡 Gunakan #todo untuk list personal_");
