@@ -20,6 +20,7 @@ pub mod classifier;
 pub mod parser;
 pub mod whitelist;
 pub mod database;
+pub mod clarification;
 
 use crate::database::crud;
 use crate::parser::commands::CommandResponse;
@@ -144,7 +145,7 @@ async fn webhook(
 ) -> StatusCode {
 
     // Check message payload
-    //println!("🔍 DEBUG Raw payload: {:#?}", payload);
+    //println!("\n🔍 DEBUG Raw payload: {:#?}\n", payload);
 
     // Only process "message.any" events
     if payload.event != "message.any" {
@@ -179,11 +180,11 @@ async fn webhook(
 
     // Ignore messages from debug group to prevent infinite loop
     let debug_group_id = std::env::var("DEBUG_GROUP_ID").ok();
-    if let Some(debug_id) = &debug_group_id {
-        if payload.payload.from == *debug_id {
-            return StatusCode::OK;
-        }
-    }
+    // if let Some(debug_id) = &debug_group_id {
+    //     if payload.payload.from == *debug_id {
+    //         return StatusCode::OK;
+    //     }
+    // }
 
     // ✅ EXTRACT SENDER AND CHAT IDs CORRECTLY
     let chat_id = &payload.payload.from;  // Where to send reply (group or personal chat)
@@ -215,6 +216,149 @@ async fn webhook(
     println!("📨 Message from: {}", chat_id);
     println!("   Sender: {} ({})", sender_name, sender_phone);
     println!("   Body: {}", payload.payload.body);
+
+    // println!("   🔍 Has quoted message: {}", payload.payload.quoted_msg.is_some());
+    // if let Some(ref q) = payload.payload.quoted_msg {
+    //     println!("   📎 Quoted text preview: {}", q.text.chars().take(50).collect::<String>());
+    // }
+
+    // ============= NEW: CLARIFICATION HANDLER =============
+    // Check if this message is replying to a clarification request
+    if let Some(quoted) = payload.payload.get_quoted_message() {
+        if quoted.text.contains("⚠️ *PERLU KLARIFIKASI*") {
+            println!("📝 Clarification response detected from {}", sender_phone);
+            
+            // Extract assignment ID from the quoted clarification message
+            if let Some(assignment_id) = clarification::extract_assignment_id_from_message(&quoted.text) {
+                println!("🔍 Updating assignment: {}", assignment_id);
+                
+                // Parse user's response (e.g., "Course: Pemrograman\nDeadline: 2025-12-30")
+                let updates = clarification::parse_clarification_response(&payload.payload.body);
+
+                if updates.is_empty() {
+                    let error_msg = "❌ Format tidak valid. Gunakan format:\n\
+                                    `Course: [nama]`\n\
+                                    `Title: [judul]`\n\
+                                    `Deadline: [YYYY-MM-DD]`\n\
+                                    `Parallel: [K1/K2/K3]`\n\
+                                    `Description: [keterangan]`\n\n\
+                                    _Cukup isi field yang kurang saja!_";
+                    
+                    if let Err(e) = send_reply(chat_id, error_msg).await {
+                        eprintln!("❌ Failed to send error: {}", e);
+                    }
+                    return StatusCode::OK;
+                }
+
+                // Parse deadline if provided
+                let new_deadline = updates.get("deadline")
+                    .and_then(|d| crud::parse_deadline(d).ok());
+
+                let new_title = updates.get("title").cloned();
+                let new_description = updates.get("description").cloned();
+                let new_parallel = updates.get("parallel_code")
+                    .map(|p| p.to_lowercase());
+
+                // Special handling for course name update
+                let course_id = if let Some(course_name) = updates.get("course_name") {
+                    match crud::get_course_by_name(&state.pool, course_name).await {
+                        Ok(Some(course)) => Some(course.id),
+                        Ok(None) => {
+                            let error_msg = format!("❌ Mata kuliah '{}' tidak ditemukan.\n\n_Cek ejaan atau tambahkan dulu ke database._", course_name);
+                            if let Err(e) = send_reply(chat_id, &error_msg).await {
+                                eprintln!("❌ Failed to send error: {}", e);
+                            }
+                            return StatusCode::OK;
+                        }
+                        Err(e) => {
+                            eprintln!("❌ Failed to lookup course: {}", e);
+                            None
+                        }
+                    }
+                } else {
+                    None
+                };
+
+                // Update the assignment in database
+                match crud::update_assignment_fields(
+                    &state.pool,
+                    assignment_id,
+                    new_deadline,
+                    new_title.clone(),
+                    new_description.clone(),
+                    new_parallel.clone(),
+                    None, // Don't change message_id for clarifications
+                ).await {
+                    Ok(updated) => {
+                        // If course_id was updated, do that separately
+                        if let Some(cid) = course_id {
+                            if let Err(e) = sqlx::query(
+                                "UPDATE assignments SET course_id = $1 WHERE id = $2"
+                            )
+                            .bind(cid)
+                            .bind(assignment_id)
+                            .execute(&state.pool)
+                            .await {
+                                eprintln!("❌ Failed to update course_id: {}", e);
+                            }
+                        }
+                        
+                        // Get course name for display
+                        let display_course_name = if let Some(course_name) = updates.get("course_name") {
+                            course_name.to_string()
+                        } else if let Some(cid) = updated.course_id {
+                            sqlx::query_scalar::<_, String>(
+                                "SELECT name FROM courses WHERE id = $1"
+                            )
+                            .bind(cid)
+                            .fetch_one(&state.pool)
+                            .await
+                            .unwrap_or_else(|_| "Unknown Course".to_string())
+                        } else {
+                            "Unknown Course".to_string()
+                        };
+                        
+                        let response = format!(
+                            "✅ *KLARIFIKASI TERSIMPAN*\n\
+                            ━━━━━━━━━━━━━━━━━━\n\
+                            📝 *{}*\n\
+                            📚 {}\n\
+                            ⏰ Deadline: {}\n\
+                            🧩 Paralel: {}\n\
+                            📄 {}\n\n\
+                            _Terima kasih atas klarifikasinya!_",
+                            updated.title,
+                            display_course_name,
+                            updated.deadline
+                                .map(|d| d.format("%Y-%m-%d").to_string())
+                                .unwrap_or("Belum ada deadline".to_string()),
+                            updated.parallel_code.as_deref().unwrap_or("N/A"),
+                            updated.description
+                        );
+                        
+                        if let Err(e) = send_reply(chat_id, &response).await {
+                            eprintln!("❌ Failed to send confirmation: {}", e);
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("❌ Failed to update assignment: {}", e);
+                        
+                        let error_msg = format!("❌ Gagal menyimpan klarifikasi: {}", e);
+                        if let Err(e) = send_reply(chat_id, &error_msg).await {
+                            eprintln!("❌ Failed to send error: {}", e);
+                        }
+                    }
+                }
+
+                return StatusCode::OK;
+            } else {
+                println!("⚠️  Could not extract assignment ID from quoted message");
+            }
+        }
+    }
+    // ============= END CLARIFICATION HANDLER =============
+
+    
 
     // STEP 1: CLASSIFY MESSAGE
     let message_type = classify_message(&payload.payload.body);
@@ -435,6 +579,7 @@ async fn handle_ai_classification(
             let parallel_code = extract_parallel_code(&title);
             let deadline_for_response = deadline.clone();
             let course_name_for_response = course_name.clone();
+            let debug_group_clone = debug_group_id.clone();
             
             tokio::spawn(async move {
                 // Look up course_id by name
@@ -479,7 +624,7 @@ async fn handle_ai_classification(
                                     );
                                     
                                     // Send to debug group instead
-                                    if let Some(debug_id) = &debug_group_id {
+                                    if let Some(debug_id) = &debug_group_clone {
                                         if let Err(e) = send_reply(debug_id, &response).await {
                                             eprintln!("❌ Failed to send to debug group: {}", e);
                                         }
@@ -513,6 +658,53 @@ async fn handle_ai_classification(
                     Ok(message) => {
                         println!("✅ {}", message);
                         
+                        // NEW: Check if clarification is needed
+                        if let Some(cid) = course_id {
+                            // Get the assignment we just created
+                            match crud::get_assignment_by_title_and_course(&pool_clone, &title_clone, cid).await {
+                                Ok(Some(assignment)) => {
+                                    // Fetch with course info for clarification check
+                                    match crud::get_assignment_with_course_by_id(&pool_clone, assignment.id).await {
+                                        Ok(Some(created_assignment)) => {
+                                            let missing_fields = clarification::identify_missing_fields(&created_assignment);
+                                            
+                                            if !missing_fields.is_empty() {
+                                                println!("⚠️  Missing fields detected: {:?}", missing_fields);
+                                                
+                                                // Send clarification request to debug group
+                                                if let Some(debug_id) = &debug_group_clone {
+                                                    let clarification_msg = clarification::generate_clarification_message(
+                                                        &created_assignment,
+                                                        &missing_fields
+                                                    );
+                                                    
+                                                    if let Err(e) = send_reply(debug_id, &clarification_msg).await {
+                                                        eprintln!("❌ Failed to send clarification: {}", e);
+                                                    }
+                                                }
+                                                
+                                                // Don't send success message - waiting for clarification
+                                                return;
+                                            }
+                                        }
+                                        Ok(None) => {
+                                            eprintln!("⚠️  Assignment not found after creation");
+                                        }
+                                        Err(e) => {
+                                            eprintln!("❌ Error fetching created assignment: {}", e);
+                                        }
+                                    }
+                                }
+                                Ok(None) => {
+                                    eprintln!("⚠️  Could not fetch created assignment");
+                                }
+                                Err(e) => {
+                                    eprintln!("❌ Error fetching assignment: {}", e);
+                                }
+                            }
+                        }
+                        
+                        // Normal success message (only if no clarification needed)
                         let response = format!(
                             "✨ *TUGAS BARU TERSIMPAN* ✨\n\
                             ━━━━━━━━━━━━━━━━━━\n\
@@ -527,8 +719,7 @@ async fn handle_ai_classification(
                             description_clone
                         );
                         
-                        // Send to debug group instead
-                        if let Some(debug_id) = &debug_group_id {
+                        if let Some(debug_id) = &debug_group_clone {
                             if let Err(e) = send_reply(debug_id, &response).await {
                                 eprintln!("❌ Failed to send to debug group: {}", e);
                             }
@@ -595,7 +786,8 @@ async fn handle_ai_classification(
                             &changes_clone,
                             &reference_keywords_clone,
                             &assignments,
-                            &course_map
+                            &course_map,
+                            parallel_code_clone.as_deref(),
                         ).await {
                             Ok(Some(assignment_id)) => {
                                 let parsed_deadline = if let Some(ref deadline_str) = new_deadline_clone {
@@ -766,6 +958,13 @@ fn parse_deadline(deadline_str: &Option<String>) -> Option<DateTime<Utc>> {
 
 fn extract_parallel_code(title: &str) -> Option<String> {
     let upper = title.to_uppercase();
+    
+    // Check for "all" first (case-insensitive)
+    if upper.contains("ALL") {
+        return Some("all".to_string());
+    }
+    
+    // Then check for specific codes
     for code in ["K1", "K2", "K3", "P1", "P2", "P3"] {
         if upper.contains(code) {
             return Some(code.to_lowercase());

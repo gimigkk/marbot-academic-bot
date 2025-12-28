@@ -28,11 +28,8 @@ pub struct MessagePayload {
 
     pub participant: Option<String>,
 
-
     #[serde(default)]
-    #[serde(rename = "chatId")]
     #[serde(flatten)]
-    #[allow(dead_code)]
     pub extra: Value,
 
     #[serde(rename = "hasMedia")]
@@ -45,13 +42,40 @@ pub struct MessagePayload {
 
     #[serde(rename = "_data")]
     pub data: Option<MessageData>,
+
+    // This is for backwards compatibility if quotedMsg exists
+    #[serde(rename = "quotedMsg")]
+    pub quoted_msg: Option<QuotedMessage>,
+}
+
+impl MessagePayload {
+    /// Get quoted message from either quotedMsg field or extra.replyTo
+    pub fn get_quoted_message(&self) -> Option<QuotedMessage> {
+        // First try the quotedMsg field
+        if let Some(ref quoted) = self.quoted_msg {
+            return Some(quoted.clone());
+        }
+        
+        // If not found, try extra.replyTo
+        if let Some(reply_to) = self.extra.get("replyTo") {
+            // Extract the body text from replyTo
+            if let Some(body_str) = reply_to.get("body").and_then(|v| v.as_str()) {
+                return Some(QuotedMessage {
+                    id: String::new(), // replyTo doesn't have ID
+                    text: body_str.to_string(),
+                    from: None,
+                });
+            }
+        }
+        
+        None
+    }
 }
 
 #[derive(Debug, Deserialize)]
 pub struct MessageData {
     #[serde(rename = "pushName")]
     pub push_name: Option<String>,
-    // Add other fields as needed
 }
 
 #[derive(Debug, Deserialize)]
@@ -60,6 +84,22 @@ pub struct MediaInfo {
     pub mimetype: Option<String>,
     pub filename: Option<String>,
     pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct QuotedMessage {
+    pub id: String,
+    #[serde(rename = "body")]
+    pub text: String,
+    #[serde(default)]
+    pub from: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ClarificationRequest {
+    pub assignment_id: uuid::Uuid,
+    pub missing_fields: Vec<String>,
+    pub message_id: String,
 }
 
 // ===== WAHA API TYPES =====
@@ -109,11 +149,11 @@ pub enum BotCommand {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum AIClassification {
     AssignmentInfo {
-        course_name: Option<String>,  // Added: Course name from AI
+        course_name: Option<String>,
         title: String,
-        deadline: Option<String>,  // "2025-01-15"
-        description: Option<String>, // kayaknya nanti gw bikin harus diisi
-        parallel_code: Option<String>,  // Added: parallel code (k1, k2, etc.)
+        deadline: Option<String>,
+        description: Option<String>,
+        parallel_code: Option<String>,
         #[serde(default)]
         #[serde(skip_serializing_if = "Option::is_none")]
         original_message: Option<String>,
@@ -125,7 +165,7 @@ pub enum AIClassification {
         new_title: Option<String>,
         new_deadline: Option<String>,
         new_description: Option<String>,
-        parallel_code: Option<String>,  // ✅ ADDED: parallel code for updates too
+        parallel_code: Option<String>,
         #[serde(default)]
         #[serde(skip_serializing_if = "Option::is_none")]
         original_message: Option<String>,
@@ -153,13 +193,13 @@ pub struct NewCourse {
 pub struct Assignment {
     pub id: Uuid,
     pub created_at: DateTime<Utc>,
-    pub course_id: Option<Uuid>,  // Foreign key to courses table
+    pub course_id: Option<Uuid>,
     pub title: String,
     pub description: String,
     pub deadline: Option<DateTime<Utc>>,
-    pub parallel_code: Option<String>,  // k1, k2, k3, p1, p2, p3
-    pub sender_id: Option<String>,      // WhatsApp sender number
-    pub message_ids: Vec<String>,             // WhatsApp message ID
+    pub parallel_code: Option<String>,
+    pub sender_id: Option<String>,
+    pub message_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, FromRow, Serialize, Deserialize)]
@@ -169,7 +209,7 @@ pub struct AssignmentDisplay {
     pub title: String,
     pub description: String,
     pub deadline: Option<DateTime<Utc>>,
-    pub parallel_code: Option<String>,  // k1, k2, k3, p1, p2, p3
+    pub parallel_code: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -183,7 +223,6 @@ pub struct NewAssignment {
     pub message_id: String,
 }
 
-/// Struct to hold assignment data with course name for display
 #[derive(Debug)]
 pub struct AssignmentWithCourse {
     pub id: uuid::Uuid,
@@ -197,7 +236,6 @@ pub struct AssignmentWithCourse {
     pub is_completed: bool,
 }
 
-// Struct baru untuk insert completion (opsional, tapi rapi)
 #[derive(Debug, Serialize, Deserialize)]
 pub struct UserCompletion {
     pub user_id: String,
@@ -217,4 +255,10 @@ pub struct WaLog {
 pub struct NewWaLog {
     pub event_type: Option<String>,
     pub payload: Option<Value>,
+}
+
+impl AssignmentWithCourse {
+    pub fn deadline_is_missing(&self) -> bool {
+        false
+    }
 }
