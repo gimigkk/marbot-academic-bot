@@ -64,10 +64,10 @@ async fn run_reminder_task(pool: PgPool, greeting: &str) -> Result<(), Box<dyn s
             .map(|d| sanitize_wa_md(d))
             .map(|d| d.trim().to_string())
             .filter(|d| !d.is_empty())
-            .map(|d| format!("📝 {}", preview_text(&d, 90)))
+            .map(|d| format!("📝 {}", preview_text(&d, 25)))
             .unwrap_or_default();
 
-        message.push_str(&format!("{}) {} *{}*\n", i + 1, status, course));
+        message.push_str(&format!("{} *[{}] [{}]*\n", status, i + 1, course));
         message.push_str(&format!("📌 {}\n", title));
         message.push_str(&format!("⏰ Deadline: {}\n", due_text));
         if !desc_line.is_empty() {
