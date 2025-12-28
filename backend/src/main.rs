@@ -139,6 +139,7 @@ async fn main() {
     axum::serve(listener, app).await.unwrap();
 }
 
+#[allow(non_snake_case)]
 async fn webhook(
     State(state): State<AppState>,
     Json(payload): Json<WebhookPayload>,
