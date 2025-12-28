@@ -718,10 +718,6 @@ fn build_matching_prompt(
         .iter()
         .enumerate()
         .map(|(i, a)| {
-            let deadline_str = a.deadline
-                .map(|d| d.format("%Y-%m-%d").to_string())
-                .unwrap_or("No deadline".to_string());
-            
             let parallel_str = a.parallel_code
                 .as_deref()
                 .unwrap_or("N/A");
