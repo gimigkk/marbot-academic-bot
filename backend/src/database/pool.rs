@@ -12,7 +12,7 @@ pub async fn create_pool() -> Result<PgPool, sqlx::Error> {
     //println!("🔌 Connecting to database...");
     
     let pool = PgPoolOptions::new()
-        .max_connections(20)  // ← Add this (default is 10)
+        .max_connections(20)  
         .connect(&database_url)
         .await?;  // ← Add ? here to propagate the error
     

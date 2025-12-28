@@ -225,7 +225,7 @@ async fn webhook(
         state.whitelist.should_process(chat_id, is_command);
 
     if !should_process {
-        println!("🚫 Ignoring: {} (from: {})", reason, chat_id);
+        println!("🚫 Ignoring: {} (from: {})\n", reason, chat_id);
         return StatusCode::OK;
     }
 
@@ -778,7 +778,7 @@ async fn fetch_image_from_url(url: &str, api_key: &str) -> Result<String, String
     // Fix URL if needed
     let corrected_url = url.replace("http://localhost:3000", "http://localhost:3001");
     
-    println!("   📡 Downloading: {}", corrected_url);
+    //println!("   📡 Downloading: {}", corrected_url);
     
     let client = reqwest::Client::new();
     let response = client

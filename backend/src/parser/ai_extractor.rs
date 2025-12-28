@@ -83,7 +83,7 @@ pub async fn extract_with_ai(
     text: &str,
     available_courses: &str,
     active_assignments: &[Assignment],
-    course_map: &HashMap<Uuid, String>,  // Map course_id -> course_name
+    course_map: &HashMap<Uuid, String>,
     image_base64: Option<&str>,
 ) -> Result<AIClassification, String> {
     let current_datetime = get_current_datetime();
@@ -100,25 +100,71 @@ pub async fn extract_with_ai(
     println!("\x1b[1;30m┌── 🤖 AI PROCESSING ──────────────────────────\x1b[0m");
     println!("│ 📝 Message  : \x1b[36m\"{}\"\x1b[0m", truncate_for_log(text, 60));
     if image_base64.is_some() {
-        println!("│ 🖼️  Image   : Detected");
+        println!("│ 🖼️  Image    : Attached (may be irrelevant meme)");
     }
     println!("│ 📊 Context  : {} active assignments", active_assignments.len());
     println!("│ 📅 Time     : {}", current_datetime);
     
-    // TIER 1: Try Groq first (vision if image, text otherwise)
-    // Groq has 128K context - plenty for assignments list
+    // TIER 1: Try vision model if image present
     if let Some(img) = image_base64 {
         match try_groq_vision(&prompt, img).await {
             Ok(classification) => {
-                println!("\x1b[1;30m└──────────────────────────────────────────────\x1b[0m");
-                return Ok(classification);
+                match classification {
+                    AIClassification::Unrecognized => {
+                        // This is EXPECTED behavior when image is an irrelevant meme
+                        println!("│ ℹ️  Vision Result: Unrecognized (image likely irrelevant)");
+                        println!("│ 🔄 Retrying with text-only analysis...");
+                        
+                        // FALLBACK: Process text-only since image was distracting
+                        match try_groq_text(&prompt).await {
+                            Ok(text_result) => {
+                                match text_result {
+                                    AIClassification::Unrecognized => {
+                                        // Both failed - truly unrecognized
+                                        println!("│ ⚠️  Text-only: Still unrecognized");
+                                        println!("\x1b[1;30m└──────────────────────────────────────────────\x1b[0m");
+                                        return Ok(AIClassification::Unrecognized);
+                                    }
+                                    _ => {
+                                        // Text-only succeeded! Image was just a distraction
+                                        println!("│ ✅ Text-only: Assignment detected (meme was distraction)");
+                                        println!("\x1b[1;30m└──────────────────────────────────────────────\x1b[0m");
+                                        return Ok(text_result);
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                eprintln!("│ ⚠️  Text fallback failed: {}", e);
+                                // Continue to Gemini
+                            }
+                        }
+                    }
+                    _ => {
+                        // Vision found something useful (image had real info)
+                        println!("│ ✅ Vision: Assignment extracted from image+text");
+                        println!("\x1b[1;30m└──────────────────────────────────────────────\x1b[0m");
+                        return Ok(classification);
+                    }
+                }
             }
             Err(e) => {
-                eprintln!("│ ⚠️  Groq Vision failed: {}", e);
-                eprintln!("│ 🔄 Falling back to Gemini...");
+                eprintln!("│ ⚠️  Vision model error: {}", e);
+                println!("│ 🔄 Trying text-only...");
+                
+                // Try text-only before Gemini
+                match try_groq_text(&prompt).await {
+                    Ok(classification) => {
+                        println!("\x1b[1;30m└──────────────────────────────────────────────\x1b[0m");
+                        return Ok(classification);
+                    }
+                    Err(e) => {
+                        eprintln!("│ ⚠️  Text fallback failed: {}", e);
+                    }
+                }
             }
         }
     } else {
+        // No image, standard text processing
         match try_groq_text(&prompt).await {
             Ok(classification) => {
                 println!("\x1b[1;30m└──────────────────────────────────────────────\x1b[0m");
@@ -131,7 +177,7 @@ pub async fn extract_with_ai(
         }
     }
     
-    // TIER 2: Fallback to Gemini (1M context - overkill but reliable)
+    // TIER 2: Gemini fallback
     for (index, model) in GEMINI_MODELS.iter().enumerate() {
         println!("│ 🔄 Model    : {} (Gemini Fallback {}/{})", model, index + 1, GEMINI_MODELS.len());
         
@@ -144,7 +190,7 @@ pub async fn extract_with_ai(
                 eprintln!("│ ❌ Failed   : {}", e);
                 if index == GEMINI_MODELS.len() - 1 {
                     println!("\x1b[1;30m└──────────────────────────────────────────────\x1b[0m");
-                    return Err("All models (Groq + Gemini) failed".to_string());
+                    return Err("All models failed".to_string());
                 }
             }
         }
@@ -209,7 +255,7 @@ async fn try_groq_vision(prompt: &str, image_base64: &str) -> Result<AIClassific
         let status = response.status();
         
         if status.is_success() {
-            println!("│ \x1b[32m✅ SUCCESS\x1b[0m   : Groq Vision response");
+            println!("│ \x1b[32m✅ SUCCESS\x1b[0m  : Groq Vision response");
             
             let groq_response: GroqResponse = response.json().await
                 .map_err(|e| format!("Failed to deserialize Groq response: {}", e))?;
@@ -292,7 +338,7 @@ async fn try_groq_text(prompt: &str) -> Result<AIClassification, String> {
         let status = response.status();
         
         if status.is_success() {
-            println!("│ \x1b[32m✅ SUCCESS\x1b[0m   : Groq Text response");
+            println!("│ \x1b[32m✅ SUCCESS\x1b[0m  : Groq Text response");
             
             let groq_response: GroqResponse = response.json().await
                 .map_err(|e| format!("Failed to deserialize Groq response: {}", e))?;
