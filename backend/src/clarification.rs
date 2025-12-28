@@ -49,7 +49,7 @@ pub fn generate_clarification_message(
         "course_name" => "📚 Nama Mata Kuliah",
         "title" => "📝 Judul Tugas",
         "deadline" => "⏰ Deadline",
-        "parallel_code" => "🧩 Kode Paralel (K1/K2/K3)",
+        "parallel_code" => "🧩 Kode Paralel (K1/K2/P1/P2/all)",
         "description" => "📄 Deskripsi/Keterangan",
         _ => "❓ Field Unknown"
     }).collect::<Vec<_>>().join("\n• ");
@@ -124,9 +124,9 @@ pub fn parse_clarification_response(text: &str) -> HashMap<String, String> {
             }
         } else {
             // No colon found - try to detect what the user meant
-            // Check if it looks like a parallel code
+            // Check if it looks like a parallel code (K1-K3 or P1-P3)
             let upper = line.to_uppercase();
-            if upper.starts_with('K') && upper.len() == 2 {
+            if is_valid_parallel_code(&upper) {
                 updates.insert("parallel_code".to_string(), upper.to_lowercase());
             }
             // Check if it looks like a date
@@ -141,6 +141,26 @@ pub fn parse_clarification_response(text: &str) -> HashMap<String, String> {
     }
     
     updates
+}
+
+/// Helper function to validate parallel codes
+fn is_valid_parallel_code(code: &str) -> bool {
+    // Accept "all" for assignments that apply to all classes
+    if code.to_lowercase() == "all" {
+        return true;
+    }
+    
+    if code.len() != 2 {
+        return false;
+    }
+    
+    let chars: Vec<char> = code.chars().collect();
+    let prefix = chars[0];
+    let number = chars[1];
+    
+    // Must start with K or P, followed by 1-3
+    (prefix == 'K' || prefix == 'P') && 
+    (number == '1' || number == '2' || number == '3')
 }
 
 /// Extract assignment ID from clarification message

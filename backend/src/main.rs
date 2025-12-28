@@ -786,7 +786,8 @@ async fn handle_ai_classification(
                             &changes_clone,
                             &reference_keywords_clone,
                             &assignments,
-                            &course_map
+                            &course_map,
+                            parallel_code_clone.as_deref(),
                         ).await {
                             Ok(Some(assignment_id)) => {
                                 let parsed_deadline = if let Some(ref deadline_str) = new_deadline_clone {
@@ -957,6 +958,13 @@ fn parse_deadline(deadline_str: &Option<String>) -> Option<DateTime<Utc>> {
 
 fn extract_parallel_code(title: &str) -> Option<String> {
     let upper = title.to_uppercase();
+    
+    // Check for "all" first (case-insensitive)
+    if upper.contains("ALL") {
+        return Some("all".to_string());
+    }
+    
+    // Then check for specific codes
     for code in ["K1", "K2", "K3", "P1", "P2", "P3"] {
         if upper.contains(code) {
             return Some(code.to_lowercase());
