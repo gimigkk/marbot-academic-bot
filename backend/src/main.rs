@@ -7,7 +7,7 @@ use axum::{
 use axum::http::StatusCode;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::net::SocketAddr;
-use std::sync::Arc;  
+use std::sync::{Arc, OnceLock};  
 use std::io::Write;
 use std::time::{Duration, Instant};
 use tokio::sync::Mutex;  
@@ -35,8 +35,26 @@ use whitelist::Whitelist;
 type MessageCache = Arc<Mutex<HashSet<String>>>;
 type RateLimiter = Arc<Mutex<HashMap<String, VecDeque<Instant>>>>;
 
-const SPAM_WINDOW_SECS: u64 = 10;
-const SPAM_MAX_MESSAGES: usize = 5;
+static SPAM_WINDOW_SECS: OnceLock<u64> = OnceLock::new();
+static SPAM_MAX_MESSAGES: OnceLock<usize> = OnceLock::new();
+
+fn spam_window_secs() -> u64 {
+    *SPAM_WINDOW_SECS.get_or_init(|| {
+        std::env::var("SPAM_WINDOW_SECS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(10)
+    })
+}
+
+fn spam_max_messages() -> usize {
+    *SPAM_MAX_MESSAGES.get_or_init(|| {
+        std::env::var("SPAM_MAX_MESSAGES")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(5)
+    })
+}
 
 
 const BANNER: &str = r#"
@@ -229,7 +247,7 @@ async fn webhook(
     // Simple anti-spam guard
     if is_spam(&state.rate_limiter, sender_phone).await {
         println!("🚫 Spam detected from {}", sender_phone);
-        let warn_msg = "🚫 Harap hindari spam. Tunggu beberapa saat sebelum mengirim pesan lagi.";
+        let warn_msg = "🚫 Please avoid spamming. Wait a moment before sending another message.";
         if let Err(e) = send_reply(chat_id, warn_msg).await {
             eprintln!("❌ Failed to send spam warning: {}", e);
         }
@@ -549,11 +567,13 @@ async fn webhook(
 
 async fn is_spam(rate_limiter: &RateLimiter, sender_id: &str) -> bool {
     let now = Instant::now();
+    let window = spam_window_secs();
+    let max_messages = spam_max_messages();
 
     let mut map = rate_limiter.lock().await;
     map.retain(|_, timestamps| {
         while let Some(&ts) = timestamps.front() {
-            if now.duration_since(ts) > Duration::from_secs(SPAM_WINDOW_SECS) {
+            if now.duration_since(ts) > Duration::from_secs(window) {
                 timestamps.pop_front();
             } else {
                 break;
@@ -563,13 +583,12 @@ async fn is_spam(rate_limiter: &RateLimiter, sender_id: &str) -> bool {
     });
     let entry = map.entry(sender_id.to_string()).or_insert_with(VecDeque::new);
 
-    if entry.len() >= SPAM_MAX_MESSAGES {
-        return true;
+    let at_limit = entry.len() >= max_messages;
+    if !at_limit {
+        entry.push_back(now);
     }
 
-    entry.push_back(now);
-
-    false
+    at_limit
 }
 
 async fn forward_message(chat_id: &str, message_id: &str) -> Result<(), String> {
