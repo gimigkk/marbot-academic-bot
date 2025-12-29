@@ -13,6 +13,8 @@ use tokio::sync::Mutex;
 use tokio::net::TcpListener;
 use sqlx::PgPool;
 use chrono::{DateTime, Utc, NaiveDate};
+use std::time::{Instant, Duration}; 
+use std::collections::HashMap;
 
 pub mod models;
 pub mod scheduler;
@@ -32,6 +34,7 @@ use parser::ai_extractor::{extract_with_ai};
 use whitelist::Whitelist;
 
 type MessageCache = Arc<Mutex<HashSet<String>>>;
+type SpamTracker = Arc<Mutex<HashMap<String, (u32, Instant)>>>;
 
 
 const BANNER: &str = r#"
@@ -43,7 +46,7 @@ const BANNER: &str = r#"
 ██║╚██╔╝██║██╔══██║██╔══██╗██╔══██╗██║   ██║   ██║   
 ██║ ╚═╝ ██║██║  ██║██║  ██║██████╔╝╚██████╔╝   ██║   
 ╚═╝     ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝  ╚═════╝    ╚═╝   
-                                                                                                                                                                                                                              
+                                                     
          [WhatsApp Academic Assistant v1.0]           
               Created by Gilang & Arya     
 \x1b[0m"#;
@@ -51,6 +54,7 @@ const BANNER: &str = r#"
 #[derive(Clone)]
 struct AppState {
     cache: MessageCache,
+    spam_tracker: SpamTracker,
     whitelist: Arc<Whitelist>,
     pool: PgPool,
 }
@@ -102,11 +106,13 @@ async fn main() {
 
     let whitelist = Arc::new(Whitelist::new());
     let cache = Arc::new(Mutex::new(HashSet::new()));
+    // --- Inisialisasi Spam Tracker ---
+    let spam_tracker = Arc::new(Mutex::new(HashMap::new())); 
 
     // 4. Jalankan Scheduler
     let pool_for_scheduler = pool.clone();
     tokio::spawn(async move {
-       
+        
         tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
         if let Err(e) = scheduler::start_scheduler(pool_for_scheduler).await {
             eprintln!("\n\x1b[31m❌ Scheduler Error: {:?}\x1b[0m", e);
@@ -115,7 +121,8 @@ async fn main() {
     println!("    └─ ⏰ Scheduler    : \x1b[32m✅ RUNNING\x1b[0m");
 
     let state = AppState { 
-        cache, 
+        cache,
+        spam_tracker, 
         whitelist, 
         pool
     };
@@ -144,9 +151,6 @@ async fn webhook(
     State(state): State<AppState>,
     Json(payload): Json<WebhookPayload>,
 ) -> StatusCode {
-
-    // Check message payload
-    //println!("\n🔍 DEBUG Raw payload: {:#?}\n", payload);
 
     // Only process "message.any" events
     if payload.event != "message.any" {
@@ -181,59 +185,80 @@ async fn webhook(
 
     // Ignore messages from debug group to prevent infinite loop
     let debug_group_id = std::env::var("DEBUG_GROUP_ID").ok();
-    // if let Some(debug_id) = &debug_group_id {
-    //     if payload.payload.from == *debug_id {
-    //         return StatusCode::OK;
-    //     }
-    // }
 
     // ✅ EXTRACT SENDER AND CHAT IDs CORRECTLY
-    let chat_id = &payload.payload.from;  // Where to send reply (group or personal chat)
+    let chat_id = &payload.payload.from;  
     
     // Extract sender's actual phone number
-    // For group messages: 'participant' field contains the actual sender
-    // For personal chats: 'from' field IS the sender
     let sender_phone = if chat_id.ends_with("@g.us") {
-        // Group message - use participant field for sender ID
         payload.payload.participant
             .as_ref()
             .unwrap_or(chat_id)
     } else {
-        // Personal chat - 'from' field is the sender
         chat_id
     };
     
-    // ✅ Extract WhatsApp display name (pushName) from _data field
+    // ✅ Extract WhatsApp display name
     let sender_name = payload.payload.data
         .as_ref()
         .and_then(|data| data.push_name.as_ref())
         .map(|name| name.as_str())
         .unwrap_or_else(|| {
-            // Fallback: extract phone number from sender_phone (remove @c.us or @g.us)
             sender_phone.split('@').next().unwrap_or(sender_phone)
         });
 
-    // Terminal logging for server monitoring
+    
+    // STEP 1: CLASSIFY MESSAGE (COMMAND OR NOT)
+    let message_type = classify_message(&payload.payload.body);
+    let is_command = matches!(message_type, MessageType::Command(_));
+
+    // ANTI-SPAM 
+    if is_command {
+        // Konfigurasi Batas
+        const MAX_MESSAGES: u32 = 5;      // MAX 5 Pesan
+        const WINDOW_SECONDS: u64 = 30;   // 30 detik window
+
+        let mut tracker = state.spam_tracker.lock().await;
+        
+        let (count, reset_time) = tracker
+            .entry(sender_phone.to_string())
+            .or_insert((0, Instant::now() + Duration::from_secs(WINDOW_SECONDS)));
+
+        if Instant::now() > *reset_time {
+            // Reset counter
+            *count = 1;
+            *reset_time = Instant::now() + Duration::from_secs(WINDOW_SECONDS);
+        } else {
+            *count += 1;
+        }
+
+        // Cek BATAS
+        if *count > MAX_MESSAGES {
+            println!("🚫 SPAM COMMAND BLOCKED: {} sent > {} cmds/{}s", sender_phone, MAX_MESSAGES, WINDOW_SECONDS);
+            
+            if *count == MAX_MESSAGES + 1 {
+                let warning_msg = "⚠️ *RATE LIMIT REACHED*\nAnda mengirim command terlalu cepat. Harap tunggu 30 detik ngab.";
+                let _ = send_reply(chat_id, warning_msg).await;
+            }
+
+            return StatusCode::OK;
+        }
+    }
+
+    // Terminal logging
     println!("📨 Message from: {}", chat_id);
     println!("   Sender: {} ({})", sender_name, sender_phone);
     println!("   Body: {}", payload.payload.body);
+    println!("   Type: {:?}", message_type);
 
-    // println!("   🔍 Has quoted message: {}", payload.payload.quoted_msg.is_some());
-    // if let Some(ref q) = payload.payload.quoted_msg {
-    //     println!("   📎 Quoted text preview: {}", q.text.chars().take(50).collect::<String>());
-    // }
-
-    // ============= NEW: CLARIFICATION HANDLER =============
-    // Check if this message is replying to a clarification request
+    // ============= CLARIFICATION HANDLER =============
     if let Some(quoted) = payload.payload.get_quoted_message() {
         if quoted.text.contains("⚠️ *PERLU KLARIFIKASI*") {
             println!("📝 Clarification response detected from {}", sender_phone);
             
-            // Extract assignment ID from the quoted clarification message
             if let Some(assignment_id) = clarification::extract_assignment_id_from_message(&quoted.text) {
                 println!("🔍 Updating assignment: {}", assignment_id);
                 
-                // Parse user's response (e.g., "Course: Pemrograman\nDeadline: 2025-12-30")
                 let updates = clarification::parse_clarification_response(&payload.payload.body);
 
                 if updates.is_empty() {
@@ -245,42 +270,32 @@ async fn webhook(
                                     `Description: [keterangan]`\n\n\
                                     _Cukup isi field yang kurang saja!_";
                     
-                    if let Err(e) = send_reply(chat_id, error_msg).await {
-                        eprintln!("❌ Failed to send error: {}", e);
-                    }
+                    let _ = send_reply(chat_id, error_msg).await;
                     return StatusCode::OK;
                 }
 
-                // Parse deadline if provided
-                let new_deadline = updates.get("deadline")
-                    .and_then(|d| crud::parse_deadline(d).ok());
-
+                // Parse fields
+                let new_deadline = updates.get("deadline").and_then(|d| crud::parse_deadline(d).ok());
                 let new_title = updates.get("title").cloned();
                 let new_description = updates.get("description").cloned();
-                let new_parallel = updates.get("parallel_code")
-                    .map(|p| p.to_lowercase());
+                let new_parallel = updates.get("parallel_code").map(|p| p.to_lowercase());
 
-                // Special handling for course name update
+                // Course lookup
                 let course_id = if let Some(course_name) = updates.get("course_name") {
                     match crud::get_course_by_name(&state.pool, course_name).await {
                         Ok(Some(course)) => Some(course.id),
                         Ok(None) => {
-                            let error_msg = format!("❌ Mata kuliah '{}' tidak ditemukan.\n\n_Cek ejaan atau tambahkan dulu ke database._", course_name);
-                            if let Err(e) = send_reply(chat_id, &error_msg).await {
-                                eprintln!("❌ Failed to send error: {}", e);
-                            }
+                            let error_msg = format!("❌ Mata kuliah '{}' tidak ditemukan.", course_name);
+                            let _ = send_reply(chat_id, &error_msg).await;
                             return StatusCode::OK;
                         }
-                        Err(e) => {
-                            eprintln!("❌ Failed to lookup course: {}", e);
-                            None
-                        }
+                        Err(_) => None,
                     }
                 } else {
                     None
                 };
 
-                // Update the assignment in database
+                // Update assignment
                 match crud::update_assignment_fields(
                     &state.pool,
                     assignment_id,
@@ -288,82 +303,34 @@ async fn webhook(
                     new_title.clone(),
                     new_description.clone(),
                     new_parallel.clone(),
-                    None, // Don't change message_id for clarifications
+                    None,
                 ).await {
                     Ok(updated) => {
-                        // If course_id was updated, do that separately
                         if let Some(cid) = course_id {
-                            if let Err(e) = sqlx::query(
-                                "UPDATE assignments SET course_id = $1 WHERE id = $2"
-                            )
-                            .bind(cid)
-                            .bind(assignment_id)
-                            .execute(&state.pool)
-                            .await {
-                                eprintln!("❌ Failed to update course_id: {}", e);
-                            }
+                             let _ = sqlx::query("UPDATE assignments SET course_id = $1 WHERE id = $2")
+                                .bind(cid).bind(assignment_id).execute(&state.pool).await;
                         }
                         
-                        // Get course name for display
-                        let display_course_name = if let Some(course_name) = updates.get("course_name") {
-                            course_name.to_string()
-                        } else if let Some(cid) = updated.course_id {
-                            sqlx::query_scalar::<_, String>(
-                                "SELECT name FROM courses WHERE id = $1"
-                            )
-                            .bind(cid)
-                            .fetch_one(&state.pool)
-                            .await
-                            .unwrap_or_else(|_| "Unknown Course".to_string())
-                        } else {
-                            "Unknown Course".to_string()
-                        };
+                        let display_course = if let Some(cn) = updates.get("course_name") { cn.to_string() } else { "Unknown".to_string() };
                         
                         let response = format!(
-                            "✅ *KLARIFIKASI TERSIMPAN*\n\
-                            ━━━━━━━━━━━━━━━━━━\n\
-                            📝 *{}*\n\
-                            📚 {}\n\
-                            ⏰ Deadline: {}\n\
-                            🧩 Paralel: {}\n\
-                            📄 {}\n\n\
-                            _Terima kasih atas klarifikasinya!_",
+                            "✅ *KLARIFIKASI TERSIMPAN*\n━━━━━━━━━━━━━━━━━━\n📝 *{}*\n📚 {}\n⏰ Deadline: {}\n_Terima kasih!_",
                             updated.title,
-                            display_course_name,
-                            updated.deadline
-                                .map(|d| d.format("%Y-%m-%d").to_string())
-                                .unwrap_or("Belum ada deadline".to_string()),
-                            updated.parallel_code.as_deref().unwrap_or("N/A"),
-                            updated.description
+                            display_course,
+                            updated.deadline.map(|d| d.format("%Y-%m-%d").to_string()).unwrap_or("-".to_string())
                         );
                         
-                        if let Err(e) = send_reply(chat_id, &response).await {
-                            eprintln!("❌ Failed to send confirmation: {}", e);
-                        }
+                        let _ = send_reply(chat_id, &response).await;
                     }
                     Err(e) => {
-                        eprintln!("❌ Failed to update assignment: {}", e);
-                        
-                        let error_msg = format!("❌ Gagal menyimpan klarifikasi: {}", e);
-                        if let Err(e) = send_reply(chat_id, &error_msg).await {
-                            eprintln!("❌ Failed to send error: {}", e);
-                        }
+                        let _ = send_reply(chat_id, &format!("❌ Gagal menyimpan: {}", e)).await;
                     }
                 }
-
                 return StatusCode::OK;
-            } else {
-                println!("⚠️  Could not extract assignment ID from quoted message");
             }
         }
     }
-    // ============= END CLARIFICATION HANDLER =============
-
-    
-
-    // STEP 1: CLASSIFY MESSAGE
-    let message_type = classify_message(&payload.payload.body);
-    let is_command = matches!(message_type, MessageType::Command(_));
+    // ============= END CLARIFICATION =============
 
     // STEP 2: CHECK WHITELIST
     let (should_process, reason) =
@@ -378,9 +345,6 @@ async fn webhook(
     match message_type {
         MessageType::Command(cmd) => {
             println!("⚙️  Processing command: {:?}", cmd);
-            
-            // ✅ FIXED: Pass sender_phone (not chat_id) as user identifier
-            // ✅ Pass sender_name for display in responses
             let response = handle_command(cmd, sender_phone, sender_name, chat_id, &state.pool).await;
             
             match response {
@@ -393,7 +357,6 @@ async fn webhook(
                     if let Err(e) = forward_message(chat_id, &message_id).await {
                         eprintln!("❌ Failed to forward message: {}", e);
                     } else {
-                        // Send warning after forwarding
                         if let Err(e) = send_reply(chat_id, &warning).await {
                             eprintln!("❌ Failed to send warning: {}", e);
                         }
@@ -402,125 +365,37 @@ async fn webhook(
             }
         }
 
-        // STEP 4: AI EXTRACTION
         MessageType::NeedsAI(text) => {
             println!("🤖 Processing with AI...");
             
-            // Check if message has media (image)
+            // Image handling
             let image_base64 = if payload.payload.has_media.unwrap_or(false) {
                 if let Some(ref media) = payload.payload.media {
                     if let Some(ref media_url) = media.url {
-                        // Check if it's an image
-                        let is_image = media.mimetype
-                            .as_ref()
-                            .map(|m| m.starts_with("image/"))
-                            .unwrap_or(false);
-                        
-                        if is_image {
-                            let api_key = std::env::var("WAHA_API_KEY")
-                                .unwrap_or_else(|_| "devkey123".to_string());
-                            
-                            match fetch_image_from_url(media_url, &api_key).await {
-                                Ok(base64) => Some(base64),
-                                Err(e) => {
-                                    eprintln!("❌ Failed to download image: {}", e);
-                                    None
-                                }
-                            }
-                        } else {
-                            println!("⚠️  Media is not an image: {:?}", media.mimetype);
-                            None
-                        }
-                    } else {
-                        eprintln!("⚠️  hasMedia=true but no URL (check WHATSAPP_DOWNLOAD_MEDIA config)");
-                        None
-                    }
-                } else {
-                    None
-                }
-            } else {
-                None
-            };
+                         if media.mimetype.as_ref().map(|m| m.starts_with("image/")).unwrap_or(false) {
+                            let api_key = std::env::var("WAHA_API_KEY").unwrap_or_else(|_| "devkey123".to_string());
+                            fetch_image_from_url(media_url, &api_key).await.ok()
+                         } else { None }
+                    } else { None }
+                } else { None }
+            } else { None };
             
-            // Fetch available courses (formatted for AI)
-            let courses_result = crud::get_all_courses_formatted(&state.pool).await;
+            // Context fetching
+            let courses_list = crud::get_all_courses_formatted(&state.pool).await.unwrap_or_default();
+            let active_assignments = crud::get_active_assignments(&state.pool).await.unwrap_or_default();
             
-            match courses_result {
-                Ok(courses_list) => {
-                    // Fetch active assignments for context
-                    let active_assignments_result = crud::get_active_assignments(&state.pool).await;
-                    
-                    match active_assignments_result {
-                        Ok(active_assignments) => {
-                            // Build course map (simple query: id -> name)
-                            let course_map_result = sqlx::query_as::<_, (uuid::Uuid, String)>(
-                                "SELECT id, name FROM courses"
-                            )
-                            .fetch_all(&state.pool)
-                            .await;
-                            
-                            match course_map_result {
-                                Ok(courses) => {
-                                    let course_map: std::collections::HashMap<uuid::Uuid, String> = 
-                                        courses.into_iter().collect();
-                                    
-                                    // Extract with AI (now with context)
-                                    match extract_with_ai(
-                                        &text, 
-                                        &courses_list, 
-                                        &active_assignments,
-                                        &course_map,
-                                        image_base64.as_deref()
-                                    ).await {
-                                        Ok(classification) => {
-                                            println!("✅ AI Classification: {:?}\n", classification);
-                                            
-                                            // Handle classification and send to debug group
-                                            handle_ai_classification(
-                                                state.pool.clone(),
-                                                classification,
-                                                &payload.payload.id,
-                                                sender_phone,  // ✅ FIXED: Use sender_phone instead of chat_id
-                                                debug_group_id.clone(),
-                                            ).await;
-                                        }
-                                        Err(e) => {
-                                            eprintln!("❌ AI extraction failed: {}", e);
-                                            
-                                            let error_msg = "❌ Failed to process message".to_string();
-                                            if let Err(e) = send_reply(chat_id, &error_msg).await {
-                                                eprintln!("❌ Failed to send error reply: {}", e);
-                                            }
-                                        }
-                                    }
-                                }
-                                Err(e) => {
-                                    eprintln!("❌ Failed to fetch course map: {}", e);
-                                    
-                                    let error_msg = "❌ Failed to fetch course data".to_string();
-                                    if let Err(e) = send_reply(chat_id, &error_msg).await {
-                                        eprintln!("❌ Failed to send error reply: {}", e);
-                                    }
-                                }
-                            }
-                        }
-                        Err(e) => {
-                            eprintln!("❌ Failed to fetch active assignments: {}", e);
-                            
-                            let error_msg = "❌ Failed to fetch assignment context".to_string();
-                            if let Err(e) = send_reply(chat_id, &error_msg).await {
-                                eprintln!("❌ Failed to send error reply: {}", e);
-                            }
-                        }
-                    }
+            let course_map = sqlx::query_as::<_, (uuid::Uuid, String)>("SELECT id, name FROM courses")
+                .fetch_all(&state.pool).await.map(|rows| rows.into_iter().collect()).unwrap_or_default();
+            
+            // Extract AI
+            match extract_with_ai(&text, &courses_list, &active_assignments, &course_map, image_base64.as_deref()).await {
+                Ok(classification) => {
+                    println!("✅ AI Classification: {:?}\n", classification);
+                    handle_ai_classification(state.pool.clone(), classification, &payload.payload.id, sender_phone, debug_group_id).await;
                 }
                 Err(e) => {
-                    eprintln!("❌ Failed to fetch courses: {}", e);
-                    
-                    let error_msg = "❌ Failed to fetch course list".to_string();
-                    if let Err(e) = send_reply(chat_id, &error_msg).await {
-                        eprintln!("❌ Failed to send error reply: {}", e);
-                    }
+                    eprintln!("❌ AI extraction failed: {}", e);
+                    let _ = send_reply(chat_id, "❌ Failed to process message").await;
                 }
             }
         }
@@ -550,10 +425,8 @@ async fn forward_message(chat_id: &str, message_id: &str) -> Result<(), String> 
         .map_err(|e| e.to_string())?;
     
     if !response.status().is_success() {
-        let error_text = response.text().await.unwrap_or_default();
-        return Err(format!("Failed to forward message: {}", error_text));
+        return Err(format!("Failed to forward message"));
     }
-    
     Ok(())
 }
 
@@ -570,465 +443,156 @@ async fn handle_ai_classification(
     
     match classification {
         AIClassification::AssignmentInfo { course_name, title, deadline, description, .. } => {
-            println!("📚 NEW ASSIGNMENT DETECTED");
-            
             let pool_clone = pool.clone();
-            let course_name_for_lookup = course_name.clone();
+            let course_name_lookup = course_name.clone();
             let title_clone = title.clone();
-            let description_clone = description.clone().unwrap_or_else(|| "No description".to_string());
+            let desc_clone = description.clone().unwrap_or("No description".to_string());
             let deadline_parsed = parse_deadline(&deadline);
             let parallel_code = extract_parallel_code(&title);
-            let deadline_for_response = deadline.clone();
-            let course_name_for_response = course_name.clone();
-            let debug_group_clone = debug_group_id.clone();
+            let debug_group = debug_group_id.clone();
             
             tokio::spawn(async move {
-                // Look up course_id by name
-                let course_id = if let Some(name) = &course_name_for_lookup {
-                    match crud::get_course_by_name(&pool_clone, name).await {
-                        Ok(Some(course)) => Some(course.id),
-                        Ok(None) => None,
-                        Err(e) => {
-                            eprintln!("❌ Error looking up course: {}", e);
-                            None
-                        }
-                    }
-                } else {
-                    None
-                };
+                let course_id = if let Some(name) = &course_name_lookup {
+                    crud::get_course_by_name(&pool_clone, name).await.ok().flatten().map(|c| c.id)
+                } else { None };
                 
-                // Check for duplicates
+                // Duplicate check
                 if let Some(cid) = course_id {
-                    match crud::get_assignment_by_title_and_course(&pool_clone, &title_clone, cid).await {
-                        Ok(Some(existing)) => {
-                            println!("⚠️ Duplicate found, updating...");
-                            
-                            match crud::update_assignment_fields(
-                                &pool_clone,
-                                existing.id,
-                                deadline_parsed,
-                                None,
-                                Some(description_clone.clone()),
-                                None,
-                                Some(message_id.clone()),
-                            ).await {
-                                Ok(updated) => {
-                                    let response = format!(
-                                        "🔄 *INFO TUGAS DIPERBARUI*\n\
-                                        ━━━━━━━━━━━━━━━━━━\n\
-                                        📝 *{}*\n\
-                                        ⚠️ _Terdeteksi duplikat, data diupdate_\n\
-                                        📅 Due: {}\n\
-                                        ━━━━━━━━━━━━━━━━━━",
-                                        updated.title,
-                                        deadline_for_response.unwrap_or("No due date".to_string())
-                                    );
-                                    
-                                    // Send to debug group instead
-                                    if let Some(debug_id) = &debug_group_clone {
-                                        if let Err(e) = send_reply(debug_id, &response).await {
-                                            eprintln!("❌ Failed to send to debug group: {}", e);
-                                        }
-                                    }
-                                }
-                                Err(e) => {
-                                    eprintln!("❌ Database update failed: {}", e);
-                                }
-                            }
-                            return;
+                    if let Ok(Some(existing)) = crud::get_assignment_by_title_and_course(&pool_clone, &title_clone, cid).await {
+                         let _ = crud::update_assignment_fields(
+                            &pool_clone, existing.id, deadline_parsed, None, Some(desc_clone), None, Some(message_id)
+                        ).await;
+                        
+                        if let Some(debug_id) = &debug_group {
+                            let _ = send_reply(debug_id, &format!("🔄 *DUPLICATE UPDATED*: {}", title_clone)).await;
                         }
-                        Ok(None) => {}
-                        Err(e) => {
-                            eprintln!("❌ Error checking for duplicates: {}", e);
-                        }
+                        return;
                     }
                 }
                 
-                // Create new assignment
+                // Create
                 let new_assignment = NewAssignment {
-                    course_id,
-                    title: title_clone.clone(),
-                    description: description_clone.clone(),
-                    deadline: deadline_parsed,
-                    parallel_code,
-                    sender_id: Some(sender_id.clone()),
-                    message_id: message_id.clone(),
+                    course_id, title: title_clone.clone(), description: desc_clone.clone(),
+                    deadline: deadline_parsed, parallel_code, sender_id: Some(sender_id), message_id
                 };
                 
                 match crud::create_assignment(&pool_clone, new_assignment).await {
-                    Ok(message) => {
-                        println!("✅ {}", message);
-                        
-                        // NEW: Check if clarification is needed
+                    Ok(_) => {
+                        // Clarification check
                         if let Some(cid) = course_id {
-                            // Get the assignment we just created
-                            match crud::get_assignment_by_title_and_course(&pool_clone, &title_clone, cid).await {
-                                Ok(Some(assignment)) => {
-                                    // Fetch with course info for clarification check
-                                    match crud::get_assignment_with_course_by_id(&pool_clone, assignment.id).await {
-                                        Ok(Some(created_assignment)) => {
-                                            let missing_fields = clarification::identify_missing_fields(&created_assignment);
-                                            
-                                            if !missing_fields.is_empty() {
-                                                println!("⚠️  Missing fields detected: {:?}", missing_fields);
-                                                
-                                                // Send clarification request to debug group
-                                                if let Some(debug_id) = &debug_group_clone {
-                                                    let clarification_msg = clarification::generate_clarification_message(
-                                                        &created_assignment,
-                                                        &missing_fields
-                                                    );
-                                                    
-                                                    if let Err(e) = send_reply(debug_id, &clarification_msg).await {
-                                                        eprintln!("❌ Failed to send clarification: {}", e);
-                                                    }
-                                                }
-                                                
-                                                // Don't send success message - waiting for clarification
-                                                return;
-                                            }
-                                        }
-                                        Ok(None) => {
-                                            eprintln!("⚠️  Assignment not found after creation");
-                                        }
-                                        Err(e) => {
-                                            eprintln!("❌ Error fetching created assignment: {}", e);
-                                        }
-                                    }
-                                }
-                                Ok(None) => {
-                                    eprintln!("⚠️  Could not fetch created assignment");
-                                }
-                                Err(e) => {
-                                    eprintln!("❌ Error fetching assignment: {}", e);
-                                }
-                            }
+                             if let Ok(Some(assignment)) = crud::get_assignment_by_title_and_course(&pool_clone, &title_clone, cid).await {
+                                 if let Ok(Some(full_assign)) = crud::get_assignment_with_course_by_id(&pool_clone, assignment.id).await {
+                                     let missing = clarification::identify_missing_fields(&full_assign);
+                                     if !missing.is_empty() {
+                                         if let Some(debug_id) = &debug_group {
+                                             let msg = clarification::generate_clarification_message(&full_assign, &missing);
+                                             let _ = send_reply(debug_id, &msg).await;
+                                         }
+                                         return;
+                                     }
+                                 }
+                             }
                         }
-                        
-                        // Normal success message (only if no clarification needed)
-                        let response = format!(
-                            "✨ *TUGAS BARU TERSIMPAN* ✨\n\
-                            ━━━━━━━━━━━━━━━━━━\n\
-                            📚 *{}*\n\
-                            📝 {}\n\
-                            📅 Deadline: {}\n\
-                            ━━━━━━━━━━━━━━━━━━\n\
-                            📄 _{}_",
-                            course_name_for_response.unwrap_or("Mata Kuliah Umum".to_string()),
-                            title_clone,
-                            deadline_for_response.unwrap_or("? (Cek lagi)".to_string()),
-                            description_clone
-                        );
-                        
-                        if let Some(debug_id) = &debug_group_clone {
-                            if let Err(e) = send_reply(debug_id, &response).await {
-                                eprintln!("❌ Failed to send to debug group: {}", e);
-                            }
+
+                        // Success
+                        if let Some(debug_id) = &debug_group {
+                            let _ = send_reply(debug_id, &format!("✨ *NEW TASK*: {}\n📚 {}", title_clone, course_name_lookup.unwrap_or_default())).await;
                         }
                     }
-                    Err(e) => {
-                        eprintln!("❌ Failed to save to database: {}", e);
-                    }
+                    Err(e) => eprintln!("Failed to save: {}", e),
                 }
             });
         }
         
         AIClassification::AssignmentUpdate { reference_keywords, changes, new_deadline, new_title, new_description, parallel_code, .. } => {
-            println!("🔄 UPDATE DETECTED");
-            
-            let new_deadline_clone = new_deadline.clone();
-            let new_title_clone = new_title.clone();
-            let changes_clone = changes.clone();
-            let reference_keywords_clone = reference_keywords.clone();
-            let new_description_clone = new_description.clone();
             let pool_clone = pool.clone();
-            let parallel_code_clone = parallel_code.clone();
-            let update_msg_id = message_id.clone();
+            let updates = (new_deadline, new_title, new_description, parallel_code);
+            let msg_id = message_id.clone();
 
-            // Fetch course_map BEFORE spawning
-            let course_map_result = sqlx::query_as::<_, (uuid::Uuid, String)>(
-                "SELECT id, name FROM courses"
-            )
-            .fetch_all(&pool_clone)
-            .await;
-            
             tokio::spawn(async move {
-                // Build course_map from the fetched data
-                let course_map: std::collections::HashMap<uuid::Uuid, String> = match course_map_result {
-                    Ok(courses) => courses.into_iter().collect(),
-                    Err(e) => {
-                        eprintln!("❌ Failed to fetch course map: {}", e);
-                        return;
-                    }
-                };
+                let course_map = sqlx::query_as::<_, (uuid::Uuid, String)>("SELECT id, name FROM courses")
+                    .fetch_all(&pool_clone).await.map(|r| r.into_iter().collect()).unwrap_or_default();
                 
-                // Try to identify course from keywords
-                let mut course_id: Option<uuid::Uuid> = None;
-                let mut course_name: Option<String> = None;
-                
-                for keyword in &reference_keywords_clone {
-                    match crud::get_course_by_name_or_alias(&pool_clone, keyword).await {
-                        Ok(Some(course)) => {
-                            course_id = Some(course.id);
-                            course_name = Some(course.name.clone());
-                            break;
-                        }
-                        Ok(None) => {}
-                        Err(e) => {
-                            eprintln!("❌ Error looking up course: {}", e);
-                        }
-                    }
+                // Try find course
+                let mut course_id = None;
+                for kw in &reference_keywords {
+                     if let Ok(Some(c)) = crud::get_course_by_name_or_alias(&pool_clone, kw).await {
+                         course_id = Some(c.id); break;
+                     }
                 }
                 
-                // Get recent assignments and try to match
-                match crud::get_recent_assignments_for_update(&pool_clone, course_id).await {
-                    Ok(assignments) if !assignments.is_empty() => {
-                        match parser::ai_extractor::match_update_to_assignment(
-                            &changes_clone,
-                            &reference_keywords_clone,
-                            &assignments,
-                            &course_map,
-                            parallel_code_clone.as_deref(),
-                        ).await {
-                            Ok(Some(assignment_id)) => {
-                                let parsed_deadline = if let Some(ref deadline_str) = new_deadline_clone {
-                                    crud::parse_deadline(deadline_str).ok()
-                                } else {
-                                    None
-                                };
-                                
-                                match crud::update_assignment_fields(
-                                    &pool_clone,
-                                    assignment_id,
-                                    parsed_deadline,
-                                    new_title_clone.clone(),
-                                    new_description_clone.clone(),
-                                    parallel_code_clone,
-                                    Some(update_msg_id),
-                                ).await {
-                                    Ok(updated) => {
-                                        let response = format!(
-                                            "🔄 *INFO TUGAS DIPERBARUI*\n\
-                                            ━━━━━━━━━━━━━━━━━━\n\
-                                            📝 *{}*\n\
-                                            ⚠️ Perubahan: _{}_\n\
-                                            📅 Deadline Baru: {}\n\
-                                            ━━━━━━━━━━━━━━━━━━",
-                                            updated.title,
-                                            changes_clone,
-                                            new_deadline_clone.unwrap_or("Tetap".to_string())
-                                        );
-                                        
-                                        // Send to debug group
-                                        if let Some(debug_id) = &debug_group_id {
-                                            if let Err(e) = send_reply(debug_id, &response).await {
-                                                eprintln!("❌ Failed to send to debug group: {}", e);
-                                            }
-                                        }
-                                    }
-                                    Err(e) => {
-                                        eprintln!("❌ Database update failed: {}", e);
-                                    }
-                                }
-                            }
-                            Ok(None) => {
-                                println!("⚠️ AI couldn't match to any assignment");
-                            }
-                            Err(e) => {
-                                eprintln!("❌ AI matching failed: {}", e);
-                            }
-                        }
-                    }
-                    Ok(_) => {
-                        println!("⚠️ No assignments found - trying fallback creation");
-                        
-                        // FALLBACK: Create new assignment
-                        if let (Some(cid), Some(ref deadline_str)) = (course_id, &new_deadline_clone) {
-                            let title = reference_keywords_clone
-                                .iter()
-                                .find(|k| {
-                                    let lower = k.to_lowercase();
-                                    lower.contains("lkp") || 
-                                    lower.contains("tugas") || 
-                                    lower.contains("quiz") ||
-                                    lower.contains("uts") ||
-                                    lower.contains("uas") ||
-                                    lower.starts_with("bab ")
-                                })
-                                .cloned()
-                                .unwrap_or_else(|| "Assignment".to_string());
-                            
-                            let parallel_code = reference_keywords_clone
-                                .iter()
-                                .find(|k| k.to_uppercase().starts_with('K') && k.len() == 2)
-                                .map(|k| k.to_lowercase());
-                            
-                            if let Ok(parsed_deadline) = crud::parse_deadline(deadline_str) {
-                                let description = new_description_clone
-                                    .unwrap_or_else(|| changes_clone.clone());
-                                
-                                let new_assignment = NewAssignment {
-                                    course_id: Some(cid),
-                                    title: title.clone(),
-                                    description: description.clone(),
-                                    deadline: Some(parsed_deadline),
-                                    parallel_code: parallel_code.clone(),
-                                    sender_id: None,
-                                    message_id: update_msg_id,
-                                };
-                                
-                                match crud::create_assignment(&pool_clone, new_assignment).await {
-                                    Ok(_) => {
-                                        let response = format!(
-                                            "✨ *TUGAS BARU TERSIMPAN* ✨\n\
-                                            ━━━━━━━━━━━━━━━━━━\n\
-                                            📚 *{}*\n\
-                                            📝 {}\n\
-                                            📅 Deadline: {}\n\
-                                            ━━━━━━━━━━━━━━━━━━\n\
-                                            📄 _{}_",
-                                            course_name.unwrap_or("Unknown".to_string()),
-                                            title,
-                                            deadline_str,
-                                            description
-                                        );
-                                        
-                                        // Send to debug group
-                                        if let Some(debug_id) = &debug_group_id {
-                                            if let Err(e) = send_reply(debug_id, &response).await {
-                                                eprintln!("❌ Failed to send to debug group: {}", e);
-                                            }
-                                        }
-                                    }
-                                    Err(e) => {
-                                        eprintln!("❌ Failed to create assignment: {}", e);
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        eprintln!("❌ Failed to fetch assignments: {}", e);
-                    }
+                if let Ok(assignments) = crud::get_recent_assignments_for_update(&pool_clone, course_id).await {
+                     if let Ok(Some(assign_id)) = parser::ai_extractor::match_update_to_assignment(
+                         &changes, &reference_keywords, &assignments, &course_map, updates.3.as_deref()
+                     ).await {
+                         let d = if let Some(s) = &updates.0 { crud::parse_deadline(s).ok() } else { None };
+                         let _ = crud::update_assignment_fields(&pool_clone, assign_id, d, updates.1, updates.2, updates.3, Some(msg_id)).await;
+                         
+                         if let Some(debug_id) = &debug_group_id {
+                             let _ = send_reply(debug_id, &format!("🔄 *UPDATED*: {}", changes)).await;
+                         }
+                         return;
+                     }
+                }
+                
+                // Fallback Create
+                if let (Some(cid), Some(d_str)) = (course_id, updates.0) {
+                     if let Ok(d) = crud::parse_deadline(&d_str) {
+                         let t = reference_keywords.first().cloned().unwrap_or("Task".into());
+                         let new_assign = NewAssignment {
+                             course_id: Some(cid), title: t.clone(), description: changes.clone(),
+                             deadline: Some(d), parallel_code: updates.3, sender_id: None, message_id: msg_id
+                         };
+                         let _ = crud::create_assignment(&pool_clone, new_assign).await;
+                         if let Some(debug_id) = &debug_group_id {
+                             let _ = send_reply(debug_id, &format!("✨ *FALLBACK TASK*: {}", t)).await;
+                         }
+                     }
                 }
             });
         }
-        
         AIClassification::Unrecognized => {}
     }
 }
 
 async fn send_reply(chat_id: &str, text: &str) -> Result<(), String> {
     let waha_url = "http://localhost:3001/api/sendText";
-    let api_key = std::env::var("WAHA_API_KEY")
-        .unwrap_or_else(|_| "devkey123".to_string());
-    
-    let payload = SendTextRequest {
-        chat_id: chat_id.to_string(),
-        text: text.to_string(),
-        session: "default".to_string(),
-    };
-
+    let api_key = std::env::var("WAHA_API_KEY").unwrap_or_else(|_| "devkey123".to_string());
+    let payload = SendTextRequest { chat_id: chat_id.to_string(), text: text.to_string(), session: "default".to_string() };
     let client = reqwest::Client::new();
-    let response = client
-        .post(waha_url)
-        .header("X-Api-Key", api_key)
-        .json(&payload)
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
-
-    let status = response.status();
-    
-    if status.is_success() {
-        Ok(())
-    } else {
-        let body = response.text().await.unwrap_or_default();
-        Err(format!("WAHA API error: {} - {}", status, body))
-    }
+    let res = client.post(waha_url).header("X-Api-Key", api_key).json(&payload).send().await.map_err(|e| e.to_string())?;
+    if res.status().is_success() { Ok(()) } else { Err(format!("API Error")) }
 }
 
-fn parse_deadline(deadline_str: &Option<String>) -> Option<DateTime<Utc>> {
-    deadline_str.as_ref().and_then(|s| {
-        NaiveDate::parse_from_str(s, "%Y-%m-%d")
-            .ok()
-            .and_then(|date| date.and_hms_opt(23, 59, 59))
-            .map(|naive| DateTime::<Utc>::from_naive_utc_and_offset(naive, Utc))
-    })
+fn parse_deadline(s: &Option<String>) -> Option<DateTime<Utc>> {
+    s.as_ref().and_then(|s| NaiveDate::parse_from_str(s, "%Y-%m-%d").ok())
+     .and_then(|d| d.and_hms_opt(23, 59, 59)).map(|n| DateTime::from_naive_utc_and_offset(n, Utc))
 }
 
 fn extract_parallel_code(title: &str) -> Option<String> {
-    let upper = title.to_uppercase();
-    
-    // Check for "all" first (case-insensitive)
-    if upper.contains("ALL") {
-        return Some("all".to_string());
-    }
-    
-    // Then check for specific codes
-    for code in ["K1", "K2", "K3", "P1", "P2", "P3"] {
-        if upper.contains(code) {
-            return Some(code.to_lowercase());
-        }
-    }
-    None
+    let u = title.to_uppercase();
+    if u.contains("ALL") { return Some("all".into()); }
+    ["K1", "K2", "K3", "P1", "P2", "P3"].iter().find(|&c| u.contains(c)).map(|c| c.to_lowercase())
 }
 
 async fn fetch_image_from_url(url: &str, api_key: &str) -> Result<String, String> {
-    // Fix URL if needed
-    let corrected_url = url.replace("http://localhost:3000", "http://localhost:3001");
-    
-    //println!("   📡 Downloading: {}", corrected_url);
-    
+    let url = url.replace("http://localhost:3000", "http://localhost:3001");
     let client = reqwest::Client::new();
-    let response = client
-        .get(&corrected_url)
-        .header("X-Api-Key", api_key)
-        .send()
-        .await
-        .map_err(|e| format!("Request failed: {}", e))?;
+    let res = client.get(&url).header("X-Api-Key", api_key).send().await.map_err(|e| e.to_string())?;
+    if !res.status().is_success() { return Err("HTTP Error".into()); }
+    let bytes = res.bytes().await.map_err(|e| e.to_string())?;
     
-    if !response.status().is_success() {
-        return Err(format!("HTTP error: {}", response.status()));
-    }
-    
-    let image_bytes = response.bytes().await
-        .map_err(|e| format!("Failed to read bytes: {}", e))?;
-    
-    // Check size and compress if needed
-    let base64_size_mb = (image_bytes.len() * 4 / 3) as f64 / 1_000_000.0;
-    
-    
-    if base64_size_mb > 3.5 {
-        println!("   🔄 Compressing image (too large for Groq)...");
-        
-        // Use the older, more compatible image loading API
-        use image::io::Reader as ImageReader;
-        use std::io::Cursor;
-        
-        let img = ImageReader::new(Cursor::new(&image_bytes))
-            .with_guessed_format()
-            .map_err(|e| format!("Failed to guess format: {}", e))?
-            .decode()
-            .map_err(|e| format!("Failed to decode image: {}", e))?;
-        
-        // Resize to max 2048px on longest side
-        let img = img.thumbnail(2048, 2048);
-        
-        // Re-encode as JPEG with compression
-        let mut compressed_bytes = Vec::new();
-        let mut cursor = Cursor::new(&mut compressed_bytes);
-        img.write_to(&mut cursor, image::ImageOutputFormat::Jpeg(80))
-            .map_err(|e| format!("Failed to compress: {}", e))?;
-        
-        let compressed_size_mb = (compressed_bytes.len() * 4 / 3) as f64 / 1_000_000.0;
-        println!("   ✅ Compressed to: {:.2} MB", compressed_size_mb);
-        
-        use base64::{Engine as _, engine::general_purpose};
-        Ok(general_purpose::STANDARD.encode(&compressed_bytes))
+    use base64::{Engine as _, engine::general_purpose};
+    use image::io::Reader as ImageReader;
+    use std::io::Cursor;
+
+    if (bytes.len() as f64 / 1_000_000.0) > 3.5 {
+         let img = ImageReader::new(Cursor::new(&bytes)).with_guessed_format().unwrap().decode().unwrap();
+         let img = img.thumbnail(2048, 2048);
+         let mut buf = Vec::new();
+         img.write_to(&mut Cursor::new(&mut buf), image::ImageOutputFormat::Jpeg(80)).unwrap();
+         Ok(general_purpose::STANDARD.encode(&buf))
     } else {
-        // Image is already small enough
-        use base64::{Engine as _, engine::general_purpose};
-        Ok(general_purpose::STANDARD.encode(&image_bytes))
+         Ok(general_purpose::STANDARD.encode(&bytes))
     }
 }
