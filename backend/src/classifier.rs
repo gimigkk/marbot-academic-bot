@@ -41,6 +41,8 @@ fn parse_command(text: &str) -> Option<BotCommand> {
     let command = parts[0].to_lowercase();
     
     match command.as_str() {
+        "test" => Some(BotCommand::Ping),
+        "tes" => Some(BotCommand::Ping),
         "ping" => Some(BotCommand::Ping),
         "tugas" => {
             // Handle both "#tugas" alone and "#tugas 123"
