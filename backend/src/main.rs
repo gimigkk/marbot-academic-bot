@@ -34,6 +34,7 @@ use parser::ai_extractor::{extract_with_ai};
 use whitelist::Whitelist;
 
 type MessageCache = Arc<Mutex<HashSet<String>>>;
+// ✅ BARU: Type definition untuk Anti-Spam
 type SpamTracker = Arc<Mutex<HashMap<String, (u32, Instant)>>>;
 
 
@@ -54,7 +55,7 @@ const BANNER: &str = r#"
 #[derive(Clone)]
 struct AppState {
     cache: MessageCache,
-    spam_tracker: SpamTracker,
+    spam_tracker: SpamTracker, // ✅ BARU: Masuk ke State
     whitelist: Arc<Whitelist>,
     pool: PgPool,
 }
@@ -106,7 +107,8 @@ async fn main() {
 
     let whitelist = Arc::new(Whitelist::new());
     let cache = Arc::new(Mutex::new(HashSet::new()));
-    // --- Inisialisasi Spam Tracker ---
+    
+    // ✅ BARU: Inisialisasi Spam Tracker
     let spam_tracker = Arc::new(Mutex::new(HashMap::new())); 
 
     // 4. Jalankan Scheduler
@@ -122,7 +124,7 @@ async fn main() {
 
     let state = AppState { 
         cache,
-        spam_tracker, 
+        spam_tracker, // ✅ BARU
         whitelist, 
         pool
     };
@@ -183,10 +185,10 @@ async fn webhook(
         return StatusCode::OK;
     }
 
-    // Ignore messages from debug group to prevent infinite loop
+    // Ignore messages from debug group
     let debug_group_id = std::env::var("DEBUG_GROUP_ID").ok();
 
-    // ✅ EXTRACT SENDER AND CHAT IDs CORRECTLY
+    // ✅ EXTRACT SENDER AND CHAT IDs
     let chat_id = &payload.payload.from;  
     
     // Extract sender's actual phone number
@@ -208,15 +210,15 @@ async fn webhook(
         });
 
     
-    // STEP 1: CLASSIFY MESSAGE (COMMAND OR NOT)
+    // STEP 1: CLASSIFY MESSAGE DULUAN (Supaya bisa cek is_command)
     let message_type = classify_message(&payload.payload.body);
     let is_command = matches!(message_type, MessageType::Command(_));
 
-    // ANTI-SPAM 
+
+    // ANTI-SPAM (HANYA UNTUK COMMAND)
     if is_command {
-        // Konfigurasi Batas
-        const MAX_MESSAGES: u32 = 5;      // MAX 5 Pesan
-        const WINDOW_SECONDS: u64 = 30;   // 30 detik window
+        const MAX_MESSAGES: u32 = 5;      // Batas 5 command
+        const WINDOW_SECONDS: u64 = 30;   // Dalam 30 detik
 
         let mut tracker = state.spam_tracker.lock().await;
         
@@ -224,8 +226,8 @@ async fn webhook(
             .entry(sender_phone.to_string())
             .or_insert((0, Instant::now() + Duration::from_secs(WINDOW_SECONDS)));
 
+        // Cek apakah waktu reset sudah lewat?
         if Instant::now() > *reset_time {
-            // Reset counter
             *count = 1;
             *reset_time = Instant::now() + Duration::from_secs(WINDOW_SECONDS);
         } else {
@@ -237,13 +239,14 @@ async fn webhook(
             println!("🚫 SPAM COMMAND BLOCKED: {} sent > {} cmds/{}s", sender_phone, MAX_MESSAGES, WINDOW_SECONDS);
             
             if *count == MAX_MESSAGES + 1 {
-                let warning_msg = "⚠️ *RATE LIMIT REACHED*\nAnda mengirim command terlalu cepat. Harap tunggu 30 detik ngab.";
+                let warning_msg = "⚠️ *RATE LIMIT REACHED*\nAnda mengirim command terlalu cepat. Harap tunggu sebentar.";
                 let _ = send_reply(chat_id, warning_msg).await;
             }
 
             return StatusCode::OK;
         }
     }
+
 
     // Terminal logging
     println!("📨 Message from: {}", chat_id);
@@ -270,32 +273,36 @@ async fn webhook(
                                     `Description: [keterangan]`\n\n\
                                     _Cukup isi field yang kurang saja!_";
                     
-                    let _ = send_reply(chat_id, error_msg).await;
+                    if let Err(e) = send_reply(chat_id, error_msg).await {
+                         eprintln!("❌ Failed to send error: {}", e);
+                    }
                     return StatusCode::OK;
                 }
 
-                // Parse fields
                 let new_deadline = updates.get("deadline").and_then(|d| crud::parse_deadline(d).ok());
                 let new_title = updates.get("title").cloned();
                 let new_description = updates.get("description").cloned();
                 let new_parallel = updates.get("parallel_code").map(|p| p.to_lowercase());
 
-                // Course lookup
                 let course_id = if let Some(course_name) = updates.get("course_name") {
                     match crud::get_course_by_name(&state.pool, course_name).await {
                         Ok(Some(course)) => Some(course.id),
                         Ok(None) => {
                             let error_msg = format!("❌ Mata kuliah '{}' tidak ditemukan.", course_name);
-                            let _ = send_reply(chat_id, &error_msg).await;
+                            if let Err(e) = send_reply(chat_id, &error_msg).await {
+                                eprintln!("❌ Failed to send error: {}", e);
+                            }
                             return StatusCode::OK;
                         }
-                        Err(_) => None,
+                        Err(e) => {
+                            eprintln!("❌ Failed to lookup course: {}", e);
+                            None
+                        }
                     }
                 } else {
                     None
                 };
 
-                // Update assignment
                 match crud::update_assignment_fields(
                     &state.pool,
                     assignment_id,
@@ -307,23 +314,35 @@ async fn webhook(
                 ).await {
                     Ok(updated) => {
                         if let Some(cid) = course_id {
-                             let _ = sqlx::query("UPDATE assignments SET course_id = $1 WHERE id = $2")
-                                .bind(cid).bind(assignment_id).execute(&state.pool).await;
+                             if let Err(e) = sqlx::query("UPDATE assignments SET course_id = $1 WHERE id = $2")
+                                .bind(cid).bind(assignment_id).execute(&state.pool).await {
+                                    eprintln!("❌ Failed to update course_id: {}", e);
+                                }
                         }
                         
                         let display_course = if let Some(cn) = updates.get("course_name") { cn.to_string() } else { "Unknown".to_string() };
                         
                         let response = format!(
-                            "✅ *KLARIFIKASI TERSIMPAN*\n━━━━━━━━━━━━━━━━━━\n📝 *{}*\n📚 {}\n⏰ Deadline: {}\n_Terima kasih!_",
+                            "✅ *KLARIFIKASI TERSIMPAN*\n
+                            ━━━━━━━━━━━━━━━━━━\n
+                            📝 *{}*\n
+                            📚 {}\n
+                            ⏰ Deadline: {}\n_
+                            Terima kasih atas klarifikasinya!_",
                             updated.title,
                             display_course,
                             updated.deadline.map(|d| d.format("%Y-%m-%d").to_string()).unwrap_or("-".to_string())
                         );
                         
-                        let _ = send_reply(chat_id, &response).await;
+                        if let Err(e) = send_reply(chat_id, &response).await {
+                            eprintln!("❌ Failed to send confirmation: {}", e);
+                        }
                     }
                     Err(e) => {
-                        let _ = send_reply(chat_id, &format!("❌ Gagal menyimpan: {}", e)).await;
+                        let error_msg = format!("❌ Gagal menyimpan: {}", e);
+                         if let Err(e) = send_reply(chat_id, &error_msg).await {
+                            eprintln!("❌ Failed to send error: {}", e);
+                        }
                     }
                 }
                 return StatusCode::OK;
@@ -368,13 +387,20 @@ async fn webhook(
         MessageType::NeedsAI(text) => {
             println!("🤖 Processing with AI...");
             
-            // Image handling
+            // Image handling (GUNAKAN VERSI AMAN DARI KODE ORIGINAL ANDA)
             let image_base64 = if payload.payload.has_media.unwrap_or(false) {
                 if let Some(ref media) = payload.payload.media {
                     if let Some(ref media_url) = media.url {
                          if media.mimetype.as_ref().map(|m| m.starts_with("image/")).unwrap_or(false) {
                             let api_key = std::env::var("WAHA_API_KEY").unwrap_or_else(|_| "devkey123".to_string());
-                            fetch_image_from_url(media_url, &api_key).await.ok()
+                            // Pakai fetch_image_from_url yang AMAN
+                            match fetch_image_from_url(media_url, &api_key).await {
+                                Ok(base64) => Some(base64),
+                                Err(e) => {
+                                    eprintln!("❌ Failed to download image: {}", e);
+                                    None
+                                }
+                            }
                          } else { None }
                     } else { None }
                 } else { None }
@@ -579,7 +605,11 @@ async fn fetch_image_from_url(url: &str, api_key: &str) -> Result<String, String
     let url = url.replace("http://localhost:3000", "http://localhost:3001");
     let client = reqwest::Client::new();
     let res = client.get(&url).header("X-Api-Key", api_key).send().await.map_err(|e| e.to_string())?;
-    if !res.status().is_success() { return Err("HTTP Error".into()); }
+    
+    if !res.status().is_success() { 
+        return Err(format!("HTTP Error: {}", res.status())); 
+    }
+    
     let bytes = res.bytes().await.map_err(|e| e.to_string())?;
     
     use base64::{Engine as _, engine::general_purpose};
@@ -587,10 +617,19 @@ async fn fetch_image_from_url(url: &str, api_key: &str) -> Result<String, String
     use std::io::Cursor;
 
     if (bytes.len() as f64 / 1_000_000.0) > 3.5 {
-         let img = ImageReader::new(Cursor::new(&bytes)).with_guessed_format().unwrap().decode().unwrap();
+         println!("   🔄 Compressing image...");
+         
+         let img = ImageReader::new(Cursor::new(&bytes))
+            .with_guessed_format()
+            .map_err(|e| format!("Format error: {}", e))?
+            .decode()
+            .map_err(|e| format!("Decode error: {}", e))?;
+         
          let img = img.thumbnail(2048, 2048);
          let mut buf = Vec::new();
-         img.write_to(&mut Cursor::new(&mut buf), image::ImageOutputFormat::Jpeg(80)).unwrap();
+         img.write_to(&mut Cursor::new(&mut buf), image::ImageOutputFormat::Jpeg(80))
+            .map_err(|e| format!("Compress error: {}", e))?;
+            
          Ok(general_purpose::STANDARD.encode(&buf))
     } else {
          Ok(general_purpose::STANDARD.encode(&bytes))
