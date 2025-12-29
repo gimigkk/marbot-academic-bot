@@ -552,25 +552,24 @@ async fn is_spam(rate_limiter: &RateLimiter, sender_id: &str) -> bool {
 
     let mut map = rate_limiter.lock().await;
     map.retain(|_, timestamps| {
-        if let Some(&last) = timestamps.back() {
-            now.duration_since(last) <= Duration::from_secs(SPAM_WINDOW_SECS)
-        } else {
-            false
+        while let Some(&ts) = timestamps.front() {
+            if now.duration_since(ts) > Duration::from_secs(SPAM_WINDOW_SECS) {
+                timestamps.pop_front();
+            } else {
+                break;
+            }
         }
+        !timestamps.is_empty()
     });
     let entry = map.entry(sender_id.to_string()).or_insert_with(VecDeque::new);
 
-    while let Some(&ts) = entry.front() {
-        if now.duration_since(ts) > Duration::from_secs(SPAM_WINDOW_SECS) {
-            entry.pop_front();
-        } else {
-            break;
-        }
+    if entry.len() >= SPAM_MAX_MESSAGES {
+        return true;
     }
 
     entry.push_back(now);
 
-    entry.len() > SPAM_MAX_MESSAGES
+    false
 }
 
 async fn forward_message(chat_id: &str, message_id: &str) -> Result<(), String> {
