@@ -5,10 +5,11 @@ use axum::{
     Router,
 };
 use axum::http::StatusCode;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::net::SocketAddr;
 use std::sync::Arc;  
 use std::io::Write;
+use std::time::{Duration, Instant};
 use tokio::sync::Mutex;  
 use tokio::net::TcpListener;
 use sqlx::PgPool;
@@ -32,6 +33,7 @@ use parser::ai_extractor::{extract_with_ai};
 use whitelist::Whitelist;
 
 type MessageCache = Arc<Mutex<HashSet<String>>>;
+type RateLimiter = Arc<Mutex<HashMap<String, VecDeque<Instant>>>>;
 
 
 const BANNER: &str = r#"
@@ -53,6 +55,7 @@ struct AppState {
     cache: MessageCache,
     whitelist: Arc<Whitelist>,
     pool: PgPool,
+    rate_limiter: RateLimiter,
 }
 
 #[tokio::main]
@@ -102,6 +105,7 @@ async fn main() {
 
     let whitelist = Arc::new(Whitelist::new());
     let cache = Arc::new(Mutex::new(HashSet::new()));
+    let rate_limiter = Arc::new(Mutex::new(HashMap::new()));
 
     // 4. Jalankan Scheduler
     let pool_for_scheduler = pool.clone();
@@ -117,7 +121,8 @@ async fn main() {
     let state = AppState { 
         cache, 
         whitelist, 
-        pool
+        pool,
+        rate_limiter,
     };
     
     let app = Router::new()
@@ -217,6 +222,16 @@ async fn webhook(
     println!("📨 Message from: {}", chat_id);
     println!("   Sender: {} ({})", sender_name, sender_phone);
     println!("   Body: {}", payload.payload.body);
+
+    // Simple anti-spam guard
+    if is_spam(&state.rate_limiter, sender_phone).await {
+        println!("🚫 Spam detected from {}", sender_phone);
+        let warn_msg = "🚫 Mohon hindari spam. Tunggu beberapa saat sebelum mengirim pesan lagi.";
+        if let Err(e) = send_reply(chat_id, warn_msg).await {
+            eprintln!("❌ Failed to send spam warning: {}", e);
+        }
+        return StatusCode::OK;
+    }
 
     // println!("   🔍 Has quoted message: {}", payload.payload.quoted_msg.is_some());
     // if let Some(ref q) = payload.payload.quoted_msg {
@@ -527,6 +542,33 @@ async fn webhook(
     }
     
     StatusCode::OK
+}
+
+async fn is_spam(rate_limiter: &RateLimiter, sender_id: &str) -> bool {
+    const WINDOW_SECS: u64 = 10;
+    const MAX_MESSAGES: usize = 5;
+
+    let now = Instant::now();
+    let mut map = rate_limiter.lock().await;
+    let entry = map.entry(sender_id.to_string()).or_insert_with(VecDeque::new);
+
+    while let Some(&ts) = entry.front() {
+        if now.duration_since(ts) > Duration::from_secs(WINDOW_SECS) {
+            entry.pop_front();
+        } else {
+            break;
+        }
+    }
+
+    entry.push_back(now);
+
+    if entry.len() > MAX_MESSAGES * 3 {
+        while entry.len() > MAX_MESSAGES * 2 {
+            entry.pop_front();
+        }
+    }
+
+    entry.len() > MAX_MESSAGES
 }
 
 async fn forward_message(chat_id: &str, message_id: &str) -> Result<(), String> {
