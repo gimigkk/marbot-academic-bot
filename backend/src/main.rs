@@ -35,6 +35,9 @@ use whitelist::Whitelist;
 type MessageCache = Arc<Mutex<HashSet<String>>>;
 type RateLimiter = Arc<Mutex<HashMap<String, VecDeque<Instant>>>>;
 
+const SPAM_WINDOW_SECS: u64 = 10;
+const SPAM_MAX_MESSAGES: usize = 5;
+
 
 const BANNER: &str = r#"
 \x1b[36m
@@ -545,16 +548,20 @@ async fn webhook(
 }
 
 async fn is_spam(rate_limiter: &RateLimiter, sender_id: &str) -> bool {
-    const WINDOW_SECS: u64 = 10;
-    const MAX_MESSAGES: usize = 5;
-
     let now = Instant::now();
 
     let mut map = rate_limiter.lock().await;
+    map.retain(|_, timestamps| {
+        if let Some(&last) = timestamps.back() {
+            now.duration_since(last) <= Duration::from_secs(SPAM_WINDOW_SECS)
+        } else {
+            false
+        }
+    });
     let entry = map.entry(sender_id.to_string()).or_insert_with(VecDeque::new);
 
     while let Some(&ts) = entry.front() {
-        if now.duration_since(ts) > Duration::from_secs(WINDOW_SECS) {
+        if now.duration_since(ts) > Duration::from_secs(SPAM_WINDOW_SECS) {
             entry.pop_front();
         } else {
             break;
@@ -563,7 +570,7 @@ async fn is_spam(rate_limiter: &RateLimiter, sender_id: &str) -> bool {
 
     entry.push_back(now);
 
-    entry.len() > MAX_MESSAGES
+    entry.len() > SPAM_MAX_MESSAGES
 }
 
 async fn forward_message(chat_id: &str, message_id: &str) -> Result<(), String> {
