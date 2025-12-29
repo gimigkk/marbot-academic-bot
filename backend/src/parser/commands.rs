@@ -21,7 +21,7 @@ pub async fn handle_command(
     match cmd {
         BotCommand::Ping => {
             println!("🏓 Ping command received from {}\n", user_phone);
-            CommandResponse::Text("SIAP! SEMANGAT! DASHYAT!".to_string())
+            CommandResponse::Text("Apa kek anjir ni command ganti replynya".to_string())
         }
 
         BotCommand::Tugas => {
