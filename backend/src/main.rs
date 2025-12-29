@@ -226,7 +226,7 @@ async fn webhook(
     // Simple anti-spam guard
     if is_spam(&state.rate_limiter, sender_phone).await {
         println!("🚫 Spam detected from {}", sender_phone);
-        let warn_msg = "🚫 Mohon hindari spam. Tunggu beberapa saat sebelum mengirim pesan lagi.";
+        let warn_msg = "🚫 Harap hindari spam. Tunggu beberapa saat sebelum mengirim pesan lagi.";
         if let Err(e) = send_reply(chat_id, warn_msg).await {
             eprintln!("❌ Failed to send spam warning: {}", e);
         }
@@ -547,8 +547,9 @@ async fn webhook(
 async fn is_spam(rate_limiter: &RateLimiter, sender_id: &str) -> bool {
     const WINDOW_SECS: u64 = 10;
     const MAX_MESSAGES: usize = 5;
-    const CLEANUP_LIMIT_MULTIPLIER: usize = 3;
-    const CLEANUP_TARGET_MULTIPLIER: usize = 2;
+    // Allow short bursts while bounding memory growth for each sender
+    const CLEANUP_LIMIT_MULTIPLIER: usize = 3;  // trim when queue grows 3x the limit
+    const CLEANUP_TARGET_MULTIPLIER: usize = 2; // shrink back to 2x the limit
 
     let now = Instant::now();
 
@@ -565,7 +566,9 @@ async fn is_spam(rate_limiter: &RateLimiter, sender_id: &str) -> bool {
         }
 
         let at_limit = entry.len() >= MAX_MESSAGES;
-        entry.push_back(now);
+        if !at_limit {
+            entry.push_back(now);
+        }
 
         let cleanup_limit = MAX_MESSAGES * CLEANUP_LIMIT_MULTIPLIER;
         let cleanup_target = MAX_MESSAGES * CLEANUP_TARGET_MULTIPLIER;
