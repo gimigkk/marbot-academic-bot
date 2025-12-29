@@ -190,7 +190,7 @@ async fn try_groq_reasoning(prompt: &str) -> Result<AIClassification, String> {
         }
         
         if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
-            eprintln!("│ ⚠️  RATE LIMIT: {}", model);
+            eprintln!("│ ⚠️  RATE LIMIT : {}", model);
             if index < GROQ_REASONING_MODELS.len() - 1 {
                 continue;
             } else {
@@ -268,7 +268,7 @@ async fn try_groq_standard_text(prompt: &str) -> Result<AIClassification, String
         }
         
         if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
-            eprintln!("│ ⚠️  RATE LIMIT: {}", model);
+            eprintln!("│ ⚠️  RATE LIMIT : {}", model);
             if index < GROQ_TEXT_MODELS.len() - 1 {
                 continue;
             } else {
@@ -355,7 +355,7 @@ async fn try_groq_vision(prompt: &str, image_base64: &str) -> Result<AIClassific
         }
         
         if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
-            eprintln!("│ ⚠️  RATE LIMIT: {}", model);
+            eprintln!("│ ⚠️  RATE LIMIT : {}", model);
             if index < GROQ_VISION_MODELS.len() - 1 {
                 continue;
             } else {
@@ -484,7 +484,7 @@ pub async fn match_update_to_assignment(
         }
         
         if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
-            eprintln!("│ ⚠️  RATE LIMIT: {}", model);
+            eprintln!("│ ⚠️  RATE LIMIT : {}", model);
             if index < GEMINI_MODELS.len() - 1 {
                 continue;
             } else {

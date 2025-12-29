@@ -25,8 +25,11 @@ pub const GROQ_TEXT_MODELS: &[&str] = &[
 
 // Gemini models (final fallback - reliable, 1M context window)
 pub const GEMINI_MODELS: &[&str] = &[
-    "gemini-2.0-flash-exp",     // Latest experimental flash
-    "gemini-1.5-flash",         // Stable fallback
+    "gemini-3-flash-preview",     // Preview - latest balanced model
+    "gemini-3-pro-preview",       // Preview - most intelligent
+    "gemini-2.5-flash",           // Stable - best price-performance (RECOMMENDED)
+    "gemini-2.5-pro",             // Stable - advanced thinking model
+    "gemini-2.5-flash-lite",      // Stable - ultra fast, cost-efficient
 ];
 
 // ===== PUBLIC API =====

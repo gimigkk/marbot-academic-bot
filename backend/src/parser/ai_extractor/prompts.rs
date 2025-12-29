@@ -147,6 +147,29 @@ DATE PARSING (relative to {})
 
 Output: YYYY-MM-DD or null
 
+**CRITICAL: DESCRIPTION FIELD IS MANDATORY**
+═══════════════════════════════════════════════════════════════════
+**NEVER leave description empty or null.** Always generate a meaningful description:
+
+• **If message has details**: Extract them
+  "LKP 14 tentang sorting" → "Programming assignment about sorting"
+
+• **If message is minimal**: Infer from title
+  "Pemrog LKP 14" → "Programming assignment LKP 14"
+  "Kalkulus Tugas 3" → "Calculus assignment task 3"
+
+• **For numbered assignments**: Include number in description
+  "LKP 14" → "Programming lab assignment 14"
+  "Problem Set 5" → "Calculus problem set 5"
+
+• **Minimum acceptable description**: "[Course] [assignment type] [identifier]"
+  Examples:
+  - "Programming lab assignment LKP 14"
+  - "Calculus problem set task 3"
+  - "Physics lab report assignment"
+
+**Why this matters**: Descriptions are used for matching updates to existing assignments. Empty descriptions cause duplicate creation bugs.
+
 OUTPUT FORMATS
 ═══════════════════════════════════════════════════════════════════
 
@@ -158,21 +181,21 @@ MULTIPLE_ASSIGNMENTS:
       "course_name": "Pemrograman",
       "title": "LKP 14",
       "deadline": "2025-12-31",
-      "description": "Brief description",
+      "description": "Programming lab assignment 14",
       "parallel_code": "k1"
     }},
     {{
       "course_name": "Kalkulus",
       "title": "Problem Set 5",
       "deadline": "2026-01-02",
-      "description": "Chapter 5 problems",
+      "description": "Calculus problem set 5 - Chapter 5 problems",
       "parallel_code": null
     }}
   ]
 }}
 
 NEW_ASSIGNMENT (single):
-{{"type":"assignment_info","course_name":"Pemrograman","title":"LKP 14","deadline":"2025-12-31","description":"Brief description","parallel_code":"k1"}}
+{{"type":"assignment_info","course_name":"Pemrograman","title":"LKP 14","deadline":"2025-12-31","description":"Programming lab assignment 14","parallel_code":"k1"}}
 
 UPDATE_ASSIGNMENT:
 {{"type":"assignment_update","reference_keywords":["CourseName","identifier"],"changes":"what changed","new_deadline":"2025-12-30","new_title":null,"new_description":null,"parallel_code":"all"}}
@@ -191,14 +214,14 @@ Example 1 - MULTIPLE:
 → {{
   "type": "multiple_assignments",
   "assignments": [
-    {{"course_name":"Pemrograman","title":"LKP 15","deadline":"2025-12-30","description":"Programming assignment","parallel_code":null}},
-    {{"course_name":"Fisika","title":"Lab Report","deadline":"2025-12-31","description":"Physics lab report","parallel_code":null}}
+    {{"course_name":"Pemrograman","title":"LKP 15","deadline":"2025-12-30","description":"Programming lab assignment 15","parallel_code":null}},
+    {{"course_name":"Fisika","title":"Lab Report","deadline":"2025-12-31","description":"Physics lab report assignment","parallel_code":null}}
   ]
 }}
 
-Example 2 - Clear NEW (single):
-"Ada tugas baru Pemrograman LKP 15 deadline minggu depan"
-→ {{"type":"assignment_info","course_name":"Pemrograman","title":"LKP 15","deadline":"2026-01-05","description":"Programming assignment","parallel_code":null}}
+Example 2 - Clear NEW (single) with minimal context:
+"Pemrog LKP 14 P3 deadline besok"
+→ {{"type":"assignment_info","course_name":"Pemrograman","title":"LKP 14","deadline":"2025-12-30","description":"Programming lab assignment 14 for P3 section","parallel_code":"p3"}}
 
 Example 3 - Descriptive UPDATE:
 "Tugas Pemrog yang coding pake kertas jadinya untuk semua parallel"
@@ -210,8 +233,8 @@ Example 4 - MULTIPLE with mixed formats:
 → {{
   "type": "multiple_assignments",
   "assignments": [
-    {{"course_name":"Pemrograman","title":"Assignment","deadline":"2025-12-30","description":"Programming task","parallel_code":null}},
-    {{"course_name":"Kalkulus","title":"Assignment","deadline":"2025-12-30","description":"Calculus task","parallel_code":null}}
+    {{"course_name":"Pemrograman","title":"Assignment","deadline":"2025-12-30","description":"Programming assignment due tomorrow","parallel_code":null}},
+    {{"course_name":"Kalkulus","title":"Assignment","deadline":"2025-12-30","description":"Calculus assignment due tomorrow","parallel_code":null}}
   ]
 }}
 
@@ -220,9 +243,10 @@ PRINCIPLES
 1. **Check for multiple assignments FIRST** before single assignment
 2. **Semantic over literal**: Understand intent, not just keywords
 3. **Context matters**: Use DB to inform decisions
-4. **Confidence-based**: High confidence → classify; Low → UNRECOGNIZED
-5. **Course boundaries**: Never match updates across different courses
-6. **When uncertain**: NEW > UPDATE (avoid bad matches); Classification > UNRECOGNIZED (avoid noise)
+4. **ALWAYS GENERATE DESCRIPTIONS**: Never leave description field empty
+5. **Confidence-based**: High confidence → classify; Low → UNRECOGNIZED
+6. **Course boundaries**: Never match updates across different courses
+7. **When uncertain**: NEW > UPDATE (avoid bad matches); Classification > UNRECOGNIZED (avoid noise)
 
 Return ONLY valid JSON. No markdown, no explanations."#,
         current_datetime,
@@ -265,13 +289,21 @@ pub fn build_matching_prompt(
                 format!("{} days ago", created_ago.num_days())
             };
             
+            // FIXED: Include description for semantic matching
+            let desc_preview = if a.description.is_empty() {
+                "(no description)".to_string()
+            } else {
+                truncate_for_log(&a.description, 60)
+            };
+            
             format!(
-                "#{}: {} | {} | \"{}\" | Parallel: {} | {}",
+                "#{}: {} | {} | \"{}\" | Parallel: {} | Desc: \"{}\" | {}",
                 i + 1,
                 a.id,
                 course_name,
                 a.title,
                 parallel_str,
+                desc_preview,
                 time_ago
             )
         })
@@ -312,9 +344,22 @@ Step 1: Course Filter
 
 Step 2: Semantic Content Match
 • Match by MEANING, not exact strings
-• "coding kertas" matches "Coding on Paper"
-• "matriks" matches "Matrix Operations"
-• Look for keywords in title/description
+• **Use BOTH title AND description for matching**
+• "LKP 14" in keywords matches:
+  - Title: "LKP 14" OR "palpale palpale"
+  - Description: "Programming lab assignment 14"
+• "coding kertas" matches:
+  - Title: "Coding on Paper"
+  - Description: "coding assignment using paper"
+• "matriks" matches:
+  - Title: "Matrix Operations"
+  - Description: "matrix calculation assignment"
+
+**Key matching rules:**
+1. Check if keywords appear in TITLE OR DESCRIPTION
+2. Look for assignment numbers/identifiers (LKP 14, Task 3, etc.)
+3. If description contains the assignment identifier → HIGH confidence match
+4. Empty descriptions reduce match confidence
 
 Step 3: Parallel Code Handling
 
@@ -337,7 +382,8 @@ Parallel: {}
 → Otherwise → Case B
 
 Step 4: Confidence
-• Course + content match → HIGH
+• Course + (title OR description) match → HIGH
+• Course + identifier in description → HIGH
 • Missing course → NULL
 • Content mismatch → NULL
 • Recency is tiebreaker only
@@ -346,7 +392,7 @@ OUTPUT FORMAT
 ═══════════════════════════════════════════════════════════════════
 
 Match found:
-{{"assignment_id":"uuid","confidence":"high","reason":"Course and content match"}}
+{{"assignment_id":"uuid","confidence":"high","reason":"Course and content match (found in description)"}}
 
 No match:
 {{"assignment_id":null,"confidence":"low","reason":"Why no match"}}
@@ -354,29 +400,37 @@ No match:
 EXAMPLES
 ═══════════════════════════════════════════════════════════════════
 
-Example 1 - Scope change (Case A):
+Example 1 - Match via description (BUG FIX):
+Keywords: ["Pemrograman","LKP 14"]
+Parallel: p3
+Assignment: Pemrograman "palpale palpale" Parallel: p3 Desc: "Programming lab assignment 14 for P3 section"
+
+→ Match! (LKP 14 found in description, even though title changed)
+{{"assignment_id":"uuid-1","confidence":"high","reason":"Keywords match description: 'LKP 14' found in assignment description"}}
+
+Example 2 - Scope change (Case A):
 Keywords: ["Pemrograman","coding","kertas"]
 Changes: "scope changed to k2"
 Parallel: k2
-Assignment: Pemrograman "Coding on Paper" Parallel: k1
+Assignment: Pemrograman "Coding on Paper" Parallel: k1 Desc: "Coding assignment using paper"
 
 → Match! (ignore parallel mismatch - it's being changed)
 {{"assignment_id":"uuid-1","confidence":"high","reason":"Course and content match, scope being changed to k2"}}
 
-Example 2 - Parallel-specific (Case B):
+Example 3 - Parallel-specific (Case B):
 Keywords: ["Pemrograman","LKP 13"]
 Changes: "deadline extended"
 Parallel: k2
 Assignments:
-  - Pemrograman "LKP 13" Parallel: k1
-  - Pemrograman "LKP 13" Parallel: k2
+  - Pemrograman "LKP 13" Parallel: k1 Desc: "Programming lab 13"
+  - Pemrograman "LKP 13" Parallel: k2 Desc: "Programming lab 13"
 
 → Match #2 (must match parallel for Case B)
 {{"assignment_id":"uuid-2","confidence":"high","reason":"Course, content, and parallel all match"}}
 
-Example 3 - No match:
+Example 4 - No match:
 Keywords: ["Pemrograman","matriks"]
-Assignments: UX Design "Prototype"
+Assignments: UX Design "Prototype" Desc: "Design prototype assignment"
 
 → No match (wrong course)
 {{"assignment_id":null,"confidence":"low","reason":"No Pemrograman assignments found"}}
@@ -384,7 +438,8 @@ Assignments: UX Design "Prototype"
 PRINCIPLES
 ═══════════════════════════════════════════════════════════════════
 • Think like a human: "Tugas X jadinya untuk K2" = find X, change its parallel to K2
-• Semantic matching: meaning > exact words
+• **Semantic matching across BOTH title and description**: meaning > exact words
+• **Descriptions are critical**: They contain assignment identifiers even when titles change
 • Course boundaries: never match across courses
 • Recency helps but doesn't override content mismatch
 
