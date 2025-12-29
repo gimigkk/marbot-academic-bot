@@ -547,28 +547,39 @@ async fn webhook(
 async fn is_spam(rate_limiter: &RateLimiter, sender_id: &str) -> bool {
     const WINDOW_SECS: u64 = 10;
     const MAX_MESSAGES: usize = 5;
+    const CLEANUP_LIMIT_MULTIPLIER: usize = 3;
+    const CLEANUP_TARGET_MULTIPLIER: usize = 2;
 
     let now = Instant::now();
-    let mut map = rate_limiter.lock().await;
-    let entry = map.entry(sender_id.to_string()).or_insert_with(VecDeque::new);
 
-    while let Some(&ts) = entry.front() {
-        if now.duration_since(ts) > Duration::from_secs(WINDOW_SECS) {
-            entry.pop_front();
-        } else {
-            break;
+    let is_spam = {
+        let mut map = rate_limiter.lock().await;
+        let entry = map.entry(sender_id.to_string()).or_insert_with(VecDeque::new);
+
+        while let Some(&ts) = entry.front() {
+            if now.duration_since(ts) > Duration::from_secs(WINDOW_SECS) {
+                entry.pop_front();
+            } else {
+                break;
+            }
         }
-    }
 
-    entry.push_back(now);
+        let at_limit = entry.len() >= MAX_MESSAGES;
+        entry.push_back(now);
 
-    if entry.len() > MAX_MESSAGES * 3 {
-        while entry.len() > MAX_MESSAGES * 2 {
-            entry.pop_front();
+        let cleanup_limit = MAX_MESSAGES * CLEANUP_LIMIT_MULTIPLIER;
+        let cleanup_target = MAX_MESSAGES * CLEANUP_TARGET_MULTIPLIER;
+
+        if entry.len() > cleanup_limit {
+            while entry.len() > cleanup_target {
+                entry.pop_front();
+            }
         }
-    }
 
-    entry.len() > MAX_MESSAGES
+        at_limit
+    };
+
+    is_spam
 }
 
 async fn forward_message(chat_id: &str, message_id: &str) -> Result<(), String> {
