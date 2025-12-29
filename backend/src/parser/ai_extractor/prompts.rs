@@ -90,12 +90,22 @@ Active assignments (recent):
 TASK
 ═══════════════════════════════════════════════════════════════════
 Classify this message as:
-1. **NEW_ASSIGNMENT** - Announcing a new task
-2. **UPDATE_ASSIGNMENT** - Modifying/clarifying existing assignment
-3. **UNRECOGNIZED** - Not about assignments
+1. **MULTIPLE_ASSIGNMENTS** - Message contains 2+ assignments (CHECK FIRST)
+2. **NEW_ASSIGNMENT** - Announcing a single new task
+3. **UPDATE_ASSIGNMENT** - Modifying/clarifying existing assignment
+4. **UNRECOGNIZED** - Not about assignments
 
 CLASSIFICATION GUIDELINES
 ═══════════════════════════════════════════════════════════════════
+
+**MULTIPLE_ASSIGNMENTS (PRIORITY CHECK):**
+Signals:
+• Numbered lists: "1. Pemrog LKP 14...\n2. Kalkulus Tugas 3..."
+• Multiple course mentions: "Pemrog dan Fisika ada tugas"
+• Bullet points with different assignments
+• "ada 2 tugas", "3 assignments today"
+
+Extract each as separate assignment with ALL fields (course, title, deadline, description, parallel)
 
 NEW_ASSIGNMENT signals:
 • "ada tugas baru", "new assignment", clear announcement
@@ -121,7 +131,7 @@ PARALLEL CODES
 ═══════════════════════════════════════════════════════════════════
 Valid codes (lowercase): k1, k2, k3, p1, p2, p3, all, null
 
-• k1-k3, p1-p3: specific sections
+• k1-k3, p1-p2, p3: specific sections
 • all: applies to all sections ("untuk semua parallel")
 • null: not specified
 
@@ -140,7 +150,28 @@ Output: YYYY-MM-DD or null
 OUTPUT FORMATS
 ═══════════════════════════════════════════════════════════════════
 
-NEW_ASSIGNMENT:
+MULTIPLE_ASSIGNMENTS:
+{{
+  "type": "multiple_assignments",
+  "assignments": [
+    {{
+      "course_name": "Pemrograman",
+      "title": "LKP 14",
+      "deadline": "2025-12-31",
+      "description": "Brief description",
+      "parallel_code": "k1"
+    }},
+    {{
+      "course_name": "Kalkulus",
+      "title": "Problem Set 5",
+      "deadline": "2026-01-02",
+      "description": "Chapter 5 problems",
+      "parallel_code": null
+    }}
+  ]
+}}
+
+NEW_ASSIGNMENT (single):
 {{"type":"assignment_info","course_name":"Pemrograman","title":"LKP 14","deadline":"2025-12-31","description":"Brief description","parallel_code":"k1"}}
 
 UPDATE_ASSIGNMENT:
@@ -152,31 +183,46 @@ UNRECOGNIZED:
 EXAMPLES
 ═══════════════════════════════════════════════════════════════════
 
-Example 1 - Clear NEW:
-"Ada tugas baru Pemrograman LKP 15 deadline minggu depan"
-→ {{"type":"assignment_info","course_name":"Pemrograman","title":"LKP 15","deadline":"2026-01-04","description":"Programming assignment","parallel_code":null}}
+Example 1 - MULTIPLE:
+"Ada 2 tugas:
+1. Pemrog LKP 15 deadline besok
+2. Fisika Lab Report deadline lusa"
 
-Example 2 - Descriptive UPDATE:
+→ {{
+  "type": "multiple_assignments",
+  "assignments": [
+    {{"course_name":"Pemrograman","title":"LKP 15","deadline":"2025-12-30","description":"Programming assignment","parallel_code":null}},
+    {{"course_name":"Fisika","title":"Lab Report","deadline":"2025-12-31","description":"Physics lab report","parallel_code":null}}
+  ]
+}}
+
+Example 2 - Clear NEW (single):
+"Ada tugas baru Pemrograman LKP 15 deadline minggu depan"
+→ {{"type":"assignment_info","course_name":"Pemrograman","title":"LKP 15","deadline":"2026-01-05","description":"Programming assignment","parallel_code":null}}
+
+Example 3 - Descriptive UPDATE:
 "Tugas Pemrog yang coding pake kertas jadinya untuk semua parallel"
 (DB has Pemrograman coding assignment)
 → {{"type":"assignment_update","reference_keywords":["Pemrograman","coding","kertas"],"changes":"scope changed to all parallel classes","new_deadline":null,"new_title":null,"new_description":null,"parallel_code":"all"}}
 
-Example 3 - Different course, same topic = NEW:
-"Pemrograman prototype deadline besok"
-(DB has "UX Design prototype" only)
-→ {{"type":"assignment_info","course_name":"Pemrograman","title":"Prototype","deadline":"2025-12-29","description":"Programming prototype","parallel_code":null}}
-
-Example 4 - Too vague:
-"deadline besok ya"
-→ {{"type":"unrecognized"}}
+Example 4 - MULTIPLE with mixed formats:
+"Pemrog sama Kalkulus deadline besok ya"
+→ {{
+  "type": "multiple_assignments",
+  "assignments": [
+    {{"course_name":"Pemrograman","title":"Assignment","deadline":"2025-12-30","description":"Programming task","parallel_code":null}},
+    {{"course_name":"Kalkulus","title":"Assignment","deadline":"2025-12-30","description":"Calculus task","parallel_code":null}}
+  ]
+}}
 
 PRINCIPLES
 ═══════════════════════════════════════════════════════════════════
-1. **Semantic over literal**: Understand intent, not just keywords
-2. **Context matters**: Use DB to inform decisions
-3. **Confidence-based**: High confidence → classify; Low → UNRECOGNIZED
-4. **Course boundaries**: Never match updates across different courses
-5. **When uncertain**: NEW > UPDATE (avoid bad matches); Classification > UNRECOGNIZED (avoid noise)
+1. **Check for multiple assignments FIRST** before single assignment
+2. **Semantic over literal**: Understand intent, not just keywords
+3. **Context matters**: Use DB to inform decisions
+4. **Confidence-based**: High confidence → classify; Low → UNRECOGNIZED
+5. **Course boundaries**: Never match updates across different courses
+6. **When uncertain**: NEW > UPDATE (avoid bad matches); Classification > UNRECOGNIZED (avoid noise)
 
 Return ONLY valid JSON. No markdown, no explanations."#,
         current_datetime,

@@ -145,15 +145,24 @@ pub enum BotCommand {
 
 // ===== AI EXTRACTION RESULTS =====
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum AIClassification {
+    /// Single assignment (backward compatible)
     AssignmentInfo {
         course_name: Option<String>,
         title: String,
         deadline: Option<String>,
         description: Option<String>,
         parallel_code: Option<String>,
+        #[serde(default)]
+        #[serde(skip_serializing_if = "Option::is_none")]
+        original_message: Option<String>,
+    },
+    
+    /// NEW: Multiple assignments in one message
+    MultipleAssignments {
+        assignments: Vec<AssignmentData>,
         #[serde(default)]
         #[serde(skip_serializing_if = "Option::is_none")]
         original_message: Option<String>,
@@ -172,6 +181,16 @@ pub enum AIClassification {
     },
     
     Unrecognized,
+}
+
+/// Individual assignment data for batch processing
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct AssignmentData {
+    pub course_name: String,
+    pub title: String,
+    pub deadline: Option<String>,
+    pub description: Option<String>,
+    pub parallel_code: Option<String>,
 }
 
 // ===== DATABASE MODELS =====
