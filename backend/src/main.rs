@@ -37,6 +37,7 @@ type RateLimiter = Arc<Mutex<HashMap<String, VecDeque<Instant>>>>;
 
 static SPAM_WINDOW_SECS: OnceLock<u64> = OnceLock::new();
 static SPAM_MAX_MESSAGES: OnceLock<usize> = OnceLock::new();
+const SPAM_MAX_TRACKED_SENDERS: usize = 1024;
 
 fn spam_window_secs() -> u64 {
     *SPAM_WINDOW_SECS.get_or_init(|| {
@@ -571,24 +572,39 @@ async fn is_spam(rate_limiter: &RateLimiter, sender_id: &str) -> bool {
     let max_messages = spam_max_messages();
 
     let mut map = rate_limiter.lock().await;
-    map.retain(|_, timestamps| {
-        while let Some(&ts) = timestamps.front() {
+    if map.len() > SPAM_MAX_TRACKED_SENDERS {
+        map.retain(|_, timestamps| {
+            while let Some(&ts) = timestamps.front() {
+                if now.duration_since(ts) > Duration::from_secs(window) {
+                    timestamps.pop_front();
+                } else {
+                    break;
+                }
+            }
+            !timestamps.is_empty()
+        });
+    }
+
+    if let Some(entry) = map.get_mut(sender_id) {
+        while let Some(&ts) = entry.front() {
             if now.duration_since(ts) > Duration::from_secs(window) {
-                timestamps.pop_front();
+                entry.pop_front();
             } else {
                 break;
             }
         }
-        !timestamps.is_empty()
-    });
-    let entry = map.entry(sender_id.to_string()).or_insert_with(VecDeque::new);
 
-    let at_limit = entry.len() >= max_messages;
-    if !at_limit {
-        entry.push_back(now);
+        let at_limit = entry.len() >= max_messages;
+        if !at_limit {
+            entry.push_back(now);
+        }
+        return at_limit;
     }
 
-    at_limit
+    let mut timestamps = VecDeque::new();
+    timestamps.push_back(now);
+    map.insert(sender_id.to_string(), timestamps);
+    false
 }
 
 async fn forward_message(chat_id: &str, message_id: &str) -> Result<(), String> {
