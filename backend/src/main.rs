@@ -482,7 +482,7 @@ async fn handle_ai_classification(
             let mut unique_assignments = Vec::new();
             let mut seen = std::collections::HashSet::new();
             
-            for assignment in &assignments {  // Borrow instead of move
+            for assignment in &assignments {
                 // Create a unique key: course + title + parallel
                 let key = format!(
                     "{}::{}::{}",
@@ -492,7 +492,7 @@ async fn handle_ai_classification(
                 );
                 
                 if seen.insert(key) {
-                    unique_assignments.push(assignment.clone());  // Clone the assignment
+                    unique_assignments.push(assignment.clone());
                 } else {
                     // Duplicate detected within batch
                     if let Some(debug_id) = &debug_group {
@@ -538,7 +538,7 @@ async fn handle_ai_classification(
             }
         }
         
-        // Single assignment (existing logic)
+        // Single assignment - USE AI FOR DUPLICATE DETECTION
         AIClassification::AssignmentInfo { course_name, title, deadline, description, parallel_code, .. } => {
             let debug_group = debug_group_id.clone();
             
@@ -547,13 +547,13 @@ async fn handle_ai_classification(
                     pool,
                     course_name,
                     title,
-                    deadline, // already Option<String>
+                    deadline,
                     description,
                     parallel_code,
                     &message_id,
                     &sender_id,
                     debug_group,
-                    0, // 0 indicates single assignment (no numbering)
+                    0,
                 ).await
             });
         }
@@ -609,18 +609,18 @@ async fn handle_ai_classification(
     }
 }
 
-// Extracted helper function to handle a single assignment (reusable for both single and multiple)
+/// Handle a single assignment with AI-powered duplicate detection
 async fn handle_single_assignment(
     pool: PgPool,
     course_name: Option<String>,
     title: String,
-    deadline: Option<String>, // Changed to Option<String> to match both cases
+    deadline: Option<String>,
     description: Option<String>,
     parallel_code: Option<String>,
     message_id: &str,
     sender_id: &str,
     debug_group_id: Option<String>,
-    assignment_number: usize, // 0 for single, 1+ for multiple
+    assignment_number: usize,
 ) {
     let title_clone = title.clone();
     let desc_clone = description.clone().unwrap_or("No description".to_string());
@@ -632,26 +632,84 @@ async fn handle_single_assignment(
         crud::get_course_by_name(&pool, name).await.ok().flatten().map(|c| c.id)
     } else { None };
     
-    // Duplicate check
+    // ========================================
+    // AI-POWERED DUPLICATE DETECTION
+    // ========================================
     if let Some(cid) = course_id {
-        if let Ok(Some(existing)) = crud::get_assignment_by_title_and_course(&pool, &title_clone, cid).await {
-             let _ = crud::update_assignment_fields(
-                &pool, existing.id, deadline_parsed, None, Some(desc_clone), None, Some(message_id.to_string())
-            ).await;
+        // Build course map for AI
+        let course_map: HashMap<uuid::Uuid, String> = sqlx::query_as::<_, (uuid::Uuid, String)>(
+            "SELECT id, name FROM courses"
+        )
+        .fetch_all(&pool)
+        .await
+        .map(|r| r.into_iter().collect())
+        .unwrap_or_default();
+        
+        // Get recent assignments for this course
+        let existing_assignments = if let Ok(assignments) = crud::get_recent_assignments_for_update(&pool, Some(cid)).await {
+            assignments
+        } else {
+            Vec::new()
+        };
+        
+        if !existing_assignments.is_empty() {
+            // Use AI to check if this is a duplicate
+            // Construct keywords from the new assignment for matching
+            let keywords: Vec<String> = vec![
+                course_name.clone().unwrap_or_default(),
+                title_clone.clone(),
+            ];
             
-            if let Some(debug_id) = &debug_group_id {
-                let prefix = if assignment_number > 0 {
-                    format!("{}. ", assignment_number)
-                } else {
-                    String::new()
-                };
-                let _ = send_reply(debug_id, &format!("{}🔄 *DUPLICATE UPDATED*: {}", prefix, title_clone)).await;
+            let changes = format!(
+                "Checking if '{}' (description: '{}') is a duplicate", 
+                title_clone, 
+                desc_clone
+            );
+            
+            println!("🔍 Checking for duplicates using AI semantic matching...");
+            
+            // Use the AI matching function to find duplicates
+            if let Ok(Some(existing_id)) = crate::parser::ai_extractor::match_update_to_assignment(
+                &changes,
+                &keywords,
+                &existing_assignments,
+                &course_map,
+                final_parallel.as_deref(),
+            ).await {
+                println!("✅ AI found duplicate assignment: {}", existing_id);
+                
+                // Update the existing assignment instead of creating new
+                let _ = crud::update_assignment_fields(
+                    &pool, 
+                    existing_id, 
+                    deadline_parsed, 
+                    None, 
+                    Some(desc_clone), 
+                    None, 
+                    Some(message_id.to_string())
+                ).await;
+                
+                if let Some(debug_id) = &debug_group_id {
+                    let prefix = if assignment_number > 0 {
+                        format!("{}. ", assignment_number)
+                    } else {
+                        String::new()
+                    };
+                    let _ = send_reply(
+                        debug_id, 
+                        &format!("{}🔄 *DUPLICATE UPDATED* (AI matched): {}", prefix, title_clone)
+                    ).await;
+                }
+                return;
+            } else {
+                println!("ℹ️  No duplicate found - proceeding with creation");
             }
-            return;
         }
     }
     
-    // Create new assignment
+    // ========================================
+    // CREATE NEW ASSIGNMENT (no duplicate found)
+    // ========================================
     let new_assignment = NewAssignment {
         course_id, 
         title: title_clone.clone(), 
