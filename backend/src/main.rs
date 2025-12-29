@@ -34,7 +34,6 @@ use parser::ai_extractor::{extract_with_ai};
 use whitelist::Whitelist;
 
 type MessageCache = Arc<Mutex<HashSet<String>>>;
-// ✅ BARU: Type definition untuk Anti-Spam
 type SpamTracker = Arc<Mutex<HashMap<String, (u32, Instant)>>>;
 
 
@@ -55,8 +54,7 @@ const BANNER: &str = r#"
 #[derive(Clone)]
 struct AppState {
     cache: MessageCache,
-    spam_tracker: SpamTracker, // ✅ BARU: Masuk ke State
-    whitelist: Arc<Whitelist>,
+    spam_tracker: SpamTracker, 
     pool: PgPool,
 }
 
@@ -108,7 +106,7 @@ async fn main() {
     let whitelist = Arc::new(Whitelist::new());
     let cache = Arc::new(Mutex::new(HashSet::new()));
     
-    // ✅ BARU: Inisialisasi Spam Tracker
+    
     let spam_tracker = Arc::new(Mutex::new(HashMap::new())); 
 
     // 4. Jalankan Scheduler
