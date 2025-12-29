@@ -11,12 +11,19 @@ pub fn identify_missing_fields(assignment: &AssignmentWithCourse) -> Vec<String>
         missing.push("course_name".to_string());
     }
     
-    // Check title (generic titles are considered "missing")
+    // Check title (generic/vague titles are considered "missing")
     let title_lower = assignment.title.to_lowercase();
-    if assignment.title.is_empty() || 
-       title_lower.contains("tugas baru") ||
-       title_lower == "assignment" ||
-       title_lower == "tugas" {
+    let is_generic_title = assignment.title.is_empty() || 
+        title_lower.contains("tugas baru") ||
+        title_lower == "assignment" ||
+        title_lower == "tugas" ||
+        title_lower == "task" ||
+        title_lower == "lkp" ||  // Too generic without context
+        title_lower == "pr" ||
+        title_lower == "homework" ||
+        title_lower.len() < 3;  // Too short
+    
+    if is_generic_title {
         missing.push("title".to_string());
     }
     
@@ -25,12 +32,17 @@ pub fn identify_missing_fields(assignment: &AssignmentWithCourse) -> Vec<String>
         missing.push("parallel_code".to_string());
     }
     
-    // Check description
+    // Check description (be stricter about what counts as "valid")
     if let Some(ref desc) = assignment.description {
         let desc_lower = desc.to_lowercase();
-        if desc.trim().is_empty() || 
-           desc_lower == "no description" ||
-           desc_lower == "brief description" {
+        let is_generic_desc = desc.trim().is_empty() || 
+            desc_lower == "no description" ||
+            desc_lower == "brief description" ||
+            desc_lower.contains("assignment") ||
+            desc_lower.contains("tugas") ||
+            desc.len() < 10;  // Too short to be useful
+        
+        if is_generic_desc {
             missing.push("description".to_string());
         }
     } else {
@@ -40,112 +52,204 @@ pub fn identify_missing_fields(assignment: &AssignmentWithCourse) -> Vec<String>
     missing
 }
 
-/// Generate clarification message text
+/// Generate clarification message text (WhatsApp-friendly formatting)
 pub fn generate_clarification_message(
     assignment: &AssignmentWithCourse,
     missing_fields: &[String]
 ) -> String {
-    let field_names = missing_fields.iter().map(|f| match f.as_str() {
+    let field_list = missing_fields.iter().map(|f| match f.as_str() {
         "course_name" => "📚 Nama Mata Kuliah",
-        "title" => "📝 Judul Tugas",
+        "title" => "📝 Judul Tugas Lengkap",
         "deadline" => "⏰ Deadline",
-        "parallel_code" => "🧩 Kode Paralel (K1/K2/P1/P2/all)",
+        "parallel_code" => "🧩 Kode Paralel",
         "description" => "📄 Deskripsi/Keterangan",
-        _ => "❓ Field Unknown"
-    }).collect::<Vec<_>>().join("\n• ");
+        _ => "❓ Unknown"
+    }).collect::<Vec<_>>().join("\n");
     
+    // Simpler, cleaner format that works better in WhatsApp
     format!(
         "⚠️ *PERLU KLARIFIKASI*\n\
-        ━━━━━━━━━━━━━━━━━━\n\
-        Tugas baru terdeteksi tapi ada info yang kurang:\n\n\
-        🆔 Assignment ID: `{}`\n\
-        📌 Judul Saat Ini: {}\n\
-        📚 Mata Kuliah: {}\n\n\
+        \n\
+        Tugas terdeteksi tapi ada info yang kurang:\n\
+        \n\
+        📌 *{}* - {}\n\
+        🆔 ID: {}\n\
+        \n\
         *Info yang dibutuhkan:*\n\
-        • {}\n\n\
-        💡 *Cara menjawab:*\n\
-        Reply/quote pesan ini dengan format:\n\
-        `Course: [nama]`\n\
-        `Title: [judul]`\n\
-        `Deadline: [YYYY-MM-DD]`\n\
-        `Parallel: [K1/K2/K3]`\n\
-        `Description: [keterangan]`\n\n\
-        _Cukup isi field yang kurang saja ya!_",
-        assignment.id,
-        assignment.title,
+        {}\n\
+        \n\
+        💡 *Cara reply:*\n\
+        Reply pesan ini, lalu tulis info yang kurang.\n\
+        \n\
+        Contoh jawaban:\n\
+        ```\n\
+        Title: LKP 14 - Recursion\n\
+        Parallel: K1\n\
+        Description: Soal ada di slide minggu ke-7\n\
+        ```\n\
+        \n\
+        _(Cukup isi field yang kurang saja!)_",
         assignment.course_name,
-        field_names
+        assignment.title,
+        assignment.id,
+        field_list
     )
 }
 
 /// Parse clarification response from user reply
-/// Now handles both formats:
+/// Supports multiple formats:
 /// - Structured: "Parallel: K1"
-/// - Simple: "K1" (when only one field is missing)
+/// - Simple: "K1" (when context is clear)
+/// - Natural: "paralel k1 aja" or "untuk semua parallel"
 pub fn parse_clarification_response(text: &str) -> HashMap<String, String> {
     let mut updates = HashMap::new();
     
-    // Remove backticks if present
-    let text = text.replace('`', "");
+    // Remove backticks and extra whitespace
+    let text = text.replace('`', "").trim().to_string();
     
+    // First pass: Look for structured "Key: Value" format
     for line in text.lines() {
         let line = line.trim();
         if line.is_empty() {
             continue;
         }
         
-        // Parse "Field: Value" format
         if let Some((key, value)) = line.split_once(':') {
             let key = key.trim().to_lowercase();
             let value = value.trim();
             
-            // Skip if value is empty or is a placeholder
-            if value.is_empty() || value.starts_with('[') || value == "..." {
+            // Skip empty or placeholder values
+            if value.is_empty() || value.starts_with('[') || value == "..." || value == "-" {
                 continue;
             }
             
             match key.as_str() {
-                "course" | "mata kuliah" | "matkul" => {
+                "course" | "mata kuliah" | "matkul" | "mk" => {
                     updates.insert("course_name".to_string(), value.to_string());
                 }
-                "title" | "judul" | "nama tugas" => {
+                "title" | "judul" | "nama tugas" | "nama" => {
                     updates.insert("title".to_string(), value.to_string());
                 }
-                "deadline" | "due" | "batas waktu" => {
+                "deadline" | "due" | "batas waktu" | "dl" => {
                     updates.insert("deadline".to_string(), value.to_string());
                 }
-                "parallel" | "paralel" | "kode" | "code" => {
-                    updates.insert("parallel_code".to_string(), value.to_string());
+                "parallel" | "paralel" | "kode" | "code" | "kelas" => {
+                    let normalized = normalize_parallel_code(value);
+                    updates.insert("parallel_code".to_string(), normalized);
                 }
-                "description" | "deskripsi" | "keterangan" | "desc" => {
+                "description" | "deskripsi" | "keterangan" | "desc" | "ket" => {
                     updates.insert("description".to_string(), value.to_string());
                 }
                 _ => {}
             }
-        } else {
-            // No colon found - try to detect what the user meant
-            // Check if it looks like a parallel code (K1-K3 or P1-P3)
-            let upper = line.to_uppercase();
-            if is_valid_parallel_code(&upper) {
-                updates.insert("parallel_code".to_string(), upper.to_lowercase());
-            }
-            // Check if it looks like a date
-            else if line.contains('-') && line.len() >= 8 {
-                updates.insert("deadline".to_string(), line.to_string());
-            }
-            // Otherwise treat as description if it's substantial
-            else if line.len() > 3 {
-                updates.insert("description".to_string(), line.to_string());
-            }
+        }
+    }
+    
+    // Second pass: Try to detect unstructured content
+    if updates.is_empty() {
+        // Check for parallel codes in the entire text
+        if let Some(parallel) = detect_parallel_code(&text) {
+            updates.insert("parallel_code".to_string(), parallel);
+        }
+        
+        // Check if it looks like a date
+        if let Some(date) = detect_date(&text) {
+            updates.insert("deadline".to_string(), date);
+        }
+        
+        // If text is substantial and we haven't categorized it, treat as description
+        if updates.is_empty() && text.len() > 5 && !text.to_lowercase().starts_with("id:") {
+            updates.insert("description".to_string(), text);
         }
     }
     
     updates
 }
 
+/// Detect and normalize parallel code from natural text
+/// Examples:
+/// - "K1" -> "k1"
+/// - "parallel 2" -> "k2" (assumes K if not specified)
+/// - "untuk semua" -> "all"
+/// - "semua parallel" -> "all"
+fn detect_parallel_code(text: &str) -> Option<String> {
+    let lower = text.to_lowercase();
+    
+    // Check for "all" variations
+    if lower.contains("semua") || 
+       lower.contains("all") || 
+       lower.contains("untuk semua kelas") ||
+       lower == "all classes" {
+        return Some("all".to_string());
+    }
+    
+    // Look for explicit codes (K1, K2, K3, P1, P2, P3)
+    let words: Vec<&str> = text.split_whitespace().collect();
+    for word in &words {
+        let upper = word.to_uppercase();
+        if is_valid_parallel_code(&upper) {
+            return Some(upper.to_lowercase());
+        }
+    }
+    
+    // Look for patterns like "kelas 1", "parallel 2", etc.
+    for (i, word) in words.iter().enumerate() {
+        let lower_word = word.to_lowercase();
+        if lower_word == "kelas" || lower_word == "parallel" || lower_word == "paralel" {
+            if i + 1 < words.len() {
+                if let Ok(num) = words[i + 1].parse::<u8>() {
+                    if (1..=3).contains(&num) {
+                        // Default to K if type not specified
+                        return Some(format!("k{}", num));
+                    }
+                }
+            }
+        }
+    }
+    
+    None
+}
+
+/// Normalize parallel code format
+fn normalize_parallel_code(code: &str) -> String {
+    let code = code.trim().to_lowercase();
+    
+    // Handle "all" variations
+    if code == "all" || code == "semua" || code == "semua parallel" {
+        return "all".to_string();
+    }
+    
+    // Already in correct format (k1, k2, p1, etc.)
+    if code.len() == 2 {
+        return code;
+    }
+    
+    code
+}
+
+/// Detect date in various formats
+fn detect_date(text: &str) -> Option<String> {
+    // Look for YYYY-MM-DD format
+    for word in text.split_whitespace() {
+        if word.contains('-') && word.len() >= 8 {
+            // Basic validation: should have 2 dashes and be mostly numbers
+            let parts: Vec<&str> = word.split('-').collect();
+            if parts.len() == 3 {
+                if let (Ok(_), Ok(_), Ok(_)) = (
+                    parts[0].parse::<u32>(),
+                    parts[1].parse::<u32>(),
+                    parts[2].parse::<u32>()
+                ) {
+                    return Some(word.to_string());
+                }
+            }
+        }
+    }
+    None
+}
+
 /// Helper function to validate parallel codes
 fn is_valid_parallel_code(code: &str) -> bool {
-    // Accept "all" for assignments that apply to all classes
     if code.to_lowercase() == "all" {
         return true;
     }
@@ -158,22 +262,55 @@ fn is_valid_parallel_code(code: &str) -> bool {
     let prefix = chars[0];
     let number = chars[1];
     
-    // Must start with K or P, followed by 1-3
-    (prefix == 'K' || prefix == 'P') && 
-    (number == '1' || number == '2' || number == '3')
+    (prefix == 'K' || prefix == 'P') && ('1'..='3').contains(&number)
 }
 
 /// Extract assignment ID from clarification message
 pub fn extract_assignment_id_from_message(text: &str) -> Option<Uuid> {
-    // Look for pattern: "Assignment ID: `uuid`"
+    // Look for pattern: "ID: uuid"
     for line in text.lines() {
-        if line.contains("Assignment ID:") {
-            if let Some(id_part) = line.split('`').nth(1) {
-                if let Ok(uuid) = Uuid::parse_str(id_part.trim()) {
+        if line.contains("ID:") || line.contains("id:") {
+            // Try to find UUID after "ID:"
+            if let Some(id_part) = line.split("ID:").nth(1) {
+                // Clean up the string and try to parse
+                let cleaned = id_part.trim().replace('`', "");
+                if let Ok(uuid) = Uuid::parse_str(cleaned.trim()) {
                     return Some(uuid);
                 }
             }
         }
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_detect_parallel_code() {
+        assert_eq!(detect_parallel_code("K1"), Some("k1".to_string()));
+        assert_eq!(detect_parallel_code("parallel k2"), Some("k2".to_string()));
+        assert_eq!(detect_parallel_code("untuk semua"), Some("all".to_string()));
+        assert_eq!(detect_parallel_code("kelas 1"), Some("k1".to_string()));
+        assert_eq!(detect_parallel_code("P3"), Some("p3".to_string()));
+    }
+
+    #[test]
+    fn test_parse_structured_response() {
+        let text = "Title: LKP 14\nParallel: K1\nDescription: Recursion problems";
+        let result = parse_clarification_response(text);
+        
+        assert_eq!(result.get("title"), Some(&"LKP 14".to_string()));
+        assert_eq!(result.get("parallel_code"), Some(&"k1".to_string()));
+        assert_eq!(result.get("description"), Some(&"Recursion problems".to_string()));
+    }
+
+    #[test]
+    fn test_parse_simple_response() {
+        let text = "K2";
+        let result = parse_clarification_response(text);
+        
+        assert_eq!(result.get("parallel_code"), Some(&"k2".to_string()));
+    }
 }

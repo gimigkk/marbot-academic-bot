@@ -55,6 +55,7 @@ const BANNER: &str = r#"
 struct AppState {
     cache: MessageCache,
     spam_tracker: SpamTracker, 
+    whitelist: Arc<Whitelist>,
     pool: PgPool,
 }
 
@@ -321,15 +322,18 @@ async fn webhook(
                         let display_course = if let Some(cn) = updates.get("course_name") { cn.to_string() } else { "Unknown".to_string() };
                         
                         let response = format!(
-                            "✅ *KLARIFIKASI TERSIMPAN*\n
-                            ━━━━━━━━━━━━━━━━━━\n
-                            📝 *{}*\n
-                            📚 {}\n
-                            ⏰ Deadline: {}\n_
-                            Terima kasih atas klarifikasinya!_",
+                            "✅ *KLARIFIKASI TERSIMPAN*\n\
+                            \n\
+                            📝 *{}*\n\
+                            📚 {}\n\
+                            ⏰ Deadline: {}\n\
+                            🧩 Parallel: {}\n\
+                            \n\
+                            _Terima kasih atas klarifikasinya!_",
                             updated.title,
                             display_course,
-                            updated.deadline.map(|d| d.format("%Y-%m-%d").to_string()).unwrap_or("-".to_string())
+                            updated.deadline.map(|d| d.format("%Y-%m-%d").to_string()).unwrap_or("-".to_string()),
+                            updated.parallel_code.as_deref().unwrap_or("Tidak ditentukan")
                         );
                         
                         if let Err(e) = send_reply(chat_id, &response).await {
@@ -466,65 +470,91 @@ async fn handle_ai_classification(
     let sender_id = sender_id.to_string();
     
     match classification {
-        AIClassification::AssignmentInfo { course_name, title, deadline, description, .. } => {
-            let pool_clone = pool.clone();
-            let course_name_lookup = course_name.clone();
-            let title_clone = title.clone();
-            let desc_clone = description.clone().unwrap_or("No description".to_string());
-            let deadline_parsed = parse_deadline(&deadline);
-            let parallel_code = extract_parallel_code(&title);
+        // NEW: Handle multiple assignments
+        AIClassification::MultipleAssignments { assignments, .. } => {
+            let debug_group = debug_group_id.clone();
+            
+            if let Some(debug_id) = &debug_group {
+                let _ = send_reply(debug_id, &format!("📦 Processing {} assignments...", assignments.len())).await;
+            }
+            
+            // CRITICAL: Deduplicate within the batch BEFORE processing
+            let mut unique_assignments = Vec::new();
+            let mut seen = std::collections::HashSet::new();
+            
+            for assignment in &assignments {  // Borrow instead of move
+                // Create a unique key: course + title + parallel
+                let key = format!(
+                    "{}::{}::{}",
+                    assignment.course_name.to_lowercase(),
+                    assignment.title.to_lowercase(),
+                    assignment.parallel_code.as_deref().unwrap_or("none")
+                );
+                
+                if seen.insert(key) {
+                    unique_assignments.push(assignment.clone());  // Clone the assignment
+                } else {
+                    // Duplicate detected within batch
+                    if let Some(debug_id) = &debug_group {
+                        let _ = send_reply(
+                            debug_id, 
+                            &format!("⚠️ Skipped duplicate in message: {} - {}", 
+                                assignment.course_name, 
+                                assignment.title
+                            )
+                        ).await;
+                    }
+                }
+            }
+            
+            if let Some(debug_id) = &debug_group {
+                if unique_assignments.len() < assignments.len() {
+                    let _ = send_reply(
+                        debug_id, 
+                        &format!("✅ Processing {} unique assignments (filtered {} duplicates)", 
+                            unique_assignments.len(),
+                            assignments.len() - unique_assignments.len()
+                        )
+                    ).await;
+                }
+            }
+            
+            // Process each unique assignment sequentially to avoid DB race conditions
+            for (index, assignment) in unique_assignments.into_iter().enumerate() {
+                let msg_id = format!("{}-{}", message_id, index);
+                
+                handle_single_assignment(
+                    pool.clone(),
+                    Some(assignment.course_name),
+                    assignment.title,
+                    assignment.deadline,
+                    assignment.description,
+                    assignment.parallel_code,
+                    &msg_id,
+                    &sender_id,
+                    debug_group_id.clone(),
+                    index + 1,
+                ).await;
+            }
+        }
+        
+        // Single assignment (existing logic)
+        AIClassification::AssignmentInfo { course_name, title, deadline, description, parallel_code, .. } => {
             let debug_group = debug_group_id.clone();
             
             tokio::spawn(async move {
-                let course_id = if let Some(name) = &course_name_lookup {
-                    crud::get_course_by_name(&pool_clone, name).await.ok().flatten().map(|c| c.id)
-                } else { None };
-                
-                // Duplicate check
-                if let Some(cid) = course_id {
-                    if let Ok(Some(existing)) = crud::get_assignment_by_title_and_course(&pool_clone, &title_clone, cid).await {
-                         let _ = crud::update_assignment_fields(
-                            &pool_clone, existing.id, deadline_parsed, None, Some(desc_clone), None, Some(message_id)
-                        ).await;
-                        
-                        if let Some(debug_id) = &debug_group {
-                            let _ = send_reply(debug_id, &format!("🔄 *DUPLICATE UPDATED*: {}", title_clone)).await;
-                        }
-                        return;
-                    }
-                }
-                
-                // Create
-                let new_assignment = NewAssignment {
-                    course_id, title: title_clone.clone(), description: desc_clone.clone(),
-                    deadline: deadline_parsed, parallel_code, sender_id: Some(sender_id), message_id
-                };
-                
-                match crud::create_assignment(&pool_clone, new_assignment).await {
-                    Ok(_) => {
-                        // Clarification check
-                        if let Some(cid) = course_id {
-                             if let Ok(Some(assignment)) = crud::get_assignment_by_title_and_course(&pool_clone, &title_clone, cid).await {
-                                 if let Ok(Some(full_assign)) = crud::get_assignment_with_course_by_id(&pool_clone, assignment.id).await {
-                                     let missing = clarification::identify_missing_fields(&full_assign);
-                                     if !missing.is_empty() {
-                                         if let Some(debug_id) = &debug_group {
-                                             let msg = clarification::generate_clarification_message(&full_assign, &missing);
-                                             let _ = send_reply(debug_id, &msg).await;
-                                         }
-                                         return;
-                                     }
-                                 }
-                             }
-                        }
-
-                        // Success
-                        if let Some(debug_id) = &debug_group {
-                            let _ = send_reply(debug_id, &format!("✨ *NEW TASK*: {}\n📚 {}", title_clone, course_name_lookup.unwrap_or_default())).await;
-                        }
-                    }
-                    Err(e) => eprintln!("Failed to save: {}", e),
-                }
+                handle_single_assignment(
+                    pool,
+                    course_name,
+                    title,
+                    deadline, // already Option<String>
+                    description,
+                    parallel_code,
+                    &message_id,
+                    &sender_id,
+                    debug_group,
+                    0, // 0 indicates single assignment (no numbering)
+                ).await
             });
         }
         
@@ -576,6 +606,98 @@ async fn handle_ai_classification(
             });
         }
         AIClassification::Unrecognized => {}
+    }
+}
+
+// Extracted helper function to handle a single assignment (reusable for both single and multiple)
+async fn handle_single_assignment(
+    pool: PgPool,
+    course_name: Option<String>,
+    title: String,
+    deadline: Option<String>, // Changed to Option<String> to match both cases
+    description: Option<String>,
+    parallel_code: Option<String>,
+    message_id: &str,
+    sender_id: &str,
+    debug_group_id: Option<String>,
+    assignment_number: usize, // 0 for single, 1+ for multiple
+) {
+    let title_clone = title.clone();
+    let desc_clone = description.clone().unwrap_or("No description".to_string());
+    let deadline_parsed = parse_deadline(&deadline);
+    let parallel_code_parsed = extract_parallel_code(&title);
+    let final_parallel = parallel_code.or(parallel_code_parsed);
+    
+    let course_id = if let Some(name) = &course_name {
+        crud::get_course_by_name(&pool, name).await.ok().flatten().map(|c| c.id)
+    } else { None };
+    
+    // Duplicate check
+    if let Some(cid) = course_id {
+        if let Ok(Some(existing)) = crud::get_assignment_by_title_and_course(&pool, &title_clone, cid).await {
+             let _ = crud::update_assignment_fields(
+                &pool, existing.id, deadline_parsed, None, Some(desc_clone), None, Some(message_id.to_string())
+            ).await;
+            
+            if let Some(debug_id) = &debug_group_id {
+                let prefix = if assignment_number > 0 {
+                    format!("{}. ", assignment_number)
+                } else {
+                    String::new()
+                };
+                let _ = send_reply(debug_id, &format!("{}🔄 *DUPLICATE UPDATED*: {}", prefix, title_clone)).await;
+            }
+            return;
+        }
+    }
+    
+    // Create new assignment
+    let new_assignment = NewAssignment {
+        course_id, 
+        title: title_clone.clone(), 
+        description: desc_clone.clone(),
+        deadline: deadline_parsed, 
+        parallel_code: final_parallel, 
+        sender_id: Some(sender_id.to_string()), 
+        message_id: message_id.to_string()
+    };
+    
+    match crud::create_assignment(&pool, new_assignment).await {
+        Ok(_) => {
+            // Clarification check
+            if let Some(cid) = course_id {
+                 if let Ok(Some(assignment)) = crud::get_assignment_by_title_and_course(&pool, &title_clone, cid).await {
+                     if let Ok(Some(full_assign)) = crud::get_assignment_with_course_by_id(&pool, assignment.id).await {
+                         let missing = clarification::identify_missing_fields(&full_assign);
+                         if !missing.is_empty() {
+                             if let Some(debug_id) = &debug_group_id {
+                                 let msg = clarification::generate_clarification_message(&full_assign, &missing);
+                                 let _ = send_reply(debug_id, &msg).await;
+                             }
+                             return;
+                         }
+                     }
+                 }
+            }
+
+            // Success message
+            if let Some(debug_id) = &debug_group_id {
+                let prefix = if assignment_number > 0 {
+                    format!("{}. ", assignment_number)
+                } else {
+                    String::new()
+                };
+                let _ = send_reply(
+                    debug_id, 
+                    &format!("{}✨ *NEW TASK*: {}\n📚 {}", 
+                        prefix, 
+                        title_clone, 
+                        course_name.unwrap_or_default()
+                    )
+                ).await;
+            }
+        }
+        Err(e) => eprintln!("Failed to save assignment: {}", e),
     }
 }
 
