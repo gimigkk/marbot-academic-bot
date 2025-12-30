@@ -416,13 +416,17 @@ fn status_dot(deadline_utc: &DateTime<Utc>) -> &'static str {
 
 fn days_left(deadline_utc: &DateTime<Utc>) -> i64 {
     let now = Local::now().date_naive();
-    let due = deadline_utc.with_timezone(&Local).date_naive();
+    // ✅ FIX: Get date component in UTC (before timezone conversion)
+    let due = deadline_utc.date_naive();
     (due - now).num_days()
 }
 
 fn humanize_deadline(deadline_utc: &DateTime<Utc>) -> String {
-    let delta = days_left(deadline_utc);
-    let due = deadline_utc.with_timezone(&Local).date_naive();
+    let now = Local::now().date_naive();
+    // ✅ FIX: Get date component in UTC (before timezone conversion)
+    let due = deadline_utc.date_naive();
+    
+    let delta = (due - now).num_days();
     let date_str = format_date_id(due);
 
     match delta {
