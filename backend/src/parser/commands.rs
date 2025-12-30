@@ -1,12 +1,18 @@
 use crate::database::crud::{get_active_assignments_for_user, get_active_assignments_sorted, mark_assignment_complete, unmark_assignment_complete, get_last_completed_assignment};
 use crate::models::BotCommand;
-use chrono::{DateTime, Datelike, Duration, Local, NaiveDate, Utc};
+use chrono::{DateTime, Duration, FixedOffset, Datelike, NaiveDate, Utc};
 use sqlx::PgPool;
 
 /// Handle bot commands and return response text or forward action
 pub enum CommandResponse {
     Text(String),
     ForwardMessage { message_id: String, warning: String },
+}
+
+/// Get current time in GMT+7 (Indonesian timezone)
+fn get_gmt7_now() -> DateTime<FixedOffset> {
+    let gmt7 = FixedOffset::east_opt(7 * 3600).unwrap();
+    Utc::now().with_timezone(&gmt7)
 }
 
 /// Handle bot commands and return response
@@ -64,10 +70,13 @@ pub async fn handle_command(
 
             match get_active_assignments_for_user(pool, user_phone).await {
                 Ok(assignments) => {
-                    let today = Local::now().date_naive();
+                    // ✅ Use GMT+7 for consistent timezone handling
+                    let gmt7 = FixedOffset::east_opt(7 * 3600).unwrap();
+                    let today = get_gmt7_now().date_naive();
+                    
                     let today_assignments: Vec<_> = assignments
                         .into_iter()
-                        .filter(|a| a.deadline.with_timezone(&Local).date_naive() == today)
+                        .filter(|a| a.deadline.with_timezone(&gmt7).date_naive() == today)
                         .collect();
 
                     format_assignments_list(today_assignments, "*[Tugas Hari Ini]*", false, true)
@@ -87,13 +96,15 @@ pub async fn handle_command(
 
             match get_active_assignments_for_user(pool, user_phone).await {
                 Ok(assignments) => {
-                    let now = Local::now();
+                    // ✅ Use GMT+7 for consistent timezone handling
+                    let now = get_gmt7_now();
                     let week_end = now + Duration::days(7);
 
                     let week_assignments: Vec<_> = assignments
                         .into_iter()
                         .filter(|a| {
-                            let d = a.deadline.with_timezone(&Local);
+                            let gmt7 = FixedOffset::east_opt(7 * 3600).unwrap();
+                            let d = a.deadline.with_timezone(&gmt7);
                             d >= now && d <= week_end
                         })
                         .collect();
@@ -407,24 +418,30 @@ fn format_assignments_list(
 
 /// 🔴 deadline 0–2 hari lagi, 🟢 setelahnya
 fn status_dot(deadline_utc: &DateTime<Utc>) -> &'static str {
-    if days_left(deadline_utc) <= 2 {
+    if days_left(deadline_utc) < 2 {
         "🔴"
-    } else {
+    } 
+    else if (days_left(deadline_utc) == 2 ) {
+        "🟠"
+    }
+    else {
         "🟢"
     }
 }
 
 fn days_left(deadline_utc: &DateTime<Utc>) -> i64 {
-    let now = Local::now().date_naive();
-    // ✅ FIX: Get date component in UTC (before timezone conversion)
-    let due = deadline_utc.date_naive();
+    // ✅ Both dates in GMT+7 timezone
+    let gmt7 = FixedOffset::east_opt(7 * 3600).unwrap();
+    let now = get_gmt7_now().date_naive();
+    let due = deadline_utc.with_timezone(&gmt7).date_naive();
     (due - now).num_days()
 }
 
 fn humanize_deadline(deadline_utc: &DateTime<Utc>) -> String {
-    let now = Local::now().date_naive();
-    // ✅ FIX: Get date component in UTC (before timezone conversion)
-    let due = deadline_utc.date_naive();
+    // ✅ Convert to GMT+7 for display
+    let gmt7 = FixedOffset::east_opt(7 * 3600).unwrap();
+    let now = get_gmt7_now().date_naive();
+    let due = deadline_utc.with_timezone(&gmt7).date_naive();
     
     let delta = (due - now).num_days();
     let date_str = format_date_id(due);
