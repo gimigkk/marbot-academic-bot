@@ -624,6 +624,7 @@ async fn handle_ai_classification(
 }
 
 /// Handle a single assignment with AI-powered duplicate detection
+#[allow(non_snake_case)]
 async fn handle_single_assignment(
     pool: PgPool,
     course_name: Option<String>,
