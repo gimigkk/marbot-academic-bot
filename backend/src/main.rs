@@ -47,7 +47,7 @@ const BANNER: &str = r#"
 ██║ ╚═╝ ██║██║  ██║██║  ██║██████╔╝╚██████╔╝   ██║   
 ╚═╝     ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝  ╚═════╝    ╚═╝   
                                                      
-         [WhatsApp Academic Assistant v1.0]           
+         [WhatsApp Academic Assistant v1.0]          
               Created by Gilang & Arya     
 \x1b[0m"#;
 
@@ -123,7 +123,7 @@ async fn main() {
 
     let state = AppState { 
         cache,
-        spam_tracker, // ✅ BARU
+        spam_tracker, 
         whitelist, 
         pool
     };
@@ -152,6 +152,9 @@ async fn webhook(
     State(state): State<AppState>,
     Json(payload): Json<WebhookPayload>,
 ) -> StatusCode {
+
+    //MONITORING GUIS
+    let request_start = Instant::now();
 
     // Only process "message.any" events
     if payload.event != "message.any" {
@@ -415,9 +418,16 @@ async fn webhook(
             let course_map = sqlx::query_as::<_, (uuid::Uuid, String)>("SELECT id, name FROM courses")
                 .fetch_all(&state.pool).await.map(|rows| rows.into_iter().collect()).unwrap_or_default();
             
+            // START MONITORING: AI Latency Timer
+            let ai_start = Instant::now();
+            
             // Extract AI
             match extract_with_ai(&text, &courses_list, &active_assignments, &course_map, image_base64.as_deref()).await {
                 Ok(classification) => {
+                    //  STOP MONITORING: Log AI Duration
+                    let ai_duration = ai_start.elapsed();
+                    println!("🧠 AI Latency: {:.2?}", ai_duration);
+
                     println!("✅ AI Classification: {:?}\n", classification);
                     handle_ai_classification(state.pool.clone(), classification, &payload.payload.id, sender_phone, debug_group_id).await;
                 }
@@ -429,6 +439,10 @@ async fn webhook(
         }
     }
     
+    // STOP MONITORING: Global Request Timer
+    let total_duration = request_start.elapsed();
+    println!("⏱️  Total Request Processed in: {:.2?}\n", total_duration);
+
     StatusCode::OK
 }
 
@@ -624,7 +638,9 @@ async fn handle_single_assignment(
 ) {
     let title_clone = title.clone();
     let desc_clone = description.clone().unwrap_or("No description".to_string());
-    let deadline_parsed = parse_deadline(&deadline);
+    // Gunakan parse_deadline punya crud.rs yang sudah support WIB
+    let deadline_parsed = deadline.as_ref()
+    .and_then(|d| crud::parse_deadline(d).ok());
     let parallel_code_parsed = extract_parallel_code(&title);
     let final_parallel = parallel_code.or(parallel_code_parsed);
     
@@ -668,14 +684,35 @@ async fn handle_single_assignment(
             
             println!("🔍 Checking for duplicates using AI semantic matching...");
             
-            // Use the AI matching function to find duplicates
-            if let Ok(Some(existing_id)) = crate::parser::ai_extractor::match_update_to_assignment(
+            //  START TIMER
+            let match_start = Instant::now();
+
+            // Perform Matching
+            let match_result = crate::parser::ai_extractor::match_update_to_assignment(
                 &changes,
                 &keywords,
                 &existing_assignments,
                 &course_map,
                 final_parallel.as_deref(),
-            ).await {
+            ).await;
+
+            // STOP TIMER
+            let match_duration = match_start.elapsed();
+
+            // LOGGING BOX
+            println!("┌── 🤖 AI MATCHING (GEMINI ONLY) ─────────────");
+            println!("│ 🔍 Keywords     : {:?}", keywords);
+            println!("│ 🔄 Model        : gemini-1.5-flash"); 
+            match &match_result {
+                Ok(Some(_)) => println!("│ ✅ RESULT       : MATCH FOUND"),
+                Ok(None)     => println!("│ ℹ️ RESULT       : NO MATCH FOUND"),
+                Err(_)       => println!("│ ❌ RESULT       : ERROR"),
+            }
+            println!("└──────────────────────────────────────────────");
+            println!("🧠 AI Matching Latency: {:.2?}", match_duration);
+            
+            // Check result
+            if let Ok(Some(existing_id)) = match_result {
                 println!("✅ AI found duplicate assignment: {}", existing_id);
                 
                 // Update the existing assignment instead of creating new
@@ -684,7 +721,7 @@ async fn handle_single_assignment(
                     existing_id, 
                     deadline_parsed, 
                     None, 
-                    Some(desc_clone), 
+                    Some(desc_clone.clone()), 
                     None, 
                     Some(message_id.to_string())
                 ).await;
@@ -700,7 +737,7 @@ async fn handle_single_assignment(
                         &format!("{}🔄 *DUPLICATE UPDATED* (AI matched): {}", prefix, title_clone)
                     ).await;
                 }
-                return;
+                return; // STOP HERE so we don't create a new one
             } else {
                 println!("ℹ️  No duplicate found - proceeding with creation");
             }
