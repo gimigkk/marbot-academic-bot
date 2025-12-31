@@ -9,6 +9,7 @@ use crate::database::crud::{
 use crate::models::BotCommand;
 use chrono::{DateTime, Duration, FixedOffset, Datelike, NaiveDate, Utc};
 use sqlx::PgPool;
+use std::time::Instant; // ✅ Added: Untuk fitur monitoring waktu
 
 /// Handle bot commands and return response text or forward action
 pub enum CommandResponse {
@@ -34,7 +35,40 @@ pub async fn handle_command(
     match cmd {
         BotCommand::Ping => {
             println!("🏓 Ping command received from {}\n", user_phone);
-            CommandResponse::Text("Apa kek anjir ni command ganti replynya".to_string())
+            
+            let start_time = Instant::now();
+
+            let db_start = Instant::now();
+
+            // Query ringan SELECT 1 untuk cek koneksi
+            let db_status = sqlx::query("SELECT 1").execute(pool).await;
+            let db_duration = db_start.elapsed();
+
+            // Tentukan status 
+            let (db_icon, db_msg) = match db_status {
+                Ok(_) => ("🟢", format!("{:.2?}", db_duration)), // Contoh: 4.5ms
+                Err(_) => ("🔴", "Error / Disconnected".to_string()),
+            };
+
+            // 3. Hitung overhead pemrosesan bot
+            let bot_duration = start_time.elapsed();
+
+            // 4. Buat Laporan 
+            let response_text = format!(
+                "🏓 *PONG! - System Diagnostic*\n\n\
+                🖥️ *Server Status:*\n\
+                • Bot Logic: 🟢 Online\n\
+                • Database: {} Connected\n\n\
+                ⏱️ *Real-time Latency:*\n\
+                • 🗄️ Database Query: {}\n\
+                • ⚙️ Bot Processing: {:.2?}\n\n\
+                ",
+                db_icon,
+                db_msg,
+                bot_duration
+            );
+
+            CommandResponse::Text(response_text)
         }
 
         BotCommand::Tugas => {
@@ -206,7 +240,7 @@ pub async fn handle_command(
                             message_id,
                             warning: format!(
                                 "🧾 *Detail Tugas #{}*\nStatus: {}\n\n{} *{}*\n📌 {}\n⏰ Deadline: {}\n📝 {}{}\n\n\
-                                ",
+                                _Keterangan: 🔴 deadline 0–2 hari lagi • 🟢 deadline > 2 hari_",
                                 index,
                                 done_status,
                                 status,
@@ -364,7 +398,7 @@ pub async fn handle_command(
             CommandResponse::Text(
                 "*[MABOT — Academic Bot]*\n\n\
 *Perintah Umum:*\n\
-• #ping — cek bot hidup\n\
+• #ping — cek bot hidup & latency\n\
 • #tugas — lihat semua tugas (global)\n\
 • #today — tugas deadline hari ini\n\
 • #week — tugas 7 hari ke depan\n\
