@@ -140,6 +140,7 @@ pub enum BotCommand {
     Done(u32),
     Undo,
     Help,
+    Delete(u32),
     UnknownCommand(String),
 }
 

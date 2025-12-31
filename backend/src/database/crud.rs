@@ -632,11 +632,44 @@ pub async fn update_assignment_fields(
     Ok(assignment)
 }
 
+
+// ========================================
+// DELETE OPERATIONS
+// ========================================
+
+/// Hapus tugas berdasarkan ID
+pub async fn delete_assignment(
+    pool: &PgPool,
+    id: Uuid,
+) -> Result<bool, sqlx::Error> {
+    let result = sqlx::query!(
+        "DELETE FROM assignments WHERE id = $1",
+        id
+    )
+    .execute(pool)
+    .await?;
+
+    // Mengembalikan true jika ada baris yang dihapus
+    Ok(result.rows_affected() > 0)
+}
+
+
 /// Parse deadline string (YYYY-MM-DD) to DateTime<Utc>
 pub fn parse_deadline(deadline_str: &str) -> Result<DateTime<Utc>, String> {
-    use chrono::NaiveDate;
-    
-    NaiveDate::parse_from_str(deadline_str, "%Y-%m-%d")
-        .map_err(|e| format!("Failed to parse date '{}': {}", deadline_str, e))
-        .map(|date| date.and_hms_opt(23, 59, 59).unwrap().and_utc())
+    use chrono::{NaiveDate, FixedOffset, TimeZone};
+
+    // 1. Parse string menjadi NaiveDate
+    let date = NaiveDate::parse_from_str(deadline_str, "%Y-%m-%d")
+        .map_err(|e| format!("Failed to parse date '{}': {}", deadline_str, e))?;
+
+    let naive_datetime = date.and_hms_opt(23, 59, 59).unwrap();
+
+    // 3. Definisikan Zona Waktu WIB (UTC+7)
+    let wib = FixedOffset::east_opt(7 * 3600).unwrap();
+
+    // 4. Interpretasikan waktu tersebut sebagai WIB, lalu convert ke UTC
+    match wib.from_local_datetime(&naive_datetime).single() {
+        Some(dt_wib) => Ok(dt_wib.with_timezone(&Utc)),
+        None => Err(format!("Invalid local datetime (ambiguous/none): {}", deadline_str))
+    }
 }

@@ -123,7 +123,7 @@ async fn main() {
 
     let state = AppState { 
         cache,
-        spam_tracker, // ✅ BARU
+        spam_tracker, 
         whitelist, 
         pool
     };
@@ -624,7 +624,9 @@ async fn handle_single_assignment(
 ) {
     let title_clone = title.clone();
     let desc_clone = description.clone().unwrap_or("No description".to_string());
-    let deadline_parsed = parse_deadline(&deadline);
+    // Gunakan parse_deadline punya crud.rs yang sudah support WIB
+    let deadline_parsed = deadline.as_ref()
+    .and_then(|d| crud::parse_deadline(d).ok());
     let parallel_code_parsed = extract_parallel_code(&title);
     let final_parallel = parallel_code.or(parallel_code_parsed);
     

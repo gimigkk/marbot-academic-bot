@@ -1,4 +1,11 @@
-use crate::database::crud::{get_active_assignments_for_user, get_active_assignments_sorted, mark_assignment_complete, unmark_assignment_complete, get_last_completed_assignment};
+use crate::database::crud::{
+    get_active_assignments_for_user, 
+    get_active_assignments_sorted, 
+    mark_assignment_complete, 
+    unmark_assignment_complete, 
+    get_last_completed_assignment,
+    delete_assignment
+};
 use crate::models::BotCommand;
 use chrono::{DateTime, Duration, FixedOffset, Datelike, NaiveDate, Utc};
 use sqlx::PgPool;
@@ -142,7 +149,6 @@ pub async fn handle_command(
                 );
             }
 
-            // ✅ ALWAYS use personal todo list (consistent with #done)
             match get_active_assignments_for_user(pool, user_phone).await {
                 Ok(assignments) => {
                     // Filter to incomplete only (same as #todo display)
@@ -200,7 +206,7 @@ pub async fn handle_command(
                             message_id,
                             warning: format!(
                                 "🧾 *Detail Tugas #{}*\nStatus: {}\n\n{} *{}*\n📌 {}\n⏰ Deadline: {}\n📝 {}{}\n\n\
-                                _Keterangan: 🔴 deadline 0–2 hari lagi • 🟢 deadline > 2 hari_",
+                                ",
                                 index,
                                 done_status,
                                 status,
@@ -294,6 +300,65 @@ pub async fn handle_command(
             }
         }
 
+        BotCommand::Delete(index) => {
+            println!("🗑️ Delete command received from {} in chat {}", user_phone, chat_id);
+
+            // Whitelist Validation
+            let academic_channels = std::env::var("ACADEMIC_CHANNELS").unwrap_or_default();
+            let is_authorized = academic_channels
+                .split(',')
+                .map(|s| s.trim())
+                .any(|allowed_id| allowed_id == chat_id);
+
+            if !is_authorized {
+                return CommandResponse::Text(
+                    "⛔ *AKSES DITOLAK*\n\n\
+                    Fitur hapus hanya boleh dilakukan di Grup Official/Academic Channel oleh PJ Matkul.\n\
+                    _Jangan iseng ya!_ 👮"
+                        .to_string(),
+                );
+            }
+
+            match get_active_assignments_sorted(pool).await {
+                Ok(assignments) => {
+                    let idx = (index as usize).saturating_sub(1);
+
+                    if idx >= assignments.len() {
+                        return CommandResponse::Text(format!(
+                            "❌ Tugas nomor *{}* tidak ditemukan.\nCek nomor terbaru dengan *#tugas*",
+                            index
+                        ));
+                    }
+
+                    let target_assignment = &assignments[idx];
+                    let title = sanitize_wa_md(&target_assignment.title);
+                    let course = sanitize_wa_md(&target_assignment.course_name);
+                    let assignment_id = target_assignment.id;
+
+                    match delete_assignment(pool, assignment_id).await {
+                        Ok(true) => {
+                            CommandResponse::Text(format!(
+                                "🗑️ *TUGAS DIHAPUS*\n\n\
+                                Mata Kuliah: {}\n\
+                                Judul: {}\n\n\
+                                _Tugas berhasil dihapus dari database._",
+                                course, title
+                            ))
+                        },
+                        Ok(false) => CommandResponse::Text("❌ Gagal menghapus. Tugas mungkin sudah hilang.".to_string()),
+                        Err(e) => {
+                            eprintln!("❌ DB Error on delete: {}", e);
+                            CommandResponse::Text("❌ Terjadi kesalahan sistem.".to_string())
+                        }
+                    }
+                }
+                Err(e) => {
+                    eprintln!("❌ Error fetching list for delete: {}", e);
+                    CommandResponse::Text("❌ Gagal mengambil daftar tugas.".to_string())
+                }
+            }
+        }
+
         BotCommand::Help => {
             println!("❓ Help command received from {}\n", user_phone);
             CommandResponse::Text(
@@ -309,6 +374,8 @@ pub async fn handle_command(
 • #<id> — lihat detail tugas dari #todo\n\
 • #done <id> — tandai selesai\n\
 • #undo — batalkan #done terakhir\n\n\
+*Perintah Admin (Grup Akademik):*\n\
+• #delete <id> — hapus tugas (id dari #tugas)\n\n\
 *Penting:* #<id> dan #done selalu pakai nomor dari *#todo*. _Info tugas akan otomatis tersimpan via grup info akademik, tidak dari chat lain._
 
 *Want to Contribute?*
