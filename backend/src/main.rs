@@ -29,7 +29,7 @@ use crate::parser::commands::CommandResponse;
 use models::{MessageType, AIClassification, WebhookPayload, SendTextRequest, NewAssignment};
 use classifier::classify_message;
 use parser::commands::handle_command;
-use parser::ai_extractor::{extract_with_ai}; 
+use parser::ai_extractor::{extract_with_ai, check_duplicate_assignment}; 
 use whitelist::Whitelist;
 
 type MessageCache = Arc<Mutex<HashSet<String>>>;
@@ -421,7 +421,15 @@ async fn webhook(
             let ai_start = Instant::now();
             
             // Extract AI
-            match extract_with_ai(&text, &courses_list, &active_assignments, &course_map, image_base64.as_deref()).await {
+            match extract_with_ai(
+                &text, 
+                &courses_list, 
+                &active_assignments, 
+                &course_map, 
+                image_base64.as_deref(),
+                sender_phone,   
+                &state.pool      
+            ).await {
                 Ok(classification) => {
                     //  STOP MONITORING: Log AI Duration
                     let ai_duration = ai_start.elapsed();
@@ -571,58 +579,134 @@ async fn handle_ai_classification(
             });
         }
         
-        AIClassification::AssignmentUpdate { reference_keywords, changes, new_deadline, new_title, new_description, parallel_code, .. } => {
+        AIClassification::AssignmentUpdate { 
+            reference_keywords, 
+            changes, 
+            new_deadline, 
+            new_title, 
+            new_description, 
+            parallel_code, 
+            .. 
+        } => {
             let pool_clone = pool.clone();
-            let updates = (new_deadline, new_title, new_description, parallel_code);
             let msg_id = message_id.clone();
+            let sender_clone = sender_id.clone();
+            let debug_clone = debug_group_id.clone();
 
             tokio::spawn(async move {
-                let course_map = sqlx::query_as::<_, (uuid::Uuid, String)>("SELECT id, name FROM courses")
-                    .fetch_all(&pool_clone).await.map(|r| r.into_iter().collect()).unwrap_or_default();
+                let course_map: HashMap<uuid::Uuid, String> = sqlx::query_as::<_, (uuid::Uuid, String)>(
+                    "SELECT id, name FROM courses"
+                )
+                .fetch_all(&pool_clone)
+                .await
+                .map(|r| r.into_iter().collect())
+                .unwrap_or_default();
                 
-                // Try find course
-                let mut course_id = None;
-                for kw in &reference_keywords {
-                     if let Ok(Some(c)) = crud::get_course_by_name_or_alias(&pool_clone, kw).await {
-                         course_id = Some(c.id); break;
-                     }
+                let course_name = reference_keywords.first().cloned();
+                let course_id = if let Some(name) = &course_name {
+                    crud::get_course_by_name(&pool_clone, name).await.ok().flatten().map(|c| c.id)
+                } else {
+                    None
+                };
+                
+                let active_assignments = crud::get_recent_assignments_for_update(&pool_clone, course_id)
+                    .await
+                    .unwrap_or_default();
+                
+                // ===== SMART UPDATE: Check for re-announcement =====
+                if let Some(ref title) = new_title {
+                    if let (Some(cid), Some(cname)) = (course_id, &course_name) {
+                        let match_start = std::time::Instant::now();
+                        
+                        let dup_check = check_duplicate_assignment(
+                            title,
+                            new_description.as_deref().unwrap_or(""),
+                            cname,
+                            parallel_code.as_deref(),
+                            &active_assignments,
+                            &course_map,
+                        ).await;
+                        
+                        if let Ok(Some(id)) = dup_check {
+                            println!("🔄 RE-ANNOUNCEMENT: {} → Updating existing", title);
+                            
+                            let deadline_parsed = new_deadline.as_ref()
+                                .and_then(|d| crud::parse_deadline(d).ok());
+                            
+                            let _ = crud::update_assignment_fields(
+                                &pool_clone,
+                                id,
+                                deadline_parsed,
+                                None,
+                                new_description.clone(),
+                                parallel_code.clone(),
+                                Some(msg_id.clone()),
+                            ).await;
+                            
+                            if let Some(debug_id) = debug_clone {
+                                let _ = send_reply(
+                                    &debug_id,
+                                    &format!("🔄 *UPDATED*: {}", title)
+                                ).await;
+                            }
+                            return;
+                        }
+                    }
                 }
                 
-                if let Ok(assignments) = crud::get_recent_assignments_for_update(&pool_clone, course_id).await {
-                     if let Ok(Some(assign_id)) = parser::ai_extractor::match_update_to_assignment(
-                         &changes, &reference_keywords, &assignments, &course_map, updates.3.as_deref()
-                     ).await {
-                         let d = if let Some(s) = &updates.0 { crud::parse_deadline(s).ok() } else { None };
-                         let _ = crud::update_assignment_fields(&pool_clone, assign_id, d, updates.1, updates.2, updates.3, Some(msg_id)).await;
-                         
-                         if let Some(debug_id) = &debug_group_id {
-                             let _ = send_reply(debug_id, &format!("🔄 *UPDATED*: {}", changes)).await;
-                         }
-                         return;
-                     }
-                }
-                
-                // Fallback Create
-                if let (Some(cid), Some(d_str)) = (course_id, updates.0) {
-                     if let Ok(d) = crud::parse_deadline(&d_str) {
-                         let t = reference_keywords.first().cloned().unwrap_or("Task".into());
-                         let new_assign = NewAssignment {
-                             course_id: Some(cid), title: t.clone(), description: changes.clone(),
-                             deadline: Some(d), parallel_code: updates.3, sender_id: None, message_id: msg_id
-                         };
-                         let _ = crud::create_assignment(&pool_clone, new_assign).await;
-                         if let Some(debug_id) = &debug_group_id {
-                             let _ = send_reply(debug_id, &format!("✨ *FALLBACK TASK*: {}", t)).await;
-                         }
-                     }
+                // ===== REGULAR UPDATE MATCHING =====
+                match parser::ai_extractor::match_update_to_assignment(
+                    &changes,
+                    &reference_keywords,
+                    &active_assignments,
+                    &course_map,
+                    parallel_code.as_deref(),
+                ).await {
+                    Ok(Some(assignment_id)) => {
+                        let deadline_parsed = new_deadline.as_ref()
+                            .and_then(|d| crud::parse_deadline(d).ok());
+                        
+                        if let Ok(updated) = crud::update_assignment_fields(
+                            &pool_clone,
+                            assignment_id,
+                            deadline_parsed,
+                            new_title.clone(),
+                            new_description.clone(),
+                            parallel_code.clone(),
+                            Some(msg_id),
+                        ).await {
+                            println!("🔄 UPDATED: {} ({})", updated.title, changes);
+                            
+                            if let Some(debug_id) = debug_clone {
+                                let _ = send_reply(
+                                    &debug_id,
+                                    &format!("🔄 *UPDATED*: {}", updated.title)
+                                ).await;
+                            }
+                        }
+                    }
+                    Ok(None) => {
+                        println!("⚠️  No match found for update: {:?}", reference_keywords);
+                        
+                        if let Some(debug_id) = debug_clone {
+                            let _ = send_reply(
+                                &debug_id,
+                                "⚠️ Could not find assignment to update"
+                            ).await;
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("❌ Update matching failed: {}", e);
+                    }
                 }
             });
         }
+        
         AIClassification::Unrecognized => {}
     }
 }
 
-/// Handle a single assignment with AI-powered duplicate detection
+/// Handle a single assignment with improved AI-powered duplicate detection
 #[allow(non_snake_case)]
 async fn handle_single_assignment(
     pool: PgPool,
@@ -638,9 +722,8 @@ async fn handle_single_assignment(
 ) {
     let title_clone = title.clone();
     let desc_clone = description.clone().unwrap_or("No description".to_string());
-    // Gunakan parse_deadline punya crud.rs yang sudah support WIB
     let deadline_parsed = deadline.as_ref()
-    .and_then(|d| crud::parse_deadline(d).ok());
+        .and_then(|d| crud::parse_deadline(d).ok());
     let parallel_code_parsed = extract_parallel_code(&title);
     let final_parallel = parallel_code.or(parallel_code_parsed);
     
@@ -648,98 +731,76 @@ async fn handle_single_assignment(
         crud::get_course_by_name(&pool, name).await.ok().flatten().map(|c| c.id)
     } else { None };
     
+    // Replace logging in handle_single_assignment
+
     // ========================================
-    // AI-POWERED DUPLICATE DETECTION
+    // IMPROVED DUPLICATE DETECTION
     // ========================================
     if let Some(cid) = course_id {
-        // Build course map for AI
-        let course_map: HashMap<uuid::Uuid, String> = sqlx::query_as::<_, (uuid::Uuid, String)>(
-            "SELECT id, name FROM courses"
-        )
-        .fetch_all(&pool)
-        .await
-        .map(|r| r.into_iter().collect())
-        .unwrap_or_default();
-        
-        // Get recent assignments for this course
-        let existing_assignments = if let Ok(assignments) = crud::get_recent_assignments_for_update(&pool, Some(cid)).await {
-            assignments
-        } else {
-            Vec::new()
-        };
-        
-        if !existing_assignments.is_empty() {
-            // Use AI to check if this is a duplicate
-            // Construct keywords from the new assignment for matching
-            let keywords: Vec<String> = vec![
-                course_name.clone().unwrap_or_default(),
-                title_clone.clone(),
-            ];
+        if let Some(cname) = &course_name {
+            let course_map: HashMap<uuid::Uuid, String> = sqlx::query_as::<_, (uuid::Uuid, String)>(
+                "SELECT id, name FROM courses"
+            )
+            .fetch_all(&pool)
+            .await
+            .map(|r| r.into_iter().collect())
+            .unwrap_or_default();
             
-            let changes = format!(
-                "Checking if '{}' (description: '{}') is a duplicate", 
-                title_clone, 
-                desc_clone
-            );
+            let existing_assignments = crud::get_recent_assignments_for_update(&pool, Some(cid))
+                .await
+                .unwrap_or_default();
             
-            println!("🔍 Checking for duplicates using AI semantic matching...");
-            
-            //  START TIMER
-            let match_start = Instant::now();
-
-            // Perform Matching
-            let match_result = crate::parser::ai_extractor::match_update_to_assignment(
-                &changes,
-                &keywords,
-                &existing_assignments,
-                &course_map,
-                final_parallel.as_deref(),
-            ).await;
-
-            // STOP TIMER
-            let match_duration = match_start.elapsed();
-
-            // LOGGING BOX
-            println!("┌── 🤖 AI MATCHING (GEMINI ONLY) ─────────────");
-            println!("│ 🔍 Keywords     : {:?}", keywords);
-            println!("│ 🔄 Model        : gemini-1.5-flash"); 
-            match &match_result {
-                Ok(Some(_)) => println!("│ ✅ RESULT       : MATCH FOUND"),
-                Ok(None)     => println!("│ ℹ️ RESULT       : NO MATCH FOUND"),
-                Err(_)       => println!("│ ❌ RESULT       : ERROR"),
-            }
-            println!("└──────────────────────────────────────────────");
-            println!("🧠 AI Matching Latency: {:.2?}", match_duration);
-            
-            // Check result
-            if let Ok(Some(existing_id)) = match_result {
-                println!("✅ AI found duplicate assignment: {}", existing_id);
+            if !existing_assignments.is_empty() {
+                let match_start = std::time::Instant::now();
                 
-                // Update the existing assignment instead of creating new
-                let _ = crud::update_assignment_fields(
-                    &pool, 
-                    existing_id, 
-                    deadline_parsed, 
-                    None, 
-                    Some(desc_clone.clone()), 
-                    None, 
-                    Some(message_id.to_string())
+                let match_result = check_duplicate_assignment(
+                    &title_clone,
+                    &desc_clone,
+                    cname,
+                    final_parallel.as_deref(),
+                    &existing_assignments,
+                    &course_map,
                 ).await;
                 
-                if let Some(debug_id) = &debug_group_id {
-                    let prefix = if assignment_number > 0 {
-                        format!("{}. ", assignment_number)
-                    } else {
-                        String::new()
-                    };
-                    let _ = send_reply(
-                        debug_id, 
-                        &format!("{}🔄 *DUPLICATE UPDATED* (AI matched): {}", prefix, title_clone)
-                    ).await;
+                let match_duration = match_start.elapsed();
+                
+                match &match_result {
+                    Ok(Some(id)) => {
+                        println!("🔄 DUPLICATE: {} → Updating existing ({})", title_clone, id);
+                        
+                        let update_result = crud::update_assignment_fields(
+                            &pool, 
+                            *id, 
+                            deadline_parsed, 
+                            None,
+                            Some(desc_clone.clone()), 
+                            final_parallel.as_ref().map(|s| s.clone()),
+                            Some(message_id.to_string())
+                        ).await;
+                        
+                        if update_result.is_ok() {
+                            if let Some(debug_id) = &debug_group_id {
+                                let prefix = if assignment_number > 0 {
+                                    format!("{}. ", assignment_number)
+                                } else {
+                                    String::new()
+                                };
+                                let _ = send_reply(
+                                    debug_id, 
+                                    &format!("{}🔄 *UPDATED*: {}", prefix, title_clone)
+                                ).await;
+                            }
+                        }
+                        return;
+                    }
+                    Ok(None) => {
+                        println!("✨ NEW: {} (checked {} assignments in {:.2?})", 
+                            title_clone, existing_assignments.len(), match_duration);
+                    }
+                    Err(e) => {
+                        println!("⚠️  Duplicate check failed: {} - creating new", e);
+                    }
                 }
-                return; // STOP HERE so we don't create a new one
-            } else {
-                println!("ℹ️  No duplicate found - proceeding with creation");
             }
         }
     }
@@ -747,54 +808,83 @@ async fn handle_single_assignment(
     // ========================================
     // CREATE NEW ASSIGNMENT (no duplicate found)
     // ========================================
+    
+    // Clone parallel_code before moving it into NewAssignment
+    let parallel_for_display = final_parallel.clone();
+    
     let new_assignment = NewAssignment {
         course_id, 
         title: title_clone.clone(), 
         description: desc_clone.clone(),
         deadline: deadline_parsed, 
-        parallel_code: final_parallel, 
+        parallel_code: final_parallel,  // This moves final_parallel
         sender_id: Some(sender_id.to_string()), 
         message_id: message_id.to_string()
     };
     
     match crud::create_assignment(&pool, new_assignment).await {
         Ok(_) => {
-            // Clarification check
+            // Assignment created successfully
+            println!("✅ Assignment created: {}", title_clone);
+            
+            // Check if clarification is needed
             if let Some(cid) = course_id {
-                 if let Ok(Some(assignment)) = crud::get_assignment_by_title_and_course(&pool, &title_clone, cid).await {
-                     if let Ok(Some(full_assign)) = crud::get_assignment_with_course_by_id(&pool, assignment.id).await {
-                         let missing = clarification::identify_missing_fields(&full_assign);
-                         if !missing.is_empty() {
-                             if let Some(debug_id) = &debug_group_id {
-                                 let msg = clarification::generate_clarification_message(&full_assign, &missing);
-                                 let _ = send_reply(debug_id, &msg).await;
-                             }
-                             return;
-                         }
-                     }
-                 }
+                if let Ok(Some(assignment)) = crud::get_assignment_by_title_and_course(&pool, &title_clone, cid).await {
+                    if let Ok(Some(full_assign)) = crud::get_assignment_with_course_by_id(&pool, assignment.id).await {
+                        let missing = clarification::identify_missing_fields(&full_assign);
+                        if !missing.is_empty() {
+                            if let Some(debug_id) = &debug_group_id {
+                                let msg = clarification::generate_clarification_message(&full_assign, &missing);
+                                let _ = send_reply(debug_id, &msg).await;
+                            }
+                            return;
+                        }
+                    }
+                }
             }
 
-            // Success message
+            // Success message (no clarification needed)
             if let Some(debug_id) = &debug_group_id {
                 let prefix = if assignment_number > 0 {
                     format!("{}. ", assignment_number)
                 } else {
                     String::new()
                 };
+                
+                let deadline_str = deadline_parsed
+                    .map(|d| format!("\n⏰ {}", d.format("%Y-%m-%d %H:%M")))
+                    .unwrap_or_default();
+                
+                let parallel_str = parallel_for_display
+                    .as_ref()
+                    .map(|p| format!("\n🧩 Parallel: {}", p.to_uppercase()))
+                    .unwrap_or_default();
+                
                 let _ = send_reply(
                     debug_id, 
-                    &format!("{}✨ *NEW TASK*: {}\n📚 {}", 
+                    &format!("{}✨ *NEW TASK*: {}\n📚 {}{}{}", 
                         prefix, 
                         title_clone, 
-                        course_name.unwrap_or_default()
+                        course_name.unwrap_or_default(),
+                        deadline_str,
+                        parallel_str
                     )
                 ).await;
             }
         }
-        Err(e) => eprintln!("Failed to save assignment: {}", e),
+        Err(e) => {
+            eprintln!("❌ Failed to save assignment: {}", e);
+            
+            if let Some(debug_id) = &debug_group_id {
+                let _ = send_reply(
+                    debug_id, 
+                    &format!("⚠️ Failed to save assignment: {}", title_clone)
+                ).await;
+            }
+        }
     }
 }
+
 
 async fn send_reply(chat_id: &str, text: &str) -> Result<(), String> {
     let waha_url = "http://localhost:3001/api/sendText";

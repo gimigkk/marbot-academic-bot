@@ -519,11 +519,14 @@ fn format_assignments_list(
 
 /// 🔴 deadline 0–2 hari lagi, 🟢 setelahnya
 fn status_dot(deadline_utc: &DateTime<Utc>) -> &'static str {
-    if days_left(deadline_utc) < 2 {
+    if days_left(deadline_utc) < 1 {
         "🔴"
     } 
-    else if days_left(deadline_utc) == 2 {
+    else if days_left(deadline_utc) == 1 {
         "🟠"
+    }
+    else if days_left(deadline_utc) == 2 {
+        "🟡"
     }
     else {
         "🟢"
@@ -541,18 +544,22 @@ fn days_left(deadline_utc: &DateTime<Utc>) -> i64 {
 fn humanize_deadline(deadline_utc: &DateTime<Utc>) -> String {
     // ✅ Convert to GMT+7 for display
     let gmt7 = FixedOffset::east_opt(7 * 3600).unwrap();
+    let deadline_gmt7 = deadline_utc.with_timezone(&gmt7);
     let now = get_gmt7_now().date_naive();
-    let due = deadline_utc.with_timezone(&gmt7).date_naive();
+    let due = deadline_gmt7.date_naive();
     
     let delta = (due - now).num_days();
     let date_str = format_date_id(due);
+    
+    // Show both DD-MM and HH:MM timestamp for debugging
+    let time_str = deadline_gmt7.format("%d-%m %H:%M").to_string();
 
     match delta {
-        0 => format!("Hari ini ({})", date_str),
-        1 => format!("Besok ({})", date_str),
-        d if d >= 2 => format!("H-{} ({})", d, date_str), 
-        -1 => format!("Kemarin ({})", date_str),
-        d => format!("lewat {} hari ({})", d.abs(), date_str),
+        0 => format!("Hari ini ({} {})", date_str, time_str),
+        1 => format!("Besok ({} {})", date_str, time_str),
+        d if d >= 2 => format!("H-{} ({} {})", d, date_str, time_str), 
+        -1 => format!("Kemarin ({} {})", date_str, time_str),
+        d => format!("lewat {} hari ({} {})", d.abs(), date_str, time_str),
     }
 }
 

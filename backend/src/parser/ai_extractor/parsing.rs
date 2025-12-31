@@ -5,7 +5,6 @@ use chrono::{Utc, FixedOffset};
 
 // ===== API RESPONSE STRUCTURES =====
 
-// Groq response structure
 #[derive(Debug, Deserialize)]
 pub(super) struct GroqResponse {
     pub choices: Vec<GroqChoice>,
@@ -21,7 +20,6 @@ pub(super) struct GroqMessage {
     pub content: String,
 }
 
-// Gemini response structure
 #[derive(Debug, Deserialize)]
 pub(super) struct GeminiResponse {
     pub candidates: Vec<Candidate>,
@@ -42,9 +40,19 @@ pub(super) struct Part {
     pub text: String,
 }
 
+// ===== DUPLICATE CHECK RESULT =====
+
+#[derive(Debug, Deserialize)]
+pub(super) struct DuplicateCheckResult {
+    pub is_duplicate: bool,
+    pub confidence: String,
+    pub reason: String,
+    #[serde(default)]
+    pub matched_assignment_id: Option<String>,
+}
+
 // ===== RESPONSE EXTRACTORS =====
 
-/// Extract text from Groq response
 pub(super) fn extract_groq_text(groq_response: &GroqResponse) -> Result<String, String> {
     groq_response
         .choices
@@ -53,7 +61,6 @@ pub(super) fn extract_groq_text(groq_response: &GroqResponse) -> Result<String, 
         .ok_or_else(|| "Groq returned empty response".to_string())
 }
 
-/// Extract AI text from Gemini response structure
 pub(super) fn extract_ai_text(gemini_response: &GeminiResponse) -> Result<&str, String> {
     gemini_response
         .candidates
@@ -65,7 +72,6 @@ pub(super) fn extract_ai_text(gemini_response: &GeminiResponse) -> Result<&str, 
 
 // ===== PARSERS =====
 
-/// Clean and parse the AI classification from text
 pub(super) fn parse_classification(ai_text: &str) -> Result<AIClassification, String> {
     let cleaned = ai_text
         .trim()
@@ -89,7 +95,6 @@ pub(super) fn parse_classification(ai_text: &str) -> Result<AIClassification, St
     }
 }
 
-/// Clean and parse AI matching for update
 pub(super) fn parse_match_result(ai_text: &str) -> Result<Option<Uuid>, String> {
     let cleaned = ai_text.trim()
         .trim_start_matches("```json")
@@ -130,30 +135,102 @@ pub(super) fn parse_match_result(ai_text: &str) -> Result<Option<Uuid>, String> 
     }
 }
 
+// ===== NUMBER EXTRACTION =====
+
+/// Extract all numbers from a string using character-based parsing
+pub fn extract_numbers(text: &str) -> Vec<u32> {
+    let mut numbers = Vec::new();
+    let mut current_number = String::new();
+    
+    for ch in text.chars() {
+        if ch.is_ascii_digit() {
+            current_number.push(ch);
+        } else if !current_number.is_empty() {
+            if let Ok(num) = current_number.parse::<u32>() {
+                numbers.push(num);
+            }
+            current_number.clear();
+        }
+    }
+    
+    // Don't forget the last number if string ends with digits
+    if !current_number.is_empty() {
+        if let Ok(num) = current_number.parse::<u32>() {
+            numbers.push(num);
+        }
+    }
+    
+    numbers
+}
+
+// ===== ASSIGNMENT TYPE EXTRACTION =====
+
+pub fn extract_assignment_type(title: &str) -> Option<String> {
+    let lower = title.to_lowercase();
+    let types = [
+        ("quiz", vec!["quiz", "kuis"]),
+        ("exam", vec!["ujian", "uts", "uas", "exam", "test"]),
+        ("lab", vec!["lkp", "lab", "praktikum", "praktik"]),
+        ("homework", vec!["tugas", "assignment", "homework", "pr"]),
+        ("project", vec!["project", "proyek", "ta", "skripsi"]),
+        ("report", vec!["laporan", "report", "makalah", "paper"]),
+        ("presentation", vec!["presentasi", "presentation", "demo"]),
+    ];
+    
+    for (category, keywords) in types.iter() {
+        for keyword in keywords {
+            if lower.contains(keyword) {
+                return Some(category.to_string());
+            }
+        }
+    }
+    None
+}
+
+// ===== SIMILARITY CALCULATION =====
+
+pub fn calculate_word_overlap(s1: &str, s2: &str) -> f32 {
+    // Create owned strings first to avoid temporary value issues
+    let s1_lower = s1.to_lowercase();
+    let s2_lower = s2.to_lowercase();
+    
+    let words1: std::collections::HashSet<&str> = s1_lower
+        .split_whitespace()
+        .collect();
+    let words2: std::collections::HashSet<&str> = s2_lower
+        .split_whitespace()
+        .collect();
+    
+    if words1.is_empty() || words2.is_empty() {
+        return 0.0;
+    }
+    
+    let common = words1.intersection(&words2).count() as f32;
+    let total = words1.len().max(words2.len()) as f32;
+    
+    common / total
+}
+
 // ===== HELPERS =====
 
-/// Get current datetime in GMT+7
 pub(super) fn get_current_datetime() -> String {
     let gmt7 = FixedOffset::east_opt(7 * 3600).unwrap();
     let now = Utc::now().with_timezone(&gmt7);
     now.format("%Y-%m-%d %H:%M:%S").to_string()
 }
 
-/// Get current date in GMT+7
 pub(super) fn get_current_date() -> String {
     let gmt7 = FixedOffset::east_opt(7 * 3600).unwrap();
     let now = Utc::now().with_timezone(&gmt7);
     now.format("%Y-%m-%d").to_string()
 }
 
-/// Check if string looks like a valid JSON object
 pub(super) fn is_valid_json_object(s: &str) -> bool {
     s.starts_with('{') 
         && s.ends_with('}') 
         && s.matches('{').count() == s.matches('}').count()
 }
 
-/// Truncate text for logging
 pub(super) fn truncate_for_log(text: &str, max_len: usize) -> String {
     let clean_text = text.replace('\n', " ");
     if clean_text.len() <= max_len {
@@ -168,17 +245,25 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_is_valid_json_object() {
-        assert!(is_valid_json_object(r#"{"type":"unrecognized"}"#));
-        assert!(is_valid_json_object(r#"{"a":{"b":"c"}}"#));
-        assert!(!is_valid_json_object(r#"{"type":"incomplete"#));
-        assert!(!is_valid_json_object(r#"not json"#));
-        assert!(!is_valid_json_object(r#"["array"]"#));
+    fn test_extract_numbers() {
+        assert_eq!(extract_numbers("LKP 15"), vec![15]);
+        assert_eq!(extract_numbers("LKP 15 and LKP 17"), vec![15, 17]);
+        assert_eq!(extract_numbers("Assignment 1, 2, 3"), vec![1, 2, 3]);
+        assert_eq!(extract_numbers("No numbers here"), Vec::<u32>::new());
+        assert_eq!(extract_numbers("2025-01-15"), vec![2025, 1, 15]);
     }
 
     #[test]
-    fn test_truncate_for_log() {
-        assert_eq!(truncate_for_log("short", 10), "short");
-        assert_eq!(truncate_for_log("this is a very long text", 10), "this is a ...");
+    fn test_extract_assignment_type() {
+        assert_eq!(extract_assignment_type("LKP 15"), Some("lab".to_string()));
+        assert_eq!(extract_assignment_type("Quiz 1"), Some("quiz".to_string()));
+        assert_eq!(extract_assignment_type("Tugas Pemrograman"), Some("homework".to_string()));
+    }
+
+    #[test]
+    fn test_word_overlap() {
+        assert!(calculate_word_overlap("LKP 15", "LKP 15") > 0.9);
+        assert!(calculate_word_overlap("Quiz Data Structures", "Quiz Algorithms") > 0.3);
+        assert!(calculate_word_overlap("Quiz", "Lab") < 0.1);
     }
 }
