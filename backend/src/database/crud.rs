@@ -1,6 +1,6 @@
 use sqlx::{PgPool, Result};
 use uuid::Uuid;
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Utc, FixedOffset, TimeZone, NaiveDateTime};
 use std::collections::HashMap;
 
 use crate::models::{Assignment, NewAssignment, Course, AssignmentDisplay, AssignmentWithCourse};
@@ -654,22 +654,31 @@ pub async fn delete_assignment(
 }
 
 
-/// Parse deadline string (YYYY-MM-DD) to DateTime<Utc>
+
+/// Parse deadline string with TIMESTAMP support (YYYY-MM-DD HH:MM)
+/// Falls back to DATE format (YYYY-MM-DD) for backward compatibility
 pub fn parse_deadline(deadline_str: &str) -> Result<DateTime<Utc>, String> {
-    use chrono::{NaiveDate, FixedOffset, TimeZone};
-
-    // 1. Parse string menjadi NaiveDate
-    let date = NaiveDate::parse_from_str(deadline_str, "%Y-%m-%d")
-        .map_err(|e| format!("Failed to parse date '{}': {}", deadline_str, e))?;
-
-    let naive_datetime = date.and_hms_opt(23, 59, 59).unwrap();
-
-    // 3. Definisikan Zona Waktu WIB (UTC+7)
+    let deadline_str = deadline_str.trim();
+    
+    // Define WIB timezone (UTC+7)
     let wib = FixedOffset::east_opt(7 * 3600).unwrap();
-
-    // 4. Interpretasikan waktu tersebut sebagai WIB, lalu convert ke UTC
-    match wib.from_local_datetime(&naive_datetime).single() {
-        Some(dt_wib) => Ok(dt_wib.with_timezone(&Utc)),
-        None => Err(format!("Invalid local datetime (ambiguous/none): {}", deadline_str))
+    
+    // Try parsing with timestamp first (YYYY-MM-DD HH:MM)
+    if let Ok(naive_dt) = NaiveDateTime::parse_from_str(deadline_str, "%Y-%m-%d %H:%M") {
+        return match wib.from_local_datetime(&naive_dt).single() {
+            Some(dt_wib) => Ok(dt_wib.with_timezone(&Utc)),
+            None => Err(format!("Invalid datetime (ambiguous): {}", deadline_str))
+        };
     }
+    
+    // Fallback: Try parsing date only (YYYY-MM-DD) - default to 23:59
+    if let Ok(date) = chrono::NaiveDate::parse_from_str(deadline_str, "%Y-%m-%d") {
+        let naive_datetime = date.and_hms_opt(23, 59, 59).unwrap();
+        return match wib.from_local_datetime(&naive_datetime).single() {
+            Some(dt_wib) => Ok(dt_wib.with_timezone(&Utc)),
+            None => Err(format!("Invalid date (ambiguous): {}", deadline_str))
+        };
+    }
+    
+    Err(format!("Failed to parse deadline '{}'. Expected format: 'YYYY-MM-DD HH:MM' or 'YYYY-MM-DD'", deadline_str))
 }
