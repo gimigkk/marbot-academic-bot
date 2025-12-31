@@ -12,7 +12,6 @@ use std::io::Write;
 use tokio::sync::Mutex;  
 use tokio::net::TcpListener;
 use sqlx::PgPool;
-use chrono::{DateTime, Utc, NaiveDate};
 use std::time::{Instant, Duration}; 
 use std::collections::HashMap;
 
@@ -804,11 +803,6 @@ async fn send_reply(chat_id: &str, text: &str) -> Result<(), String> {
     let client = reqwest::Client::new();
     let res = client.post(waha_url).header("X-Api-Key", api_key).json(&payload).send().await.map_err(|e| e.to_string())?;
     if res.status().is_success() { Ok(()) } else { Err(format!("API Error")) }
-}
-
-fn parse_deadline(s: &Option<String>) -> Option<DateTime<Utc>> {
-    s.as_ref().and_then(|s| NaiveDate::parse_from_str(s, "%Y-%m-%d").ok())
-     .and_then(|d| d.and_hms_opt(23, 59, 59)).map(|n| DateTime::from_naive_utc_and_offset(n, Utc))
 }
 
 fn extract_parallel_code(title: &str) -> Option<String> {
