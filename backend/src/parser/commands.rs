@@ -522,7 +522,7 @@ fn status_dot(deadline_utc: &DateTime<Utc>) -> &'static str {
     if days_left(deadline_utc) < 2 {
         "🔴"
     } 
-    else if (days_left(deadline_utc) == 2 ) {
+    else if days_left(deadline_utc) == 2 {
         "🟠"
     }
     else {
