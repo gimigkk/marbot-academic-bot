@@ -1,0 +1,222 @@
+{
+  "Senin": [
+    {
+      "course": "KOM1221 - Metode Kuantitatif",
+      "parallel": "K1",
+      "schedule": "08:00-09:40"
+    },
+    {
+      "course": "KOM120D - Pengantar Matematika Komputasi",
+      "parallel": "K1",
+      "schedule": "10:00-11:40"
+    },
+    {
+      "course": "KOM1221 - Metode Kuantitatif",
+      "parallel": "K2",
+      "schedule": "10:00-11:40"
+    },
+    {
+      "course": "KOM1221 - Metode Kuantitatif",
+      "parallel": "P1",
+      "schedule": "13:00-15:00"
+    },
+    {
+      "course": "KOM1221 - Metode Kuantitatif",
+      "parallel": "P2",
+      "schedule": "13:00-15:00"
+    },
+    {
+      "course": "KOM1221 - Metode Kuantitatif",
+      "parallel": "P3",
+      "schedule": "13:00-15:00"
+    },
+    {
+      "course": "KOM120D - Pengantar Matematika Komputasi",
+      "parallel": "P1",
+      "schedule": "15:00-17:00"
+    }
+  ],
+  "Selasa": [
+    {
+      "course": "KOM120C - Pemrograman",
+      "parallel": "K2",
+      "schedule": "08:00-09:40"
+    },
+    {
+      "course": "KOM120C - Pemrograman",
+      "parallel": "K3",
+      "schedule": "08:00-09:40"
+    },
+    {
+      "course": "KOM120G - Organisasi dan Arsitektur Komputer",
+      "parallel": "K4",
+      "schedule": "08:00-09:40"
+    },
+    {
+      "course": "KOM120H - Struktur Data",
+      "parallel": "K1",
+      "schedule": "08:00-09:40"
+    },
+    {
+      "course": "KOM1231 - Rekayasa Perangkat Lunak",
+      "parallel": "K2",
+      "schedule": "10:00-11:40"
+    },
+    {
+      "course": "KOM1232 - Desain Pengalaman Pengguna",
+      "parallel": "K3",
+      "schedule": "10:00-11:40"
+    },
+    {
+      "course": "KOM1304 - Grafika Komputer dan Visualisasi",
+      "parallel": "K1",
+      "schedule": "10:00-11:40"
+    },
+    {
+      "course": "KOM1231 - Rekayasa Perangkat Lunak",
+      "parallel": "K1",
+      "schedule": "13:00-14:40"
+    },
+    {
+      "course": "KOM1231 - Rekayasa Perangkat Lunak",
+      "parallel": "R2",
+      "schedule": "13:00-15:00"
+    },
+    {
+      "course": "KOM1232 - Desain Pengalaman Pengguna",
+      "parallel": "P3",
+      "schedule": "13:00-15:00"
+    }
+  ],
+  "Rabu": [
+    {
+      "course": "KOM120C - Pemrograman",
+      "parallel": "K1",
+      "schedule": "08:00-09:40"
+    },
+    {
+      "course": "KOM120C - Pemrograman",
+      "parallel": "K4",
+      "schedule": "08:00-09:40"
+    },
+    {
+      "course": "KOM120G - Organisasi dan Arsitektur Komputer",
+      "parallel": "K3",
+      "schedule": "08:00-09:40"
+    },
+    {
+      "course": "KOM120H - Struktur Data",
+      "parallel": "K2",
+      "schedule": "08:00-09:40"
+    },
+    {
+      "course": "KOM120C - Pemrograman",
+      "parallel": "P2",
+      "schedule": "08:00-10:00"
+    },
+    {
+      "course": "KOM120C - Pemrograman",
+      "parallel": "P3",
+      "schedule": "08:00-10:00"
+    },
+    {
+      "course": "KOM120C - Pemrograman",
+      "parallel": "P1",
+      "schedule": "10:00-12:00"
+    },
+    {
+      "course": "KOM120C - Pemrograman",
+      "parallel": "P4",
+      "schedule": "10:00-12:00"
+    },
+    {
+      "course": "KOM120H - Struktur Data",
+      "parallel": "P2",
+      "schedule": "10:00-12:00"
+    },
+    {
+      "course": "KOM1231 - Rekayasa Perangkat Lunak",
+      "parallel": "K3",
+      "schedule": "13:00-14:40"
+    },
+    {
+      "course": "KOM1232 - Desain Pengalaman Pengguna",
+      "parallel": "K1",
+      "schedule": "13:00-14:40"
+    },
+    {
+      "course": "KOM1304 - Grafika Komputer dan Visualisasi",
+      "parallel": "K2",
+      "schedule": "13:00-14:40"
+    }
+  ],
+  "Kamis": [
+    {
+      "course": "KOM120H - Struktur Data",
+      "parallel": "P1",
+      "schedule": "08:00-10:00"
+    },
+    {
+      "course": "KOM1232 - Desain Pengalaman Pengguna",
+      "parallel": "K2",
+      "schedule": "10:00-11:40"
+    },
+    {
+      "course": "KOM1231 - Rekayasa Perangkat Lunak",
+      "parallel": "R3",
+      "schedule": "10:00-12:00"
+    },
+    {
+      "course": "KOM1232 - Desain Pengalaman Pengguna",
+      "parallel": "P1",
+      "schedule": "10:00-12:00"
+    },
+    {
+      "course": "KOM1304 - Grafika Komputer dan Visualisasi",
+      "parallel": "K3",
+      "schedule": "13:00-14:40"
+    },
+    {
+      "course": "KOM1231 - Rekayasa Perangkat Lunak",
+      "parallel": "R1",
+      "schedule": "13:00-15:00"
+    },
+    {
+      "course": "KOM1232 - Desain Pengalaman Pengguna",
+      "parallel": "P2",
+      "schedule": "13:00-15:00"
+    }
+  ],
+  "Jumat": [
+    {
+      "course": "KOM120G - Organisasi dan Arsitektur Komputer",
+      "parallel": "K1",
+      "schedule": "09:00-10:40"
+    },
+    {
+      "course": "KOM120H - Struktur Data",
+      "parallel": "K3",
+      "schedule": "09:00-10:40"
+    },
+    {
+      "course": "KOM120H - Struktur Data",
+      "parallel": "K4",
+      "schedule": "09:00-10:40"
+    },
+    {
+      "course": "KOM120G - Organisasi dan Arsitektur Komputer",
+      "parallel": "K2",
+      "schedule": "13:30-15:10"
+    },
+    {
+      "course": "KOM120H - Struktur Data",
+      "parallel": "P3",
+      "schedule": "13:30-15:30"
+    },
+    {
+      "course": "KOM120H - Struktur Data",
+      "parallel": "P4",
+      "schedule": "13:30-15:30"
+    }
+  ]
+}
