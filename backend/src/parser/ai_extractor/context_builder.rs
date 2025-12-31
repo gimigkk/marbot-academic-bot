@@ -15,7 +15,7 @@ pub struct MessageContext {
     pub parallel_confidence: f32,
     pub parallel_source: String,
     pub deadline_hint: Option<String>,
-    pub deadline_type: String,
+    pub deadline_type: String, // Keep for backward compatibility
     pub course_hints: Vec<CourseHint>,
 }
 
@@ -25,6 +25,7 @@ pub struct CourseHint {
     pub course_name: String,
     pub parallel_code: Option<String>,
     pub deadline_hint: Option<String>,
+    pub deadline_type: String, // NEW: per-course deadline type
 }
 
 /// Build context by querying DB + lightweight AI
@@ -55,12 +56,28 @@ pub async fn build_context(
         None
     };
     
+    // Global deadline_type is now just for backward compatibility
+    // Use the first course's type, or "unknown" if multiple different types
+    let global_deadline_type = if course_hints.len() == 1 {
+        course_hints[0].deadline_type.clone()
+    } else {
+        let types: std::collections::HashSet<_> = course_hints
+            .iter()
+            .map(|h| h.deadline_type.as_str())
+            .collect();
+        if types.len() == 1 {
+            course_hints[0].deadline_type.clone()
+        } else {
+            "mixed".to_string()
+        }
+    };
+    
     Ok(MessageContext {
         parallel_code: ai_hints.parallel_code,
         parallel_confidence: ai_hints.parallel_confidence,
         parallel_source: ai_hints.parallel_source,
         deadline_hint,
-        deadline_type: ai_hints.deadline_type,
+        deadline_type: global_deadline_type,
         course_hints,
     })
 }
@@ -110,7 +127,7 @@ struct AIHints {
     parallel_code: Option<String>,
     parallel_confidence: f32,
     parallel_source: String,
-    deadline_type: String,
+    deadline_type: String, // Global fallback
     course_hints: Vec<AICourseHint>,
 }
 
@@ -118,6 +135,7 @@ struct AIHints {
 struct AICourseHint {
     course_name: String,
     parallel_code: Option<String>,
+    deadline_type: String, // NEW: per-course deadline type
 }
 
 async fn call_context_resolver_ai(
@@ -155,62 +173,59 @@ TASK: Answer these questions in JSON:
 
 1. parallel_code: Global parallel (k1/k2/k3/p1/p2/p3/r1/r2/r3/null)
    - ONLY set if EVERY SINGLE course explicitly mentions the SAME parallel
-   - Example: "PEMROG K2, KALKULUS K2, FISIKA K2" → parallel_code="k2" ✓
-   - Example: "PEMROG K2, KALKULUS TUGAS" → parallel_code=null ✗ (Kalkulus not specified)
-   - Example: "STRUKDAT K2, ORKOM KUIS" → parallel_code=null ✗ (ORKOM not specified)
    - If even ONE course lacks explicit parallel → null
 
 2. parallel_confidence: 0.0-1.0
-   - 1.0: ALL courses explicitly mention same parallel
-   - 0.85-0.9: Single course with explicit parallel or strong history
-   - 0.0: Multiple courses where not all have explicit parallels
 
 3. parallel_source: "explicit"|"sender_history"|"unknown"
 
-4. deadline_type: "explicit"|"next_meeting"|"relative"|"unknown"
-   - explicit: contains YYYY-MM-DD or specific date
-   - next_meeting: "sebelum pertemuan", "before class", "before next meeting"
-   - relative: "besok", "lusa", "minggu depan"
-   - unknown: no deadline mentioned
+4. deadline_type: Global fallback (use if all courses have same type)
+   - "explicit"|"next_meeting"|"relative"|"unknown"
 
-5. course_hints: Array of courses - CRITICAL FIELD
-   - Extract EVERY course from message
-   - For EACH course, determine parallel INDEPENDENTLY:
-     
-     Step 1: Check if parallel explicitly mentioned WITH that specific course
-       "STRUKDAT K2 TUGAS" → Strukdat gets k2
-       "ORKOM KUIS" → ORKOM gets null (NO parallel mentioned)
-     
-     Step 2: If not explicit, check sender history for THAT SPECIFIC course
-       If "Struktur Data: k1 (3x)" in history → use k1
-       If no history → null
-     
-     Step 3: NEVER copy parallel from another course
-       Even if "STRUKDAT K2, ORKOM KUIS" are in same message
-       → Strukdat=k2, ORKOM=null (NOT k2!)
+5. course_hints: Array of courses with PER-COURSE deadline types
+   
+   For EACH course, determine:
+   
+   a) parallel_code: Same rules as before (explicit > history > null)
+   
+   b) deadline_type: **IMPORTANT - ANALYZE PER COURSE**
+      - explicit: Course mentions YYYY-MM-DD or specific date
+        Examples: "STRUKDAT TUGAS deadline 5 Januari"
+      
+      - next_meeting: Course mentions "sebelum pertemuan", "before class", "before next meeting"
+        Examples: "STRUKDAT sebelum pertemuan berikutnya"
+      
+      - relative: Course mentions "besok", "lusa", "minggu depan", "tomorrow"
+        Examples: "ORKOM KUIS deadline Lusa"
+      
+      - unknown: No deadline mentioned for this specific course
+   
+   CRITICAL: Each course gets its OWN deadline_type based on what's said about THAT course
    
    Examples:
    
-   1. "STRUKDAT K2 TUGAS, ORKOM KUIS"
-      → {{"parallel_code":null,"course_hints":[
-           {{"course_name":"Struktur Data","parallel_code":"k2"}},
-           {{"course_name":"Organisasi dan Arsitektur Komputer","parallel_code":null}}
-         ]}}
-      Reason: Only STRUKDAT has explicit K2, ORKOM has NOTHING
+   1. "STRUKDAT K2 TUGAS sebelum pertemuan, ORKOM KUIS deadline Lusa"
+      → course_hints: [
+           {{"course_name":"Struktur Data","parallel_code":"k2","deadline_type":"next_meeting"}},
+           {{"course_name":"Organisasi dan Arsitektur Komputer","parallel_code":null,"deadline_type":"relative"}}
+         ]
+      Reason: STRUKDAT has "sebelum pertemuan" → next_meeting
+              ORKOM has "deadline Lusa" → relative
    
-   2. "PEMROG K1, KALKULUS K1, FISIKA K1"
-      → {{"parallel_code":"k1","course_hints":[
-           {{"course_name":"Pemrograman","parallel_code":"k1"}},
-           {{"course_name":"Kalkulus","parallel_code":"k1"}},
-           {{"course_name":"Fisika","parallel_code":"k1"}}
-         ]}}
-      Reason: ALL three explicitly K1
+   2. "PEMROG K1 TUGAS besok, KALKULUS K1 TUGAS besok"
+      → course_hints: [
+           {{"course_name":"Pemrograman","parallel_code":"k1","deadline_type":"relative"}},
+           {{"course_name":"Kalkulus","parallel_code":"k1","deadline_type":"relative"}}
+         ]
+      Reason: Both mention "besok" → relative
    
-   3. "PEMROG TUGAS" + history: "Pemrograman: k2 (5x)"
-      → {{"parallel_code":"k2","course_hints":[
-           {{"course_name":"Pemrograman","parallel_code":"k2"}}
-         ]}}
-      Reason: Single course, use history
+   3. "STRUKDAT TUGAS 15, ORKOM QUIZ 3 sebelum pertemuan"
+      → course_hints: [
+           {{"course_name":"Struktur Data","parallel_code":null,"deadline_type":"unknown"}},
+           {{"course_name":"Organisasi dan Arsitektur Komputer","parallel_code":null,"deadline_type":"next_meeting"}}
+         ]
+      Reason: STRUKDAT has no deadline mention → unknown
+              ORKOM mentions "sebelum pertemuan" → next_meeting
 
 OUTPUT: JSON only, no markdown."#,
         message,
@@ -292,24 +307,22 @@ fn calculate_course_hints(
     let now = Utc::now().with_timezone(&gmt7);
     let today = now.date_naive();
     
-    println!("🕐 Current time (GMT+7): {}", now.format("%Y-%m-%d %H:%M:%S"));
-    println!("📅 Today's date: {}", today);
-    println!("🔍 Deadline type: {}", hints.deadline_type);
-    
     for ai_course_hint in &hints.course_hints {
-        let deadline_hint = match hints.deadline_type.as_str() {
+        // Use PER-COURSE deadline type instead of global
+        println!("│");
+        println!("│ 🎯 Processing: {}", ai_course_hint.course_name);
+        println!("│    Parallel: {:?}", ai_course_hint.parallel_code);
+        println!("│    Deadline Type: {}", ai_course_hint.deadline_type);
+        
+        let deadline_hint = match ai_course_hint.deadline_type.as_str() {
             "next_meeting" => {
-                println!("🎯 Calculating next meeting for: {}", ai_course_hint.course_name);
-                
-                // Check if we have a valid parallel code
                 let has_valid_parallel = ai_course_hint.parallel_code
                     .as_ref()
                     .map(|p| p != "all" && p != "null" && !p.is_empty())
                     .unwrap_or(false);
                 
                 if !has_valid_parallel {
-                    println!("  ⚠️ No valid parallel code - will need clarification");
-                    println!("  ⏭️ Skipping deadline hint (parallel needed for schedule lookup)");
+                    println!("│    ⏭️  Result: Skipped (needs parallel for schedule)");
                     None
                 } else {
                     let parallel = ai_course_hint.parallel_code.as_ref().unwrap();
@@ -318,28 +331,25 @@ fn calculate_course_hints(
                         .get_next_meeting_with_time(&ai_course_hint.course_name, parallel, today)
                     {
                         let hint = format!("{} {}", meeting_date, meeting_time);
-                        println!("  ✅ Found next meeting: {} (parallel: {})", hint, parallel);
+                        println!("│    ✅ Result: Next meeting at {}", hint);
                         Some(hint)
                     } else {
-                        println!("  ⚠️ No schedule found for {} with parallel {}", 
-                            ai_course_hint.course_name, parallel);
-                        println!("  ⏭️ Will need clarification for deadline");
+                        println!("│    ⏭️  Result: No schedule found");
                         None
                     }
                 }
             },
             "relative" => {
-                println!("📆 Calculating relative deadline for: {}", ai_course_hint.course_name);
                 let hint = format!("{} 23:59", today + Duration::days(1));
-                println!("  ℹ️ Relative hint (tomorrow EOD): {}", hint);
+                println!("│    ✅ Result: Tomorrow EOD ({})", hint);
                 Some(hint)
             },
             "explicit" => {
-                println!("📅 Explicit deadline in message - main AI will parse it");
+                println!("│    📅 Result: Explicit date (main AI will parse)");
                 None
             },
             _ => {
-                println!("  ⏭️ Skipping hint calculation (type: {})", hints.deadline_type);
+                println!("│    ❓ Result: Unknown type (no hint generated)");
                 None
             }
         };
@@ -348,9 +358,10 @@ fn calculate_course_hints(
             course_name: ai_course_hint.course_name.clone(),
             parallel_code: ai_course_hint.parallel_code.clone(),
             deadline_hint,
+            deadline_type: ai_course_hint.deadline_type.clone(), // Store per-course type
         });
     }
     
-    println!("✅ Generated {} course hints\n", course_hints.len());
+    //println!("│\n│ ✅ Generated {} course hints\n│", course_hints.len());
     course_hints
 }
