@@ -54,12 +54,12 @@ pub async fn extract_with_ai(
                     .join(", ")
             };
             
-            println!("│ ✅ Context  : Parallel={:?} ({}), Courses=[{}]",
+            println!("│\n│ ✅ Context  : Parallel={:?} ({}), Courses=[{}]",
                 ctx.parallel_code, ctx.parallel_source, courses_summary);
             Some(ctx)
         }
         Err(e) => {
-            eprintln!("│ ⚠️  Context failed: {}", e);
+            eprintln!("│\n│ ⚠️  Context failed: {}", e);
             None
         }
     };
@@ -659,9 +659,12 @@ pub async fn check_duplicate_assignment(
             if result.is_duplicate && result.confidence == "high" {
                 if let Some(id_str) = result.matched_assignment_id {
                     if let Ok(uuid) = Uuid::parse_str(&id_str) {
+                        println!("🔍 Duplicate detected: {} - Reason: {}", title, result.reason);
                         return Ok(Some(uuid));
                     }
                 }
+            } else if result.is_duplicate {
+                println!("⚠️  Low confidence duplicate: {} - Reason: {}", title, result.reason);
             }
             
             return Ok(None);

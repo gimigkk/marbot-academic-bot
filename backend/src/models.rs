@@ -250,10 +250,16 @@ pub struct AssignmentWithCourse {
     pub parallel_code: Option<String>,
     pub title: String,
     pub description: Option<String>,
-    pub deadline: DateTime<Utc>,
+    pub deadline: Option<DateTime<Utc>>,
     pub message_ids: Vec<String>,   
     pub sender_id: Option<String>, 
     pub is_completed: bool,
+}
+
+impl AssignmentWithCourse {
+    pub fn deadline_is_missing(&self) -> bool {
+        self.deadline.is_none()
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -275,10 +281,4 @@ pub struct WaLog {
 pub struct NewWaLog {
     pub event_type: Option<String>,
     pub payload: Option<Value>,
-}
-
-impl AssignmentWithCourse {
-    pub fn deadline_is_missing(&self) -> bool {
-        false
-    }
 }

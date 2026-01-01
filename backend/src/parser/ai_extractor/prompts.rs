@@ -160,12 +160,11 @@ Signals:
 Extract each as separate assignment with ALL fields (course, title, deadline, description, parallel)
 
 **DEADLINE HANDLING:**
-- If deadline hint is provided in RESOLVED CONTEXT with TIME (HH:MM), USE IT EXACTLY
-- Example: "2026-01-06 08:00" means deadline is at 8:00 AM on Jan 6
-- If deadline hint shows "23:59", it's end of day
-- For "pertemuan berikutnya" / "before next meeting": Use the lecture start time from hint
-- NEVER change the time component from hints
-- Only use "23:59" if calculating relative dates yourself (besok, lusa, etc)
+- **If no deadline info exists in EITHER the message OR hints → deadline MUST be NULL**
+- If deadline hint is provided in RESOLVED CONTEXT, you MAY use it if appropriate
+- For dates WITHOUT specific time (e.g., "besok", "deadline Jumat") → USE 23:59 (end of day)
+- For dates WITH specific time (e.g., "jam 10 pagi") → USE that time
+- NEVER hallucinate dates when none are mentioned
 
 NEW_ASSIGNMENT signals:
 - "ada tugas baru", "new assignment", clear announcement
@@ -208,12 +207,12 @@ MULTIPLE_ASSIGNMENTS:
   "type": "multiple_assignments",
   "assignments": [
     {{ "course_name": "Pemrograman", "title": "LKP 14", "deadline": "2025-12-31 08:00", "description": "Programming lab assignment 14", "parallel_code": "k1" }},
-    {{ "course_name": "Kalkulus", "title": "Problem Set 5", "deadline": "2026-01-02 10:00", "description": "Calculus problem set 5", "parallel_code": null }}
+    {{ "course_name": "Kalkulus", "title": "Problem Set 5", "deadline": null, "description": "Calculus problem set 5", "parallel_code": null }}
   ]
 }}
 
 NEW_ASSIGNMENT (single):
-{{"type":"assignment_info","course_name":"Pemrograman","title":"LKP 14","deadline":"2025-12-31 08:00","description":"Programming lab assignment 14","parallel_code":"k1"}}
+{{"type":"assignment_info","course_name":"Pemrograman","title":"LKP 14","deadline":"2025-12-31 23:59","description":"Programming lab assignment 14","parallel_code":"k1"}}
 
 UPDATE_ASSIGNMENT:
 {{"type":"assignment_update","reference_keywords":["CourseName","identifier"],"changes":"what changed","new_deadline":"2025-12-30 14:00","new_title":null,"new_description":null,"parallel_code":"all"}}
@@ -227,7 +226,7 @@ PRINCIPLES
 2. **Semantic over literal**: Understand intent, not just keywords
 3. **Context matters**: Use DB and RESOLVED CONTEXT hints
 4. **ALWAYS GENERATE DESCRIPTIONS**: Never leave description field empty
-5. **Deadline format**: YYYY-MM-DD HH:MM (use provided time from hints)
+5. **Deadline format**: YYYY-MM-DD HH:MM (use provided time from hints, 23:59 for dates without time, NULL if no info)
 6. **Confidence-based**: High confidence → classify; Low → UNRECOGNIZED
 7. **Course boundaries**: Never match updates across different courses
 8. **When uncertain**: NEW > UPDATE (avoid bad matches); Classification > UNRECOGNIZED (avoid noise)

@@ -27,6 +27,11 @@ pub fn identify_missing_fields(assignment: &AssignmentWithCourse) -> Vec<String>
         missing.push("title".to_string());
     }
     
+    // Check deadline - use the existing method from AssignmentWithCourse
+    if assignment.deadline_is_missing() {
+        missing.push("deadline".to_string());
+    }
+    
     // Check parallel code
     if assignment.parallel_code.is_none() {
         missing.push("parallel_code".to_string());
@@ -84,6 +89,7 @@ pub fn generate_clarification_message(
         Contoh jawaban:\n\
         ```\n\
         Title: LKP 14 - Recursion\n\
+        Deadline: 2026-01-10 23:59\n\
         Parallel: K1\n\
         Description: Soal ada di slide minggu ke-7\n\
         ```\n\
@@ -312,5 +318,13 @@ mod tests {
         let result = parse_clarification_response(text);
         
         assert_eq!(result.get("parallel_code"), Some(&"k2".to_string()));
+    }
+    
+    #[test]
+    fn test_deadline_detection() {
+        let text = "Deadline: 2026-01-15 23:59";
+        let result = parse_clarification_response(text);
+        
+        assert_eq!(result.get("deadline"), Some(&"2026-01-15 23:59".to_string()));
     }
 }
