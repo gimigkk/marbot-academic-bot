@@ -250,15 +250,15 @@ async fn webhook(
 
 
     // Terminal logging
-    println!("📨 Message from: {}", chat_id);
-    println!("   Sender: {} ({})", sender_name, sender_phone);
-    println!("   Body: {}", payload.payload.body);
-    println!("   Type: {:?}", message_type);
+    println!("\n| 📨 Message from: {}", chat_id);
+    println!("|  Sender: {} ({})", sender_name, sender_phone);
+    println!("|  Body: {}", payload.payload.body);
+    println!("|  Type: {:?}\n", message_type);
 
-    println!("🔍 DEBUG: Has quoted message? {:?}", payload.payload.get_quoted_message().is_some());
-if let Some(quoted) = payload.payload.get_quoted_message() {
-    println!("🔍 DEBUG: Quoted text preview: '{}'", &quoted.text[..quoted.text.len().min(100)]);
-}
+    // println!("🔍 DEBUG: Has quoted message? {:?}", payload.payload.get_quoted_message().is_some());
+    // if let Some(quoted) = payload.payload.get_quoted_message() {
+    //     println!("🔍 DEBUG: Quoted text preview: '{}'", &quoted.text[..quoted.text.len().min(100)]);
+    // }
 
     // ============= CLARIFICATION HANDLER =============
     if let Some(quoted) = payload.payload.get_quoted_message() {
@@ -774,7 +774,7 @@ async fn handle_single_assignment(
                 .unwrap_or_default();
             
             if !existing_assignments.is_empty() {
-                let match_start = std::time::Instant::now();
+                //let match_start = std::time::Instant::now();
                 
                 let match_result = check_duplicate_assignment(
                     &title_clone,
@@ -785,7 +785,7 @@ async fn handle_single_assignment(
                     &course_map,
                 ).await;
                 
-                let match_duration = match_start.elapsed();
+                //let match_duration = match_start.elapsed();
                 
                 match &match_result {
                     Ok(Some(id)) => {
@@ -817,8 +817,8 @@ async fn handle_single_assignment(
                         return;
                     }
                     Ok(None) => {
-                        println!("✨ NEW: {} (checked {} assignments in {:.2?})", 
-                            title_clone, existing_assignments.len(), match_duration);
+                        // println!("✨ NEW: {} (checked {} assignments in {:.2?})", 
+                        //     title_clone, existing_assignments.len(), match_duration);
                     }
                     Err(e) => {
                         println!("⚠️  Duplicate check failed: {} - creating new", e);
