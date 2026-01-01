@@ -1,4 +1,4 @@
-// backend/src/scheduler.rs
+// backend/src/scheduler.rs - Fixed for Optional Deadline
 use tokio_cron_scheduler::{Job, JobScheduler, JobSchedulerError};
 use sqlx::PgPool;
 use crate::database::crud;
@@ -45,11 +45,10 @@ async fn run_reminder_task(pool: PgPool, greeting: &str) -> Result<(), Box<dyn s
         return Ok(());
     }
 
-    // Format pesan: sama gaya kartu rapi
     let mut message = String::new();
     message.push_str(greeting);
     message.push_str("\n*Pengingat Tugas*\n\n");
-    message.push_str("Keterangan:\n🔴 Deadline 0–2 hari\n🟢 Deadline > 2 hari\n\n");
+    message.push_str("Keterangan:\n🔴 Deadline 0–2 hari\n🟢 Deadline > 2 hari\n⚪ Belum ada deadline\n\n");
 
     for (i, a) in assignments.iter().enumerate() {
         let status = status_dot(&a.deadline);
@@ -113,12 +112,19 @@ async fn run_reminder_task(pool: PgPool, greeting: &str) -> Result<(), Box<dyn s
     Ok(())
 }
 
-/// 🔴 deadline 0–2 hari lagi, 🟢 setelahnya
-fn status_dot(deadline_utc: &DateTime<Utc>) -> &'static str {
-    if days_left(deadline_utc) <= 2 {
-        "🔴"
-    } else {
-        "🟢"
+/// Status indicator for deadline
+#[allow(non_snake_case)]
+fn status_dot(deadline: &Option<DateTime<Utc>>) -> &'static str {
+    match deadline {
+        Some(d) => {
+            let days = days_left(d);
+            if days <= 2 {
+                "🔴"
+            } else {
+                "🟢"
+            }
+        }
+        None => "⚪" // No deadline
     }
 }
 
@@ -128,20 +134,26 @@ fn days_left(deadline_utc: &DateTime<Utc>) -> i64 {
     (due - now).num_days()
 }
 
-fn humanize_deadline(deadline_utc: &DateTime<Utc>) -> String {
-    let delta = days_left(deadline_utc);
-    let due = deadline_utc.with_timezone(&Local).date_naive();
-    let date_str = format_date_id(due);
+#[allow(non_snake_case)]
+fn humanize_deadline(deadline: &Option<DateTime<Utc>>) -> String {
+    match deadline {
+        Some(deadline_utc) => {
+            let delta = days_left(deadline_utc);
+            let due = deadline_utc.with_timezone(&Local).date_naive();
+            let date_str = format_date_id(due);
 
-    match delta {
-        0 => format!("Hari ini ({})", date_str),
-        1 => format!("Besok ({})", date_str),
-        // Logic untuk H-2, H-3, dst. digabung di sini
-        d if d >= 2 => format!("H-{} ({})", d, date_str), 
-        -1 => format!("Kemarin ({})", date_str),
-        d => format!("lewat {} hari ({})", d.abs(), date_str),
+            match delta {
+                0 => format!("Hari ini ({})", date_str),
+                1 => format!("Besok ({})", date_str),
+                d if d >= 2 => format!("H-{} ({})", d, date_str), 
+                -1 => format!("Kemarin ({})", date_str),
+                d => format!("lewat {} hari ({})", d.abs(), date_str),
+            }
+        }
+        None => "⚠️ Belum ada deadline".to_string()
     }
 }
+
 fn format_date_id(date: NaiveDate) -> String {
     let day = date.day();
     let month = match date.month() {

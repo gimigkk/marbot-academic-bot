@@ -56,9 +56,10 @@ pub async fn build_context(
         None
     };
     
-    // Global deadline_type is now just for backward compatibility
-    // Use the first course's type, or "unknown" if multiple different types
-    let global_deadline_type = if course_hints.len() == 1 {
+    // Compute global deadline_type from per-course types (for backward compatibility)
+    let global_deadline_type = if course_hints.is_empty() {
+        "unknown".to_string()
+    } else if course_hints.len() == 1 {
         course_hints[0].deadline_type.clone()
     } else {
         let types: std::collections::HashSet<_> = course_hints
@@ -127,7 +128,6 @@ struct AIHints {
     parallel_code: Option<String>,
     parallel_confidence: f32,
     parallel_source: String,
-    deadline_type: String, // Global fallback
     course_hints: Vec<AICourseHint>,
 }
 
@@ -168,6 +168,7 @@ ABSOLUTE RULES (NEVER VIOLATE):
 3. "PEMROG K2, GKV KUIS" → ONLY Pemrog gets K2, GKV gets null (NOT K2!)
 4. "STRUKDAT K2, ORKOM KUIS" → ONLY Strukdat gets K2, ORKOM gets null (NOT K2!)
 5. Do NOT infer parallels from nearby courses - treat each independently
+6. **Do NOT include courses not mentioned in the message**
 
 TASK: Answer these questions in JSON:
 
@@ -179,10 +180,7 @@ TASK: Answer these questions in JSON:
 
 3. parallel_source: "explicit"|"sender_history"|"unknown"
 
-4. deadline_type: Global fallback (use if all courses have same type)
-   - "explicit"|"next_meeting"|"relative"|"unknown"
-
-5. course_hints: Array of courses with PER-COURSE deadline types
+4. course_hints: Array of courses with PER-COURSE deadline types
    
    For EACH course, determine:
    
