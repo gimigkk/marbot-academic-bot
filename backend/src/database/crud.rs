@@ -135,7 +135,7 @@ pub async fn get_last_completed_assignment(
             a.parallel_code,
             a.title,
             a.description,  
-            a.deadline as "deadline!",
+            a.deadline,  -- Now optional
             a.message_ids,
             a.sender_id,
             true as "is_completed!"
@@ -245,14 +245,17 @@ pub async fn get_active_assignments_sorted(pool: &PgPool) -> Result<Vec<Assignme
             a.parallel_code,
             a.title,
             a.description,  
-            a.deadline as "deadline!",
+            a.deadline,  -- Now optional (can be NULL)
             a.message_ids,
             a.sender_id,
             false as "is_completed!" -- Default false untuk scheduler
         FROM assignments a
         JOIN courses c ON a.course_id = c.id
-        WHERE a.deadline >= $1 AND a.deadline IS NOT NULL
-        ORDER BY a.deadline ASC, c.name ASC
+        WHERE a.deadline IS NULL OR a.deadline >= $1
+        ORDER BY 
+            CASE WHEN a.deadline IS NULL THEN 0 ELSE 1 END,  -- NULL deadlines first
+            a.deadline ASC NULLS FIRST,  -- Then sort by deadline
+            c.name ASC
         "#,
         now
     )
@@ -264,7 +267,6 @@ pub async fn get_active_assignments_sorted(pool: &PgPool) -> Result<Vec<Assignme
     Ok(assignments)
 }
 
-/// ✅ TODO :(memperhatikan status DONE user)
 pub async fn get_active_assignments_for_user(
     pool: &PgPool, 
     user_id: &str
@@ -283,7 +285,7 @@ pub async fn get_active_assignments_for_user(
             a.parallel_code,
             a.title,
             a.description,  
-            a.deadline as "deadline!",
+            a.deadline,  -- Now optional (can be NULL)
             a.message_ids,
             a.sender_id,
             -- ✅ Check if THIS user has completed it
@@ -294,8 +296,11 @@ pub async fn get_active_assignments_for_user(
             ) as "is_completed!" 
         FROM assignments a
         JOIN courses c ON a.course_id = c.id
-        WHERE a.deadline >= $1 AND a.deadline IS NOT NULL
-        ORDER BY a.deadline ASC, c.name ASC
+        WHERE a.deadline IS NULL OR a.deadline >= $1
+        ORDER BY 
+            CASE WHEN a.deadline IS NULL THEN 0 ELSE 1 END,  -- NULL deadlines at top
+            a.deadline ASC NULLS FIRST,
+            c.name ASC
         "#,
         now,
         user_id
@@ -307,7 +312,12 @@ pub async fn get_active_assignments_for_user(
     
     // Debug: Print completion status
     for (i, a) in assignments.iter().enumerate() {
-        println!("  {}. {} - Completed: {}", i + 1, a.title, a.is_completed);
+        let deadline_str = match a.deadline {
+            Some(d) => d.to_string(),
+            None => "⚠️ NO DEADLINE".to_string()
+        };
+        println!("  {}. {} - Deadline: {} - Completed: {}", 
+            i + 1, a.title, deadline_str, a.is_completed);
     }
 
     println!("");
@@ -425,21 +435,6 @@ pub async fn get_all_courses_formatted(pool: &PgPool) -> Result<String> {
 }
 
 /// Check if assignment already exists by message_id
-pub async fn get_assignment_by_message_id(
-    pool: &PgPool,
-    message_id: &str,
-) -> Result<Option<Assignment>> {
-    let assignment = sqlx::query_as::<_, Assignment>(
-        "SELECT * FROM assignments WHERE $1 = ANY(message_ids)"
-    )
-    .bind(message_id)
-    .fetch_optional(pool)
-    .await?;
-
-    Ok(assignment)
-}
-
-/// Get assignment with course info by assignment ID (for clarification checks)
 pub async fn get_assignment_with_course_by_id(
     pool: &PgPool,
     assignment_id: Uuid,
@@ -453,7 +448,7 @@ pub async fn get_assignment_with_course_by_id(
             a.parallel_code,
             a.title,
             a.description,  
-            a.deadline as "deadline!",
+            a.deadline,  -- Now optional
             a.message_ids,
             a.sender_id,
             false as "is_completed!"
@@ -468,6 +463,7 @@ pub async fn get_assignment_with_course_by_id(
     
     Ok(assignment)
 }
+
 
 /// Find assignments by keywords (for update detection) - IMPROVED VERSION
 pub async fn find_assignment_by_keywords(
@@ -657,6 +653,7 @@ pub async fn delete_assignment(
 
 /// Parse deadline string with TIMESTAMP support (YYYY-MM-DD HH:MM)
 /// Falls back to DATE format (YYYY-MM-DD) for backward compatibility
+#[allow(non_snake_case)]
 pub fn parse_deadline(deadline_str: &str) -> Result<DateTime<Utc>, String> {
     let deadline_str = deadline_str.trim();
     

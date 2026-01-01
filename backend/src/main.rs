@@ -590,7 +590,6 @@ async fn handle_ai_classification(
         } => {
             let pool_clone = pool.clone();
             let msg_id = message_id.clone();
-            let sender_clone = sender_id.clone();
             let debug_clone = debug_group_id.clone();
 
             tokio::spawn(async move {
@@ -615,9 +614,7 @@ async fn handle_ai_classification(
                 
                 // ===== SMART UPDATE: Check for re-announcement =====
                 if let Some(ref title) = new_title {
-                    if let (Some(cid), Some(cname)) = (course_id, &course_name) {
-                        let match_start = std::time::Instant::now();
-                        
+                    if let (Some(_course_id), Some(cname)) = (course_id, &course_name) {
                         let dup_check = check_duplicate_assignment(
                             title,
                             new_description.as_deref().unwrap_or(""),
