@@ -774,7 +774,7 @@ async fn handle_single_assignment(
                 .unwrap_or_default();
             
             if !existing_assignments.is_empty() {
-                let match_start = std::time::Instant::now();
+                //let match_start = std::time::Instant::now();
                 
                 let match_result = check_duplicate_assignment(
                     &title_clone,
@@ -785,7 +785,7 @@ async fn handle_single_assignment(
                     &course_map,
                 ).await;
                 
-                let match_duration = match_start.elapsed();
+                //let match_duration = match_start.elapsed();
                 
                 match &match_result {
                     Ok(Some(id)) => {
