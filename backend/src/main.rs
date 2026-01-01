@@ -255,10 +255,20 @@ async fn webhook(
     println!("   Body: {}", payload.payload.body);
     println!("   Type: {:?}", message_type);
 
+    println!("🔍 DEBUG: Has quoted message? {:?}", payload.payload.get_quoted_message().is_some());
+if let Some(quoted) = payload.payload.get_quoted_message() {
+    println!("🔍 DEBUG: Quoted text preview: '{}'", &quoted.text[..quoted.text.len().min(100)]);
+}
+
     // ============= CLARIFICATION HANDLER =============
     if let Some(quoted) = payload.payload.get_quoted_message() {
-        if quoted.text.contains("⚠️ *PERLU KLARIFIKASI*") {
+        // Check if this is a reply to EITHER the info message OR the template message
+        let is_clarification_reply = quoted.text.contains("⚠️ *PERLU KLARIFIKASI*") 
+            || quoted.text.contains("ID:") && quoted.text.contains("```");
+        
+        if is_clarification_reply {
             println!("📝 Clarification response detected from {}", sender_phone);
+            println!("🔍 DEBUG: Quoted text: '{}'", &quoted.text[..quoted.text.len().min(200)]);
             
             if let Some(assignment_id) = clarification::extract_assignment_id_from_message(&quoted.text) {
                 println!("🔍 Updating assignment: {}", assignment_id);
@@ -275,10 +285,11 @@ async fn webhook(
                                     _Cukup isi field yang kurang saja!_";
                     
                     if let Err(e) = send_reply(chat_id, error_msg).await {
-                         eprintln!("❌ Failed to send error: {}", e);
+                        eprintln!("❌ Failed to send error: {}", e);
                     }
                     return StatusCode::OK;
                 }
+
 
                 let new_deadline = updates.get("deadline").and_then(|d| crud::parse_deadline(d).ok());
                 let new_title = updates.get("title").cloned();
@@ -313,43 +324,58 @@ async fn webhook(
                     new_parallel.clone(),
                     None,
                 ).await {
-                    Ok(updated) => {
+                    Ok(_updated) => {
                         if let Some(cid) = course_id {
-                             if let Err(e) = sqlx::query("UPDATE assignments SET course_id = $1 WHERE id = $2")
+                            if let Err(e) = sqlx::query("UPDATE assignments SET course_id = $1 WHERE id = $2")
                                 .bind(cid).bind(assignment_id).execute(&state.pool).await {
                                     eprintln!("❌ Failed to update course_id: {}", e);
                                 }
                         }
                         
-                        let display_course = if let Some(cn) = updates.get("course_name") { cn.to_string() } else { "Unknown".to_string() };
-                        
-                        let response = format!(
-                            "✅ *KLARIFIKASI TERSIMPAN*\n\
-                            \n\
-                            📝 *{}*\n\
-                            📚 {}\n\
-                            ⏰ Deadline: {}\n\
-                            🧩 Parallel: {}\n\
-                            \n\
-                            _Terima kasih atas klarifikasinya!_",
-                            updated.title,
-                            display_course,
-                            updated.deadline.map(|d| d.format("%Y-%m-%d").to_string()).unwrap_or("-".to_string()),
-                            updated.parallel_code.as_deref().unwrap_or("Tidak ditentukan")
-                        );
-                        
-                        if let Err(e) = send_reply(chat_id, &response).await {
-                            eprintln!("❌ Failed to send confirmation: {}", e);
+                        // ✅ FETCH THE COMPLETE UPDATED ASSIGNMENT
+                        if let Ok(Some(full_assignment)) = crud::get_assignment_with_course_by_id(&state.pool, assignment_id).await {
+                            let response = format!(
+                                "✅ *KLARIFIKASI TERSIMPAN*\n\
+                                \n\
+                                📝 *{}*\n\
+                                📚 {}\n\
+                                📄 {}\n\
+                                ⏰ Deadline: {}\n\
+                                🧩 Parallel: {}\n\
+                                \n\
+                                _Terima kasih atas klarifikasinya!_",
+                                full_assignment.title,
+                                full_assignment.course_name,
+                                full_assignment.description.as_deref().unwrap_or("(tidak ada deskripsi)"),
+                                full_assignment.deadline
+                                    .map(|d| d.format("%Y-%m-%d %H:%M").to_string())
+                                    .unwrap_or("(belum ditentukan)".to_string()),
+                                full_assignment.parallel_code.as_deref().unwrap_or("(belum ditentukan)")
+                            );
+                            
+                            if let Err(e) = send_reply(chat_id, &response).await {
+                                eprintln!("❌ Failed to send confirmation: {}", e);
+                            }
+                        } else {
+                            // Fallback if fetch fails
+                            let response = "✅ *KLARIFIKASI TERSIMPAN*\n\n_Terima kasih atas klarifikasinya!_";
+                            let _ = send_reply(chat_id, response).await;
                         }
                     }
                     Err(e) => {
                         let error_msg = format!("❌ Gagal menyimpan: {}", e);
-                         if let Err(e) = send_reply(chat_id, &error_msg).await {
+                        if let Err(e) = send_reply(chat_id, &error_msg).await {
                             eprintln!("❌ Failed to send error: {}", e);
                         }
                     }
                 }
+
                 return StatusCode::OK;
+            }
+            
+            else {
+                println!("⚠️  DEBUG: Could not extract assignment ID from quoted message");  // ADD THIS LINE
+                return StatusCode::OK;  // Still stop processing even if ID extraction fails
             }
         }
     }
@@ -831,8 +857,16 @@ async fn handle_single_assignment(
                         let missing = clarification::identify_missing_fields(&full_assign);
                         if !missing.is_empty() {
                             if let Some(debug_id) = &debug_group_id {
-                                let msg = clarification::generate_clarification_message(&full_assign, &missing);
-                                let _ = send_reply(debug_id, &msg).await;
+                                let (info_msg, template_msg) = clarification::generate_clarification_messages(&full_assign, &missing);
+                                
+                                // Send first message (info)
+                                let _ = send_reply(debug_id, &info_msg).await;
+                                
+                                // Small delay to ensure correct ordering
+                                tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+                                
+                                // Send second message (template)
+                                let _ = send_reply(debug_id, &template_msg).await;
                             }
                             return;
                         }

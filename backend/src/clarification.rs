@@ -57,49 +57,75 @@ pub fn identify_missing_fields(assignment: &AssignmentWithCourse) -> Vec<String>
     missing
 }
 
-/// Generate clarification message text (WhatsApp-friendly formatting)
-pub fn generate_clarification_message(
+pub fn generate_clarification_messages(
     assignment: &AssignmentWithCourse,
     missing_fields: &[String]
-) -> String {
+) -> (String, String) {
     let field_list = missing_fields.iter().map(|f| match f.as_str() {
         "course_name" => "📚 Nama Mata Kuliah",
-        "title" => "📝 Judul Tugas Lengkap",
+        "title" => "📝 Judul Tugas",
         "deadline" => "⏰ Deadline",
         "parallel_code" => "🧩 Kode Paralel",
-        "description" => "📄 Deskripsi/Keterangan",
+        "description" => "📄 Deskripsi",
         _ => "❓ Unknown"
     }).collect::<Vec<_>>().join("\n");
     
-    // Simpler, cleaner format that works better in WhatsApp
-    format!(
+    // Show current description if available
+    let desc_preview = assignment.description
+        .as_ref()
+        .map(|d| format!("📄 {}", d))
+        .unwrap_or_else(|| "📄 (belum ada deskripsi)".to_string());
+    
+    // First message: Info about the assignment and what's missing
+    let info_message = format!(
         "⚠️ *PERLU KLARIFIKASI*\n\
         \n\
         Tugas terdeteksi tapi ada info yang kurang:\n\
         \n\
         📌 *{}* - {}\n\
-        🆔 ID: {}\n\
+        {}\n\
         \n\
         *Info yang dibutuhkan:*\n\
         {}\n\
         \n\
-        💡 *Cara reply:*\n\
-        Reply pesan ini, lalu tulis info yang kurang.\n\
+        💡 Pesan berikutnya adalah template yang bisa langsung kamu copy & edit!\n\
         \n\
-        Contoh jawaban:\n\
-        ```\n\
-        Title: LKP 14 - Recursion\n\
-        Deadline: 2026-01-10 23:59\n\
-        Parallel: K1\n\
-        Description: Soal ada di slide minggu ke-7\n\
-        ```\n\
-        \n\
-        _(Cukup isi field yang kurang saja!)_",
+        `ID: {}`",  
         assignment.course_name,
         assignment.title,
+        desc_preview,
+        field_list,
+        assignment.id 
+    );
+    
+    // Second message: ONLY show missing fields in template
+    let template_fields = missing_fields.iter().map(|f| match f.as_str() {
+        "course_name" => "Course: ",
+        "title" => "Title: ",
+        "deadline" => "Deadline: YYYY-MM-DD HH:MM",
+        "parallel_code" => "Parallel: ",
+        "description" => "Description: ",
+        _ => ""
+    }).filter(|s| !s.is_empty()).collect::<Vec<_>>().join("\n");
+    
+    let template_message = format!(
+        "```\nID: {}\n{}\n```\n\
+        \n\
+        _(Reply pesan ini dengan info yang kurang)_",
         assignment.id,
-        field_list
-    )
+        template_fields
+    );
+    
+    (info_message, template_message)
+}
+
+/// Legacy function for backward compatibility
+pub fn generate_clarification_message(
+    assignment: &AssignmentWithCourse,
+    missing_fields: &[String]
+) -> String {
+    let (info, template) = generate_clarification_messages(assignment, missing_fields);
+    format!("{}\n\n{}", info, template)
 }
 
 /// Parse clarification response from user reply
@@ -189,7 +215,7 @@ fn detect_parallel_code(text: &str) -> Option<String> {
         return Some("all".to_string());
     }
     
-    // Look for explicit codes (K1, K2, K3, P1, P2, P3)
+    // Look for explicit codes (K1, K2, K3, P1, P2, P3, R1, R2, R3)  // ✅ Added R1-R3
     let words: Vec<&str> = text.split_whitespace().collect();
     for word in &words {
         let upper = word.to_uppercase();
@@ -268,24 +294,35 @@ fn is_valid_parallel_code(code: &str) -> bool {
     let prefix = chars[0];
     let number = chars[1];
     
-    (prefix == 'K' || prefix == 'P') && ('1'..='3').contains(&number)
+    (prefix == 'K' || prefix == 'P' || prefix == 'R') && ('1'..='4').contains(&number)
 }
 
 /// Extract assignment ID from clarification message
 pub fn extract_assignment_id_from_message(text: &str) -> Option<Uuid> {
-    // Look for pattern: "ID: uuid"
-    for line in text.lines() {
-        if line.contains("ID:") || line.contains("id:") {
+    // Remove all backticks first
+    let cleaned_text = text.replace('`', "");
+    
+    // Look for pattern: "ID: uuid" or "id: uuid"
+    for line in cleaned_text.lines() {
+        let line_lower = line.to_lowercase();
+        if line_lower.contains("id:") {
             // Try to find UUID after "ID:"
-            if let Some(id_part) = line.split("ID:").nth(1) {
-                // Clean up the string and try to parse
-                let cleaned = id_part.trim().replace('`', "");
-                if let Ok(uuid) = Uuid::parse_str(cleaned.trim()) {
+            if let Some(id_part) = line.split(':').nth(1) {
+                let id_str = id_part.trim();
+                if let Ok(uuid) = Uuid::parse_str(id_str) {
                     return Some(uuid);
                 }
             }
         }
     }
+    
+    // Fallback: Look for any UUID pattern in the entire text
+    for word in cleaned_text.split_whitespace() {
+        if let Ok(uuid) = Uuid::parse_str(word) {
+            return Some(uuid);
+        }
+    }
+    
     None
 }
 
