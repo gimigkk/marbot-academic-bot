@@ -268,10 +268,10 @@ async fn webhook(
         
         if is_clarification_reply {
             println!("📝 Clarification response detected from {}", sender_phone);
-            println!("🔍 DEBUG: Quoted text: '{}'", &quoted.text[..quoted.text.len().min(200)]);
+            //println!("🔍 DEBUG: Quoted text: '{}'", &quoted.text[..quoted.text.len().min(200)]);
             
             if let Some(assignment_id) = clarification::extract_assignment_id_from_message(&quoted.text) {
-                println!("🔍 Updating assignment: {}", assignment_id);
+                //println!("🔍 Updating assignment: {}", assignment_id);
                 
                 let updates = clarification::parse_clarification_response(&payload.payload.body);
 
