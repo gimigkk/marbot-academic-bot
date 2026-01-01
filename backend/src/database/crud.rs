@@ -267,6 +267,7 @@ pub async fn get_active_assignments_sorted(pool: &PgPool) -> Result<Vec<Assignme
     Ok(assignments)
 }
 
+#[allow(non_snake_case)]
 pub async fn get_active_assignments_for_user(
     pool: &PgPool, 
     user_id: &str
