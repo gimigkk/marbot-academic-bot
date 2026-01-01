@@ -113,6 +113,7 @@ async fn run_reminder_task(pool: PgPool, greeting: &str) -> Result<(), Box<dyn s
 }
 
 /// Status indicator for deadline
+#[allow(non_snake_case)]
 fn status_dot(deadline: &Option<DateTime<Utc>>) -> &'static str {
     match deadline {
         Some(d) => {
@@ -133,6 +134,7 @@ fn days_left(deadline_utc: &DateTime<Utc>) -> i64 {
     (due - now).num_days()
 }
 
+#[allow(non_snake_case)]
 fn humanize_deadline(deadline: &Option<DateTime<Utc>>) -> String {
     match deadline {
         Some(deadline_utc) => {
