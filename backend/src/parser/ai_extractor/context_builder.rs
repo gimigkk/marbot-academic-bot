@@ -7,6 +7,7 @@ use sqlx::PgPool;
 
 use super::schedule_oracle::ScheduleOracle;
 use super::parsing::{extract_groq_text, GroqResponse};
+use super::GROQ_TEXT_MODELS;
 
 /// Minimal context needed for main AI prompt
 #[derive(Debug, Clone)]
@@ -15,8 +16,9 @@ pub struct MessageContext {
     pub parallel_confidence: f32,
     pub parallel_source: String,
     pub deadline_hint: Option<String>,
-    pub deadline_type: String, // Keep for backward compatibility
+    pub deadline_type: String,
     pub course_hints: Vec<CourseHint>,
+    pub courses_list: String,  // ✅ NEW: Full course list with aliases
 }
 
 /// Per-course context hints
@@ -25,7 +27,7 @@ pub struct CourseHint {
     pub course_name: String,
     pub parallel_code: Option<String>,
     pub deadline_hint: Option<String>,
-    pub deadline_type: String, // NEW: per-course deadline type
+    pub deadline_type: String,
 }
 
 /// Build context by querying DB + lightweight AI
@@ -36,27 +38,26 @@ pub async fn build_context(
     schedule_oracle: &ScheduleOracle,
 ) -> Result<MessageContext, String> {
     
-    // Step 1: Query sender history (fast, 0.01s)
     let sender_history = get_sender_history(pool, sender_id).await
         .unwrap_or_default();
     
-    // Step 2: Quick AI call to resolve ambiguities (0.8s)
-    let ai_hints = call_context_resolver_ai(message, &sender_history).await?;
+    // ✅ NEW: Get course list with aliases
+    let courses_list = get_courses_list(pool).await
+        .unwrap_or_else(|_| "No courses available".to_string());
     
-    // Step 3: Calculate deadline hints for each course (instant)
+    let ai_hints = call_context_resolver_ai(message, &sender_history, &courses_list).await?;
+    
     let course_hints = calculate_course_hints(
         &ai_hints,
         schedule_oracle,
     );
     
-    // Step 4: Determine global deadline hint (for backward compatibility)
     let deadline_hint = if course_hints.len() == 1 {
         course_hints.first().and_then(|h| h.deadline_hint.clone())
     } else {
         None
     };
     
-    // Compute global deadline_type from per-course types (for backward compatibility)
     let global_deadline_type = if course_hints.is_empty() {
         "unknown".to_string()
     } else if course_hints.len() == 1 {
@@ -80,7 +81,48 @@ pub async fn build_context(
         deadline_hint,
         deadline_type: global_deadline_type,
         course_hints,
+        courses_list,  // ✅ NEW: Include in context
     })
+}
+
+// ===== COURSE LIST =====
+
+/// Get formatted course list with aliases
+async fn get_courses_list(pool: &PgPool) -> Result<String, sqlx::Error> {
+    #[derive(Debug)]
+    struct CourseRow {
+        name: String,
+        aliases: Option<Vec<String>>,
+    }
+    
+    let courses = sqlx::query_as!(
+        CourseRow,
+        r#"
+        SELECT name, aliases
+        FROM courses
+        ORDER BY name
+        "#
+    )
+    .fetch_all(pool)
+    .await?;
+    
+    let formatted = courses
+        .iter()
+        .map(|c| {
+            if let Some(ref aliases) = c.aliases {
+                if !aliases.is_empty() {
+                    format!("{} [aka: {}]", c.name, aliases.join(", "))
+                } else {
+                    c.name.clone()
+                }
+            } else {
+                c.name.clone()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    
+    Ok(formatted)
 }
 
 // ===== SENDER HISTORY =====
@@ -135,16 +177,17 @@ struct AIHints {
 struct AICourseHint {
     course_name: String,
     parallel_code: Option<String>,
-    deadline_type: String, // NEW: per-course deadline type
+    deadline_type: String,
 }
 
 async fn call_context_resolver_ai(
     message: &str,
     sender_history: &SenderHistory,
+    courses_list: &str,  // ✅ NEW parameter
 ) -> Result<AIHints, String> {
     
     let history_text = if sender_history.parallel_patterns.is_empty() {
-        "No history".to_string()
+        "None".to_string()
     } else {
         sender_history.parallel_patterns
             .iter()
@@ -156,89 +199,60 @@ async fn call_context_resolver_ai(
     };
     
     let prompt = format!(
-        r#"Quick analysis of this message.
+        r#"Analyze this academic message and extract structured course information.
 
 MESSAGE: "{}"
-
 SENDER HISTORY: {}
 
-ABSOLUTE RULES (NEVER VIOLATE):
-1. NEVER assume a parallel applies to multiple courses unless EXPLICITLY stated
-2. Each course MUST have its parallel explicitly mentioned OR be in sender history
-3. "PEMROG K2, GKV KUIS" → ONLY Pemrog gets K2, GKV gets null (NOT K2!)
-4. "STRUKDAT K2, ORKOM KUIS" → ONLY Strukdat gets K2, ORKOM gets null (NOT K2!)
-5. Do NOT infer parallels from nearby courses - treat each independently
-6. **Do NOT include courses not mentioned in the message**
+AVAILABLE COURSES:
+{}
 
-TASK: Answer these questions in JSON:
+TASK: Identify courses mentioned and classify deadline information.
 
-1. parallel_code: Global parallel (k1/k2/k3/p1/p2/p3/r1/r2/r3/null)
-   - ONLY set if EVERY SINGLE course explicitly mentions the SAME parallel
-   - If even ONE course lacks explicit parallel → null
+COURSE IDENTIFICATION:
+• Match against AVAILABLE COURSES list (check both full names and aliases in [aka: ...])
+• Always use the FULL course name, not the alias
+• Assignment titles and project names are NOT courses
+• Return empty array if no valid courses identified
 
-2. parallel_confidence: 0.0-1.0
+PARALLEL CLASS (per course):
+• Valid values: k1, k2, k3, p1, p2, p3, r1, r2, r3, or null
+• Priority: explicit mention > sender history > null
+• Each course independent (don't assume shared parallel)
 
-3. parallel_source: "explicit"|"sender_history"|"unknown"
+DEADLINE TYPE (per course):
+• "explicit": Specific date (2026-01-15, "5 Januari", "15 Desember")
+• "next_meeting": References next class ("sebelum pertemuan", "before class")
+• "relative": Relative time ("besok", "tomorrow", "minggu depan")
+• "unknown": Course mentioned without deadline
 
-4. course_hints: Array of courses with PER-COURSE deadline types
-   
-   For EACH course, determine:
-   
-   a) parallel_code: Same rules as before (explicit > history > null)
-   
-   b) deadline_type: **IMPORTANT - ANALYZE PER COURSE**
-      - explicit: Course mentions YYYY-MM-DD or specific date
-        Examples: "STRUKDAT TUGAS deadline 5 Januari"
-      
-      - next_meeting: Course mentions "sebelum pertemuan", "before class", "before next meeting"
-        Examples: "STRUKDAT sebelum pertemuan berikutnya"
-      
-      - relative: Course mentions "besok", "lusa", "minggu depan", "tomorrow"
-        Examples: "ORKOM KUIS deadline Lusa"
-      
-      - unknown: No deadline mentioned for this specific course
-   
-   CRITICAL: Each course gets its OWN deadline_type based on what's said about THAT course
-   
-   Examples:
-   
-   1. "STRUKDAT K2 TUGAS sebelum pertemuan, ORKOM KUIS deadline Lusa"
-      → course_hints: [
-           {{"course_name":"Struktur Data","parallel_code":"k2","deadline_type":"next_meeting"}},
-           {{"course_name":"Organisasi dan Arsitektur Komputer","parallel_code":null,"deadline_type":"relative"}}
-         ]
-      Reason: STRUKDAT has "sebelum pertemuan" → next_meeting
-              ORKOM has "deadline Lusa" → relative
-   
-   2. "PEMROG K1 TUGAS besok, KALKULUS K1 TUGAS besok"
-      → course_hints: [
-           {{"course_name":"Pemrograman","parallel_code":"k1","deadline_type":"relative"}},
-           {{"course_name":"Kalkulus","parallel_code":"k1","deadline_type":"relative"}}
-         ]
-      Reason: Both mention "besok" → relative
-   
-   3. "STRUKDAT TUGAS 15, ORKOM QUIZ 3 sebelum pertemuan"
-      → course_hints: [
-           {{"course_name":"Struktur Data","parallel_code":null,"deadline_type":"unknown"}},
-           {{"course_name":"Organisasi dan Arsitektur Komputer","parallel_code":null,"deadline_type":"next_meeting"}}
-         ]
-      Reason: STRUKDAT has no deadline mention → unknown
-              ORKOM mentions "sebelum pertemuan" → next_meeting
+GLOBAL PARALLEL:
+• Set only if ALL courses share identical parallel
+• Otherwise null
 
-OUTPUT: JSON only, no markdown."#,
+Return JSON:
+{{
+  "parallel_code": string | null,
+  "parallel_confidence": float,
+  "parallel_source": "explicit" | "sender_history" | "unknown",
+  "course_hints": [
+    {{
+      "course_name": string,
+      "parallel_code": string | null,
+      "deadline_type": string
+    }}
+  ]
+}}"#,
         message,
-        history_text
+        history_text,
+        courses_list  // ✅ Include course list in prompt
     );
     
     let api_key = std::env::var("GROQ_API_KEY")
         .map_err(|_| "GROQ_API_KEY not set".to_string())?;
     
-    let models = &[
-        "llama-3.3-70b-versatile",
-        "llama-3.1-8b-instant",
-    ];
-    
-    for model in models {
+    // ✅ Use configured text models from mod.rs
+    for model in GROQ_TEXT_MODELS {
         match call_groq_api(&api_key, model, &prompt).await {
             Ok(json_text) => {
                 return parse_ai_hints(&json_text);
@@ -259,8 +273,8 @@ async fn call_groq_api(api_key: &str, model: &str, prompt: &str) -> Result<Strin
     let request_body = json!({
         "model": model,
         "messages": [{"role": "user", "content": prompt}],
-        "temperature": 0.2,
-        "max_tokens": 800,
+        "temperature": 0.1,  // ✅ Lower temperature for consistency
+        "max_tokens": 1000,
         "response_format": {"type": "json_object"}
     });
     
@@ -306,7 +320,6 @@ fn calculate_course_hints(
     let today = now.date_naive();
     
     for ai_course_hint in &hints.course_hints {
-        // Use PER-COURSE deadline type instead of global
         println!("│");
         println!("│ 🎯 Processing: {}", ai_course_hint.course_name);
         println!("│    Parallel: {:?}", ai_course_hint.parallel_code);
@@ -356,10 +369,9 @@ fn calculate_course_hints(
             course_name: ai_course_hint.course_name.clone(),
             parallel_code: ai_course_hint.parallel_code.clone(),
             deadline_hint,
-            deadline_type: ai_course_hint.deadline_type.clone(), // Store per-course type
+            deadline_type: ai_course_hint.deadline_type.clone(),
         });
     }
     
-    //println!("│\n│ ✅ Generated {} course hints\n│", course_hints.len());
     course_hints
 }
