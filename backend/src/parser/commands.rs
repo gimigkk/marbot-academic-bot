@@ -1,3 +1,5 @@
+// backend/src/commands.rs - Fixed for Optional Deadline
+
 use crate::database::crud::{
     get_active_assignments_for_user, 
     get_active_assignments_sorted, 
@@ -9,7 +11,7 @@ use crate::database::crud::{
 use crate::models::BotCommand;
 use chrono::{DateTime, Duration, FixedOffset, Datelike, NaiveDate, Utc};
 use sqlx::PgPool;
-use std::time::Instant; // ✅ Added: Untuk fitur monitoring waktu
+use std::time::Instant;
 
 /// Handle bot commands and return response text or forward action
 pub enum CommandResponse {
@@ -37,23 +39,18 @@ pub async fn handle_command(
             println!("🏓 Ping command received from {}\n", user_phone);
             
             let start_time = Instant::now();
-
             let db_start = Instant::now();
 
-            // Query ringan SELECT 1 untuk cek koneksi
             let db_status = sqlx::query("SELECT 1").execute(pool).await;
             let db_duration = db_start.elapsed();
 
-            // Tentukan status 
             let (db_icon, db_msg) = match db_status {
-                Ok(_) => ("🟢", format!("{:.2?}", db_duration)), // Contoh: 4.5ms
+                Ok(_) => ("🟢", format!("{:.2?}", db_duration)),
                 Err(_) => ("🔴", "Error / Disconnected".to_string()),
             };
 
-            // 3. Hitung overhead pemrosesan bot
             let bot_duration = start_time.elapsed();
 
-            // 4. Buat Laporan 
             let response_text = format!(
                 "🏓 *PONG! - System Diagnostic*\n\n\
                 🖥️ *Server Status:*\n\
@@ -74,7 +71,6 @@ pub async fn handle_command(
         BotCommand::Tugas => {
             println!("📋 Tugas command received from {}", user_phone);
 
-            // Show ALL active assignments (global view)
             match get_active_assignments_sorted(pool).await {
                 Ok(assignments) => format_assignments_list(assignments, "*[Daftar Tugas Aktif]*", false, false),
                 Err(e) => {
@@ -90,7 +86,6 @@ pub async fn handle_command(
         BotCommand::Todo => {
             println!("✅ Todo command received from {}", user_phone);
 
-            // Show user-specific todo list (respects #done status)
             match get_active_assignments_for_user(pool, user_phone).await {
                 Ok(assignments) => {
                     let header = format!("*[To-Do] User ID: {}*", user_name);
@@ -111,13 +106,18 @@ pub async fn handle_command(
 
             match get_active_assignments_for_user(pool, user_phone).await {
                 Ok(assignments) => {
-                    // ✅ Use GMT+7 for consistent timezone handling
                     let gmt7 = FixedOffset::east_opt(7 * 3600).unwrap();
                     let today = get_gmt7_now().date_naive();
                     
                     let today_assignments: Vec<_> = assignments
                         .into_iter()
-                        .filter(|a| a.deadline.with_timezone(&gmt7).date_naive() == today)
+                        .filter(|a| {
+                            if let Some(deadline) = a.deadline {
+                                deadline.with_timezone(&gmt7).date_naive() == today
+                            } else {
+                                false
+                            }
+                        })
                         .collect();
 
                     format_assignments_list(today_assignments, "*[Tugas Hari Ini]*", false, true)
@@ -137,16 +137,19 @@ pub async fn handle_command(
 
             match get_active_assignments_for_user(pool, user_phone).await {
                 Ok(assignments) => {
-                    // ✅ Use GMT+7 for consistent timezone handling
                     let now = get_gmt7_now();
                     let week_end = now + Duration::days(7);
 
                     let week_assignments: Vec<_> = assignments
                         .into_iter()
                         .filter(|a| {
-                            let gmt7 = FixedOffset::east_opt(7 * 3600).unwrap();
-                            let d = a.deadline.with_timezone(&gmt7);
-                            d >= now && d <= week_end
+                            if let Some(deadline) = a.deadline {
+                                let gmt7 = FixedOffset::east_opt(7 * 3600).unwrap();
+                                let d = deadline.with_timezone(&gmt7);
+                                d >= now && d <= week_end
+                            } else {
+                                false
+                            }
                         })
                         .collect();
 
@@ -168,7 +171,6 @@ pub async fn handle_command(
                 index, user_phone, chat_id
             );
 
-            // Check if command is from academic channel group
             let academic_channels = std::env::var("ACADEMIC_CHANNELS").unwrap_or_default();
             let is_academic_channel = academic_channels
                 .split(',')
@@ -185,7 +187,6 @@ pub async fn handle_command(
 
             match get_active_assignments_for_user(pool, user_phone).await {
                 Ok(assignments) => {
-                    // Filter to incomplete only (same as #todo display)
                     let incomplete: Vec<_> = assignments
                         .into_iter()
                         .filter(|a| !a.is_completed)
@@ -266,10 +267,8 @@ pub async fn handle_command(
         BotCommand::Done(id) => {
             println!("✅ Done command for assignment {} from {}\n", id, user_phone);
             
-            // ✅ ALWAYS use personal todo list (consistent with #expand)
             match get_active_assignments_for_user(pool, user_phone).await {
                 Ok(assignments) => {
-                    // Filter to incomplete only (same as #todo display)
                     let incomplete: Vec<_> = assignments
                         .into_iter()
                         .filter(|a| !a.is_completed)
@@ -287,7 +286,6 @@ pub async fn handle_command(
                     
                     let assignment = &incomplete[idx];
                     
-                    // Mark as complete (no toggle - always mark complete)
                     match mark_assignment_complete(pool, assignment.id, user_phone).await {
                         Ok(_) => CommandResponse::Text(format!(
                             "✅ Mantap! Tugas *{}* selesai.\n\n\
@@ -304,10 +302,8 @@ pub async fn handle_command(
         BotCommand::Undo => {
             println!("↩️  Undo command from {}\n", user_phone);
             
-            // Get user's recently completed assignments (ordered by completion time)
             match get_last_completed_assignment(pool, user_phone).await {
                 Ok(Some(assignment)) => {
-                    // Unmark as complete
                     match unmark_assignment_complete(pool, assignment.id, user_phone).await {
                         Ok(_) => CommandResponse::Text(format!(
                             "↩️ Oke! Tugas *{}* ditandai belum selesai.\n\n\
@@ -337,7 +333,6 @@ pub async fn handle_command(
         BotCommand::Delete(index) => {
             println!("🗑️ Delete command received from {} in chat {}", user_phone, chat_id);
 
-            // Whitelist Validation
             let academic_channels = std::env::var("ACADEMIC_CHANNELS").unwrap_or_default();
             let is_authorized = academic_channels
                 .split(',')
@@ -434,7 +429,6 @@ fn format_assignments_list(
     show_legend: bool,
     user_specific: bool,
 ) -> CommandResponse {
-    // ✅ For user-specific view, filter out completed assignments
     let filtered_assignments: Vec<_> = if user_specific {
         assignments.into_iter().filter(|a| !a.is_completed).collect()
     } else {
@@ -443,7 +437,6 @@ fn format_assignments_list(
 
     if filtered_assignments.is_empty() {
         if user_specific {
-            // ✅ Congratulations message for completed todo list
             return CommandResponse::Text(format!(
                 "{}\n\n🎉 *Selamat!* Semua tugas sudah selesai!\n✨ _Kamu keren banget!_",
                 header
@@ -466,14 +459,14 @@ fn format_assignments_list(
     response.push('\n');
 
     if show_legend {
-        response.push_str("\nKeterangan:\n🔴 Deadline 0–2 hari\n🟢 Deadline > 2 hari\n\n");
+        response.push_str("\nKeterangan:\n🔴 Deadline 0–2 hari\n🟢 Deadline > 2 hari\n⚪ Belum ada deadline\n\n");
     } else {
         response.push('\n');
     }
 
     for (i, a) in filtered_assignments.iter().enumerate() {
         let status_emoji = status_dot(&a.deadline);
-        let title_fmt = format!("{}", preview_text(&sanitize_wa_md(&a.title),25));
+        let title_fmt = format!("{}", preview_text(&sanitize_wa_md(&a.title), 25));
         let due_text = humanize_deadline(&a.deadline);
         let course = sanitize_wa_md(&a.course_name);
 
@@ -505,86 +498,76 @@ fn format_assignments_list(
         response.push('\n');
     }
 
-    // ✅ Different footers based on list type
     if user_specific {
-        // For #todo, #today, #week - these use personal numbering
         response.push_str("\n_🔎 Detail: #<nomor>_\n_✅ Selesai: #done <nomor>_");
     } else {
-        // For #tugas - this is global view only
         response.push_str("\n_💡 Gunakan #todo untuk list personal_");
     }
     
     CommandResponse::Text(response)
 }
 
-/// 🔴 deadline 0–2 hari lagi, 🟢 setelahnya
-fn status_dot(deadline_utc: &DateTime<Utc>) -> &'static str {
-    if days_left(deadline_utc) < 1 {
-        "🔴"
-    } 
-    else if days_left(deadline_utc) == 1 {
-        "🟠"
-    }
-    else if days_left(deadline_utc) == 2 {
-        "🟡"
-    }
-    else {
-        "🟢"
+/// Status indicator based on deadline
+fn status_dot(deadline: &Option<DateTime<Utc>>) -> &'static str {
+    match deadline {
+        Some(d) => {
+            let days = days_left(d);
+            if days < 1 {
+                "🔴"
+            } else if days == 1 {
+                "🟠"
+            } else if days == 2 {
+                "🟡"
+            } else {
+                "🟢"
+            }
+        }
+        None => "⚪" // No deadline set
     }
 }
 
 fn days_left(deadline_utc: &DateTime<Utc>) -> i64 {
-    // ✅ Both dates in GMT+7 timezone
     let gmt7 = FixedOffset::east_opt(7 * 3600).unwrap();
     let now = get_gmt7_now().date_naive();
     let due = deadline_utc.with_timezone(&gmt7).date_naive();
     (due - now).num_days()
 }
 
-fn humanize_deadline(deadline_utc: &DateTime<Utc>) -> String {
-    // ✅ Convert to GMT+7 for display
-    let gmt7 = FixedOffset::east_opt(7 * 3600).unwrap();
-    let deadline_gmt7 = deadline_utc.with_timezone(&gmt7);
-    let now = get_gmt7_now().date_naive();
-    let due = deadline_gmt7.date_naive();
-    
-    let delta = (due - now).num_days();
-    let date_str = format_date_id(due);
-    
-    // Show both DD-MM and HH:MM timestamp for debugging
-    let time_str = deadline_gmt7.format("%d-%m %H:%M").to_string();
+fn humanize_deadline(deadline: &Option<DateTime<Utc>>) -> String {
+    match deadline {
+        Some(deadline_utc) => {
+            let gmt7 = FixedOffset::east_opt(7 * 3600).unwrap();
+            let deadline_gmt7 = deadline_utc.with_timezone(&gmt7);
+            let now = get_gmt7_now().date_naive();
+            let due = deadline_gmt7.date_naive();
+            
+            let delta = (due - now).num_days();
+            let date_str = format_date_id(due);
+            let time_str = deadline_gmt7.format("%d-%m %H:%M").to_string();
 
-    match delta {
-        0 => format!("Hari ini ({} {})", date_str, time_str),
-        1 => format!("Besok ({} {})", date_str, time_str),
-        d if d >= 2 => format!("H-{} ({} {})", d, date_str, time_str), 
-        -1 => format!("Kemarin ({} {})", date_str, time_str),
-        d => format!("lewat {} hari ({} {})", d.abs(), date_str, time_str),
+            match delta {
+                0 => format!("Hari ini ({} {})", date_str, time_str),
+                1 => format!("Besok ({} {})", date_str, time_str),
+                d if d >= 2 => format!("H-{} ({} {})", d, date_str, time_str), 
+                -1 => format!("Kemarin ({} {})", date_str, time_str),
+                d => format!("lewat {} hari ({} {})", d.abs(), date_str, time_str),
+            }
+        }
+        None => "⚠️ Belum ada deadline".to_string()
     }
 }
 
-/// Format date like "26 Des 2025"
 fn format_date_id(date: NaiveDate) -> String {
     let day = date.day();
     let month = match date.month() {
-        1 => "Jan",
-        2 => "Feb",
-        3 => "Mar",
-        4 => "Apr",
-        5 => "Mei",
-        6 => "Jun",
-        7 => "Jul",
-        8 => "Agu",
-        9 => "Sep",
-        10 => "Okt",
-        11 => "Nov",
-        12 => "Des",
+        1 => "Jan", 2 => "Feb", 3 => "Mar", 4 => "Apr",
+        5 => "Mei", 6 => "Jun", 7 => "Jul", 8 => "Agu",
+        9 => "Sep", 10 => "Okt", 11 => "Nov", 12 => "Des",
         _ => "???",
     };
     format!("{} {} {}", day, month, date.year())
 }
 
-/// Potong text
 fn preview_text(s: &str, max_chars: usize) -> String {
     let one_line = s
         .replace('\n', " ")
