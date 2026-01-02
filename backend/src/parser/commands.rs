@@ -245,8 +245,8 @@ pub async fn handle_command(
                                 index,
                                 done_status,
                                 status,
-                                course,
                                 title,
+                                course,
                                 due_text,
                                 desc_full,
                                 code_line
