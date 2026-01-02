@@ -245,8 +245,8 @@ pub async fn handle_command(
                                 index,
                                 done_status,
                                 status,
-                                course,
                                 title,
+                                course,
                                 due_text,
                                 desc_full,
                                 code_line
@@ -485,8 +485,8 @@ fn format_assignments_list(
             .map(|c| format!("🧩 Kode: {}", sanitize_wa_md(c)))
             .unwrap_or_default();
 
-        response.push_str(&format!("{} *[{}] [{}]*\n", status_emoji, i + 1, course));
-        response.push_str(&format!("📌 {}\n", title_fmt));
+        response.push_str(&format!("{} *[{}] [{}]*\n", status_emoji, i + 1, title_fmt));
+        response.push_str(&format!("📌 {}\n", course));
         response.push_str(&format!("⏰ Deadline: {}\n", due_text));
         
         if !desc_line.is_empty() {
