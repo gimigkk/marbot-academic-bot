@@ -67,8 +67,8 @@ async fn run_reminder_task(pool: PgPool, greeting: &str) -> Result<(), Box<dyn s
             .unwrap_or_default();
 
         message.push_str(&format!("{} *[{}] [{}]*\n", status, i + 1, course));
-        message.push_str(&format!("📌 {}\n", title));
-        message.push_str(&format!("⏰ Deadline: {}\n", due_text));
+        message.push_str(&format!("{} *[{}] [{}]*\n", status, i + 1, title));
+        message.push_str(&format!("📌 {}\n", course));
         if !desc_line.is_empty() {
             message.push_str(&format!("{}\n", desc_line));
         }
