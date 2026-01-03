@@ -29,6 +29,7 @@ pub async fn extract_with_ai(
     image_base64: Option<&str>,
     sender_id: &str,
     pool: &PgPool,
+    quoted_message: Option<&str>,  
 ) -> Result<AIClassification, String> {
     let current_datetime = get_current_datetime();
     let current_date = get_current_date();
@@ -36,8 +37,19 @@ pub async fn extract_with_ai(
     println!("\n\x1b[1;30m┌── 🤖 AI PROCESSING ──────────────────────────\x1b[0m");
     println!("│ 📝 Message  : \x1b[36m\"{}\"\x1b[0m", truncate_for_log(text, 60));
     
-    // NEW STAGE 1
-    let context = match build_context(text, sender_id, pool, &*SCHEDULE_ORACLE).await {
+    // Show quoted message if present
+    if let Some(quoted) = quoted_message {
+        println!("│ 💬 Quoted   : \x1b[35m\"{}\"\x1b[0m", truncate_for_log(quoted, 60));
+    }
+    
+    // NEW STAGE 1: Build context with quoted message
+    let context = match build_context(
+        text, 
+        sender_id, 
+        pool, 
+        &*SCHEDULE_ORACLE,
+        quoted_message  
+    ).await {
         Ok(ctx) => {
             // Build a clean, compact context summary
             let courses_summary = if ctx.course_hints.is_empty() {
@@ -56,6 +68,12 @@ pub async fn extract_with_ai(
             
             println!("│\n│ ✅ Context  : Parallel={:?} ({}), Courses=[{}]",
                 ctx.parallel_code, ctx.parallel_source, courses_summary);
+            
+            // ✅ Show quoted context if resolved
+            if let Some(ref quoted_summary) = ctx.quoted_message_summary {
+                println!("│              {}", quoted_summary);
+            }
+            
             Some(ctx)
         }
         Err(e) => {
@@ -72,7 +90,7 @@ pub async fn extract_with_ai(
         course_map, 
         &current_datetime, 
         &current_date,
-        context.as_ref()  // Pass Option<&MessageContext>
+        context.as_ref()  // Pass Option<&MessageContext> with quoted info
     );
     
     println!("│ 🤖 Stage 2  : Extracting with AI...");
@@ -83,6 +101,7 @@ pub async fn extract_with_ai(
     println!("│ 📊 Context  : {} active assignments", active_assignments.len());
     println!("│ 📅 Time     : {}", current_datetime);
     
+    // [Rest of the function remains the same...]
     // TIER 1: Try vision model if image present
     if let Some(img) = image_base64 {
         match try_groq_vision(&prompt, img).await {
@@ -92,7 +111,6 @@ pub async fn extract_with_ai(
                         println!("│ ℹ️  Vision Result: Unrecognized (image likely irrelevant)");
                         println!("│ 🔄 Retrying with text-only analysis...");
                         
-                        // FALLBACK: Try reasoning models for text-only
                         match try_groq_reasoning(&prompt).await {
                             Ok(text_result) => {
                                 match text_result {
@@ -137,7 +155,6 @@ pub async fn extract_with_ai(
             }
         }
     } else {
-        // No image, use reasoning models directly
         match try_groq_reasoning(&prompt).await {
             Ok(classification) => {
                 log_classification_success(&classification);

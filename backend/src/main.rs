@@ -14,7 +14,7 @@ use tokio::net::TcpListener;
 use sqlx::PgPool;
 use std::time::{Instant, Duration}; 
 use std::collections::HashMap;
-use chrono::{Datelike, Timelike};
+use chrono::{Datelike};
 use chrono::Duration as ChronoDuration;
 
 pub mod models;
@@ -148,6 +148,7 @@ async fn main() {
     axum::serve(listener, app).await.unwrap();
 }
 
+
 #[allow(non_snake_case)]
 async fn webhook(
     State(state): State<AppState>,
@@ -252,15 +253,19 @@ async fn webhook(
 
 
     // Terminal logging
-    println!("\n| 📨 Message from: {}", chat_id);
-    println!("|  Sender: {} ({})", sender_name, sender_phone);
-    println!("|  Body: {}", payload.payload.body);
-    println!("|  Type: {:?}\n", message_type);
+    println!("\n| Message from: \x1b[32m{}\x1b[0m", chat_id);
+    println!("| Sender      : \x1b[32m{}\x1b[0m (\x1b[32m{}\x1b[0m)", sender_name, sender_phone);
+    println!("| Body        : \x1b[32m{}\x1b[0m", payload.payload.body);
+    println!("| Type        : \x1b[32m{:?}\x1b[0m\n", message_type);
 
-    // println!("🔍 DEBUG: Has quoted message? {:?}", payload.payload.get_quoted_message().is_some());
-    // if let Some(quoted) = payload.payload.get_quoted_message() {
-    //     println!("🔍 DEBUG: Quoted text preview: '{}'", &quoted.text[..quoted.text.len().min(100)]);
-    // }
+    // Extract quoted message for AI context
+    let quoted_message_text = payload.payload.get_quoted_message()
+        .map(|quoted| quoted.text.clone());
+
+    if let Some(ref quoted) = quoted_message_text {
+        println!("| Quoted: \"{}\"\n", 
+            quoted.chars().take(80).collect::<String>());
+    }
 
     // ============= CLARIFICATION HANDLER =============
     if let Some(quoted) = payload.payload.get_quoted_message() {
@@ -461,7 +466,7 @@ async fn webhook(
             // START MONITORING: AI Latency Timer
             let ai_start = Instant::now();
             
-            // Extract AI
+            // ✅ NEW: Pass quoted message to AI
             match extract_with_ai(
                 &text, 
                 &courses_list, 
@@ -469,7 +474,8 @@ async fn webhook(
                 &course_map, 
                 image_base64.as_deref(),
                 sender_phone,   
-                &state.pool      
+                &state.pool,
+                quoted_message_text.as_deref(),  
             ).await {
                 Ok(classification) => {
                     //  STOP MONITORING: Log AI Duration
