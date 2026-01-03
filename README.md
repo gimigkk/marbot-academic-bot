@@ -51,7 +51,7 @@
 
 ### 🔔 **Automated Reminders**
 - **Twice Daily**: Morning (07:00) and evening (17:00) GMT+7
-- **Smart Prioritization**: Color-coded by urgency (🔴 0-2 days, 🟢 >2 days, ⚪ no deadline)
+- **Smart Prioritization**: Color-coded by urgency (🔴 today, 🟠 tomorrow, 🟡 2 days, 🟢 >2 days, ⚪ no deadline)
 - **Humanized Dates**: "Hari ini", "Besok", "H-5" in Indonesian
 
 ### 🛡️ **Reliability & Safety**
