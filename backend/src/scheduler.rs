@@ -112,19 +112,23 @@ async fn run_reminder_task(pool: PgPool, greeting: &str) -> Result<(), Box<dyn s
     Ok(())
 }
 
-/// Status indicator for deadline
+/// Status indicator based on deadline
 #[allow(non_snake_case)]
 fn status_dot(deadline: &Option<DateTime<Utc>>) -> &'static str {
     match deadline {
         Some(d) => {
             let days = days_left(d);
-            if days <= 2 {
+            if days < 1 {
                 "🔴"
+            } else if days == 1 {
+                "🟠"
+            } else if days == 2 {
+                "🟡"
             } else {
                 "🟢"
             }
         }
-        None => "⚪" // No deadline
+        None => "⚪" // No deadline set
     }
 }
 
