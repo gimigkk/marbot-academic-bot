@@ -18,7 +18,8 @@ pub struct MessageContext {
     pub deadline_hint: Option<String>,
     pub deadline_type: String,
     pub course_hints: Vec<CourseHint>,
-    pub courses_list: String,  // ✅ NEW: Full course list with aliases
+    pub courses_list: String,
+    pub quoted_message_summary: Option<String>,  // ✅ NEW: Summary of quoted message
 }
 
 /// Per-course context hints
@@ -36,16 +37,29 @@ pub async fn build_context(
     sender_id: &str,
     pool: &PgPool,
     schedule_oracle: &ScheduleOracle,
+    quoted_message: Option<&str>,  // ✅ NEW: Optional quoted message
 ) -> Result<MessageContext, String> {
     
     let sender_history = get_sender_history(pool, sender_id).await
         .unwrap_or_default();
     
-    // ✅ NEW: Get course list with aliases
     let courses_list = get_courses_list(pool).await
         .unwrap_or_else(|_| "No courses available".to_string());
     
-    let ai_hints = call_context_resolver_ai(message, &sender_history, &courses_list).await?;
+    // ✅ NEW: Process quoted message if present
+    let quoted_summary = if let Some(quoted) = quoted_message {
+        extract_quoted_context(quoted, pool).await
+            .ok()
+    } else {
+        None
+    };
+    
+    let ai_hints = call_context_resolver_ai(
+        message, 
+        &sender_history, 
+        &courses_list,
+        quoted_summary.as_deref(),  // ✅ Pass quoted context to AI
+    ).await?;
     
     let course_hints = calculate_course_hints(
         &ai_hints,
@@ -81,13 +95,32 @@ pub async fn build_context(
         deadline_hint,
         deadline_type: global_deadline_type,
         course_hints,
-        courses_list,  // ✅ NEW: Include in context
+        courses_list,
+        quoted_message_summary: quoted_summary,  // ✅ NEW
     })
+}
+
+// ===== QUOTED MESSAGE CONTEXT (NEW) =====
+
+/// Extract relevant context from quoted message
+/// Just returns the quoted text - let the main AI do the matching
+async fn extract_quoted_context(
+    quoted_text: &str,
+    _pool: &PgPool,
+) -> Result<String, String> {
+    // Simply return truncated quoted text
+    // The main AI will handle intelligent matching
+    let truncated = if quoted_text.len() > 200 {
+        format!("{}...", &quoted_text[..200])
+    } else {
+        quoted_text.to_string()
+    };
+    
+    Ok(truncated)
 }
 
 // ===== COURSE LIST =====
 
-/// Get formatted course list with aliases
 async fn get_courses_list(pool: &PgPool) -> Result<String, sqlx::Error> {
     #[derive(Debug)]
     struct CourseRow {
@@ -183,7 +216,8 @@ struct AICourseHint {
 async fn call_context_resolver_ai(
     message: &str,
     sender_history: &SenderHistory,
-    courses_list: &str,  // ✅ NEW parameter
+    courses_list: &str,
+    quoted_context: Option<&str>,  // ✅ NEW parameter
 ) -> Result<AIHints, String> {
     
     let history_text = if sender_history.parallel_patterns.is_empty() {
@@ -198,11 +232,16 @@ async fn call_context_resolver_ai(
             .join(", ")
     };
     
+    // ✅ NEW: Include quoted context in prompt
+    let quoted_section = quoted_context
+        .map(|ctx| format!("\n\nQUOTED MESSAGE CONTEXT:\n{}\n(User is replying to/referencing this message)", ctx))
+        .unwrap_or_default();
+    
     let prompt = format!(
         r#"Analyze this academic message and extract structured course information.
 
 MESSAGE: "{}"
-SENDER HISTORY: {}
+SENDER HISTORY: {}{}
 
 AVAILABLE COURSES:
 {}
@@ -213,11 +252,12 @@ COURSE IDENTIFICATION:
 • Match against AVAILABLE COURSES list (check both full names and aliases in [aka: ...])
 • Always use the FULL course name, not the alias
 • Assignment titles and project names are NOT courses
+• If QUOTED MESSAGE CONTEXT is present, use it to identify which assignment is being referenced
 • Return empty array if no valid courses identified
 
 PARALLEL CLASS (per course):
 • Valid values: k1, k2, k3, p1, p2, p3, r1, r2, r3, or null
-• Priority: explicit mention > sender history > null
+• Priority: explicit mention > quoted context > sender history > null
 • Each course independent (don't assume shared parallel)
 
 DEADLINE TYPE (per course):
@@ -230,11 +270,15 @@ GLOBAL PARALLEL:
 • Set only if ALL courses share identical parallel
 • Otherwise null
 
+USING QUOTED CONTEXT:
+• If message says "diundur" / "berubah" / "updated" and quotes a previous assignment, extract info from quoted context
+• Treat quoted assignment info as the reference point for updates
+
 Return JSON:
 {{
   "parallel_code": string | null,
   "parallel_confidence": float,
-  "parallel_source": "explicit" | "sender_history" | "unknown",
+  "parallel_source": "explicit" | "quoted_context" | "sender_history" | "unknown",
   "course_hints": [
     {{
       "course_name": string,
@@ -245,13 +289,13 @@ Return JSON:
 }}"#,
         message,
         history_text,
-        courses_list  // ✅ Include course list in prompt
+        quoted_section,  // ✅ Include quoted context
+        courses_list
     );
     
     let api_key = std::env::var("GROQ_API_KEY")
         .map_err(|_| "GROQ_API_KEY not set".to_string())?;
     
-    // ✅ Use configured text models from mod.rs
     for model in GROQ_TEXT_MODELS {
         match call_groq_api(&api_key, model, &prompt).await {
             Ok(json_text) => {
@@ -273,7 +317,7 @@ async fn call_groq_api(api_key: &str, model: &str, prompt: &str) -> Result<Strin
     let request_body = json!({
         "model": model,
         "messages": [{"role": "user", "content": prompt}],
-        "temperature": 0.1,  // ✅ Lower temperature for consistency
+        "temperature": 0.1,
         "max_tokens": 1000,
         "response_format": {"type": "json_object"}
     });
