@@ -1,7 +1,7 @@
 use crate::models::AssignmentWithCourse;
 use uuid::Uuid;
 use std::collections::HashMap;
-use chrono::{NaiveDate, NaiveTime, NaiveDateTime, Datelike};
+use chrono::{NaiveDate, NaiveTime, NaiveDateTime};
 
 /// Check which fields are missing from an assignment
 pub fn identify_missing_fields(assignment: &AssignmentWithCourse) -> Vec<String> {

@@ -473,7 +473,7 @@ pub async fn find_assignment_by_keywords(
     course_id: Option<Uuid>,
 ) -> Result<Vec<Assignment>> {
     if keywords.is_empty() {
-        println!("⚠️ No keywords provided for search");
+        //println!("⚠️ No keywords provided for search");
         return Ok(vec![]);
     }
     
@@ -481,7 +481,7 @@ pub async fn find_assignment_by_keywords(
     
     // Strategy 1: Search by course + keywords
     if let Some(cid) = course_id {
-        println!("🔍 Strategy 1: Searching by course_id + keywords");
+        //println!("🔍 Strategy 1: Searching by course_id + keywords");
         let patterns: Vec<String> = keywords
             .iter()
             .map(|kw| format!("%{}%", kw.to_lowercase()))
@@ -503,9 +503,9 @@ pub async fn find_assignment_by_keywords(
         query.push_str(&conditions.join(" AND "));
         query.push_str(") ORDER BY created_at DESC LIMIT 5");
         
-        println!("🔍 Query: {}", query);
-        println!("🔍 Course ID: {}", cid);
-        println!("🔍 Keywords: {:?}", keywords);
+        // println!("🔍 Query: {}", query);
+        // println!("🔍 Course ID: {}", cid);
+        // println!("🔍 Keywords: {:?}", keywords);
         
         let mut sql_query = sqlx::query_as::<_, Assignment>(&query).bind(cid);
         
@@ -516,7 +516,7 @@ pub async fn find_assignment_by_keywords(
         let assignments = sql_query.fetch_all(pool).await?;
         
         if !assignments.is_empty() {
-            println!("✅ Found {} assignments with strategy 1", assignments.len());
+            //println!("✅ Found {} assignments with strategy 1", assignments.len());
             return Ok(assignments);
         }
     }
