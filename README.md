@@ -1,237 +1,336 @@
-# MARBOT - WhatsApp Academic Bot 🤖
+# 🤖 MARBOT - Academic Assignment Bot
 
-A Rust bot that reads WhatsApp messages from academic channels and automatically saves assignment info to a database using AI.
-```
-                      ███╗   ███╗ █████╗ ██████╗ ██████╗  ██████╗ ████████╗
-                      ████╗ ████║██╔══██╗██╔══██╗██╔══██╗██╔═══██╗╚══██╔══╝
-                      ██╔████╔██║███████║██████╔╝██████╔╝██║   ██║   ██║   
-                      ██║╚██╔╝██║██╔══██║██╔══██╗██╔══██╗██║   ██║   ██║   
-                      ██║ ╚═╝ ██║██║  ██║██║  ██║██████╔╝╚██████╔╝   ██║   
-                      ╚═╝     ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝  ╚═════╝    ╚═╝   
-                                                                                                                                                                                                                              
-                             [🤖 WhatsApp Academic Assistant v1.0]
-                                       by Gilang & Arya
-```
-
-## What It Does
-
-- Reads messages from WhatsApp channels/groups (via WAHA)
-- Uses Gemini AI to understand assignment info (course, deadline, description)
-- Saves assignments to PostgreSQL database
-- Responds with bot commands like `#tugas` to list assignments
-- Prevents duplicate assignments
-- Only processes messages from whitelisted channels
-
-## How It Works
+<div align="center">
 
 ```
-    [WhatsApp Message]
-            │
-   WAHA (sends webhook)
-            │
- Bot Server (Axum :3000)
-            │
-         Command?
-   ┌─no─────┴─────yes──┐
-   │                   │
-Whitelist Check        │
-   │                   │
-Gemini AI           Execute
-   │                   │
-   ┕──── PostgreSQL ───┘
-             │
-      [Reply via WAHA]
-```
-```
-marbot-academic-bot/
-├── backend/                    # Core Rust backend service
-│   ├── migrations/             # SQL database migrations
-│   │   ├── *_init_schema.up.sql
-│   │   └── *_init_schema.down.sql
-│   │
-│   ├── src/
-│   │   ├── main.rs             # Application entry point & wiring
-│   │   │
-│   │   ├── classifier.rs       # Message type classification (command, task, ignore, etc.)
-│   │   ├── models.rs           # Domain models shared across the application
-│   │   ├── scheduler.rs        # Background jobs (reminders, periodic tasks)
-│   │   ├── whitelist.rs        # Access control for users / groups
-│   │   │
-│   │   ├── database/           # Database access layer
-│   │   │   ├── pool.rs         # PostgreSQL connection pool setup
-│   │   │   ├── crud.rs         # Database queries and mutations
-│   │   │   └── mod.rs
-│   │   │
-│   │   └── parser/             # Message parsing layer
-│   │       ├── commands.rs     # Deterministic command parsing (#done, #expand, etc.)
-│   │       ├── ai_extractor.rs # AI-assisted extraction from free-form messages
-│   │       └── mod.rs
-│   │
-│   ├── .env                    # Local environment variables (not committed)
-│   ├── Cargo.toml              # Rust project manifest
-│   ├── Cargo.lock
-│   └── README.md               # Backend-specific notes (if any)
-│
-├── waha/                       # WhatsApp HTTP API (external dependency)
-│   ├── .waha/                  # WAHA session data (not committed)
-│   └── waha_data/              # Runtime data / volumes
-│
-├── .gitignore
-└── README.md                   # Project documentation (this file)
+███╗   ███╗ █████╗ ██████╗ ██████╗  ██████╗ ████████╗
+████╗ ████║██╔══██╗██╔══██╗██╔══██╗██╔═══██╗╚══██╔══╝
+██╔████╔██║███████║██████╔╝██████╔╝██║   ██║   ██║   
+██║╚██╔╝██║██╔══██║██╔══██╗██╔══██╗██║   ██║   ██║   
+██║ ╚═╝ ██║██║  ██║██║  ██║██████╔╝╚██████╔╝   ██║   
+╚═╝     ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝  ╚═════╝    ╚═╝   
+                                                     
+         WhatsApp Academic Assistant v1.0          
 ```
 
-## Quick Start
+[![Rust](https://img.shields.io/badge/rust-%23000000.svg?style=for-the-badge&logo=rust&logoColor=white)](https://www.rust-lang.org/)
+[![PostgreSQL](https://img.shields.io/badge/postgres-%23316192.svg?style=for-the-badge&logo=postgresql&logoColor=white)](https://www.postgresql.org/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)](https://opensource.org/licenses/MIT)
+
+**Never miss a deadline again.** An intelligent WhatsApp bot that automatically extracts, organizes, and reminds you about academic assignments using cutting-edge AI.
+
+[Features](#-features) • [Installation](#-installation) • [Commands](#-commands) • [Architecture](#-architecture) • [Contributing](#-contributing)
+
+</div>
+
+---
+
+## ✨ Features
+
+### 🧠 **AI-Powered Intelligence**
+- **Multi-Model Architecture**: Groq reasoning models (120B GPT-OSS) → Vision models → Gemini fallback
+- **Smart Extraction**: Automatically detects assignments from natural language messages
+- **Multimodal Support**: Processes both text and images (even when images are memes!)
+- **Context-Aware**: Uses schedule data to predict deadlines intelligently
+- **Duplicate Detection**: AI-powered duplicate checking prevents redundant entries
+
+### 📚 **Academic Management**
+- **Assignment Tracking**: Automatically captures course, title, deadline, description, and parallel code
+- **Multiple Assignments**: Handles bulk announcements (e.g., "LKP 14, LKP 15, LKP 16 tomorrow")
+- **Update Detection**: Recognizes assignment changes and clarifications
+- **Clarification Flow**: Interactive system for incomplete assignment data
+- **Schedule Oracle**: Predicts "before next meeting" deadlines using class schedules
+
+### 👤 **Personal Productivity**
+- **Per-User Task Lists**: Track your own completion status
+- **Smart Filtering**: View today's tasks, this week's tasks, or all tasks
+- **Assignment Details**: Expand any task to see full info + forward original message
+- **Progress Tracking**: Mark tasks as done/undone with undo support
+
+### 🔔 **Automated Reminders**
+- **Twice Daily**: Morning (07:00) and evening (17:00) GMT+7
+- **Smart Prioritization**: Color-coded by urgency (🔴 0-2 days, 🟢 >2 days, ⚪ no deadline)
+- **Humanized Dates**: "Hari ini", "Besok", "H-5" in Indonesian
+
+### 🛡️ **Reliability & Safety**
+- **Anti-Spam**: Rate limiting on commands (5 commands / 30 seconds)
+- **Whitelist System**: Only processes assignments from authorized academic channels
+- **Deduplication**: Message cache prevents duplicate processing
+- **Error Recovery**: Graceful fallback through multiple AI models
+- **Performance Monitoring**: Real-time latency tracking for AI and database operations
+
+---
+
+## 🚀 Installation
 
 ### Prerequisites
-- Docker installed
-- Rust toolchain (`rustup`)
-- PostgreSQL database
-- WhatsApp account for bot
-
-### 1. Set Up Database
-
 ```bash
-cd backend
-cp .env.example .env
-# Edit .env with your database credentials
+# Required
+Rust 1.70+
+PostgreSQL 14+
+WAHA (WhatsApp HTTP API)
+
+# API Keys
+Groq API Key (free tier available)
+Gemini API Key (free tier available)
+```
+
+### 1. Clone Repository
+```bash
+git clone https://github.com/gimigkk/marbot-academic-bot.git
+cd marbot-academic-bot
+```
+
+### 2. Database Setup
+```sql
+-- Create database
+CREATE DATABASE marbot;
+
+-- Run migrations (schema in migrations folder)
+-- Or use SQLx CLI:
+sqlx database create
 sqlx migrate run
 ```
 
-### 2. Start WAHA Container
+### 3. Configure Environment
+Create a `.env` file:
+```env
+# Database
+DATABASE_URL=postgresql://user:password@localhost/marbot
 
-```bash
-cd ~/Academic\ Bot/waha
+# AI Models
+GROQ_API_KEY=gsk_your_groq_api_key
+GEMINI_API_KEY=your_gemini_api_key
 
-sudo docker run -d \
---name waha \
--p 3001:3000 \
--e WAHA_API_KEY=devkey123 \
--e WHATSAPP_HOOK_URL=http://172.17.0.1:3000/webhook \
--e WHATSAPP_HOOK_EVENTS=message.any \
--e WHATSAPP_HOOK_MEDIA=true \
--e WHATSAPP_DOWNLOAD_MEDIA=true \
--v "$HOME/Desktop/Projects/Academic Bot/waha/.waha:/app/.waha" \
-devlikeapro/waha
+# WhatsApp (WAHA)
+WAHA_URL=http://localhost:3001
+WAHA_API_KEY=your_waha_api_key
+
+# Channels (comma-separated)
+ACADEMIC_CHANNELS=120363xxxxxx@newsletter,120363yyyyyy@g.us
+DEBUG_GROUP_ID=120363zzzzzz@g.us
 ```
 
-### 3. Create WhatsApp Session & Authenticate WhatsApp
-
-```bash
-curl -X POST http://localhost:3001/api/sessions \
-  -H "Content-Type: application/json" \
-  -H "X-Api-Key: devkey123" \
-  -d '{
-    "name": "default",
-    "config": {
-      "webhooks": [
-        {
-          "url": "http://172.17.0.1:3000/webhook",
-          "events": ["message.any"]
-        }
-      ]
+### 4. Add Schedule Data
+Create `schedule.json` in the root directory:
+```json
+{
+  "Senin": [
+    {
+      "course": "KOM120C - Pemrograman",
+      "parallel": "K1",
+      "schedule": "08:00-09:40"
     }
-  }'
-
-# Get QR code
-curl -X GET http://localhost:3001/api/default/auth/qr \
-  -H "X-Api-Key: devkey123"
+  ],
+  "Selasa": [],
+  "Rabu": [],
+  "Kamis": [],
+  "Jumat": []
+}
 ```
 
-Scan the QR code with your WhatsApp account.
-
-### 4. Start Rust Backend
-
+### 5. Run Bot
 ```bash
-cd ../backend
+# Development
 cargo run
+
+# Production (optimized)
+cargo build --release
+./target/release/marbot
 ```
 
-**Expected output:**
-```
-🚀 Starting WhatsApp Academic Bot
-👂 Listening on 0.0.0.0:3000
-```
+### 6. Configure WAHA Webhook
+Point your WAHA webhook to: `http://your-server:3000/webhook`
 
-### 5. Test the Bot
+---
 
-Send from WhatsApp:
-```
-#ping
-```
-## Usage
+## 📱 Commands
 
-### Bot Commands
-
-Commands can be sent from **any chat** (DM, group, or channel):
-
+### General Commands
 | Command | Description | Example |
 |---------|-------------|---------|
-| `#ping` | Check if bot is alive | `#ping` |
-| `#tugas` | List all assignments | `#tugas` |
-| `#today` | List today assignments | `#today` |
-| `#week` | List this week assignments | `#week` |
-| `#tugas <id> or #<id>` | Forward original assignment details | `#tugas 1 or just #1` |
-| `#todo` | Show user specific list | `#todo` |
-| `#done <id>` | Mark assignment complete | `#done 1` |
-| `#undo` | removes the #done marker | `#undo` |
-| `#help` | Show help message | `#help` |
+| `#ping` | Check bot status & latency | `#ping` |
+| `#tugas` | List all active assignments (global) | `#tugas` |
+| `#help` | Show command reference | `#help` |
 
-### Natural Language Messages
+### Personal Commands
+| Command | Description | Example |
+|---------|-------------|---------|
+| `#todo` | Your personal task list | `#todo` |
+| `#today` | Tasks due today | `#today` |
+| `#week` | Tasks due this week | `#week` |
+| `#<number>` | View assignment details | `#3` |
+| `#done <number>` | Mark task as complete | `#done 3` |
+| `#undo` | Undo last completion | `#undo` |
 
-The bot automatically processes messages from **whitelisted channels only**:
+### Admin Commands (Academic Channels Only)
+| Command | Description | Example |
+|---------|-------------|---------|
+| `#delete <number>` | Delete assignment | `#delete 5` |
 
-**Creating Assignments:**
+---
+
+## 🏗️ Architecture
+
+### System Flow
 ```
-Tugas Pemrograman Bab 2 K1 deadline 2025-12-31
-Dikerjakan individu
+WhatsApp Message → WAHA → Webhook → Marbot → AI Processing → Database
+                                      ↓
+                                  Scheduler → Reminders → WhatsApp
 ```
 
-**Updating Assignments:**
+### AI Pipeline
 ```
-Pemrograman Bab 2 deadline diperpanjang jadi 2026-01-05
+1. Context Builder (Schedule Oracle + Parallel Detection)
+   ↓
+2. Classification (NEW/UPDATE/MULTIPLE/UNRECOGNIZED)
+   ↓
+3. Extraction (Course, Title, Deadline, Description, Parallel)
+   ↓
+4. Duplicate Check (Pre-filter + AI Verification)
+   ↓
+5. Database Storage
+   ↓
+6. Clarification (if incomplete) OR Success Notification
 ```
 
+### Tech Stack
+- **Framework**: Axum (async web framework)
+- **Database**: PostgreSQL + SQLx (compile-time query verification)
+- **Async Runtime**: Tokio
+- **AI Models**: 
+  - Groq (reasoning models for complex logic)
+  - Gemini (fallback + matching logic)
+- **Scheduling**: tokio-cron-scheduler
+- **HTTP Client**: reqwest
+
+---
+
+## 🎯 How It Works
+
+### 1. Message Classification
+```rust
+// Classifier determines message type
+"#tugas" → Command
+"Ada tugas LKP 15 besok" → NeedsAI (assignment info)
+"halo" → Unrecognized (ignored if not from academic channel)
 ```
-LKP 13 GKV dikumpulkan hari ini
+
+### 2. AI Extraction
+```
+Message: "Pemrog LKP 15 dan Kalkulus Quiz 3 besok jam 10"
+  ↓
+AI detects: MULTIPLE_ASSIGNMENTS
+  ↓
+Extracts:
+  1. Pemrograman - LKP 15 - 2026-01-04 10:00 - K1
+  2. Kalkulus - Quiz 3 - 2026-01-04 10:00 - null
 ```
 
-### AI Classification Logic
+### 3. Context Enhancement
+```
+Message: "LKP 15 sebelum pertemuan selanjutnya"
+  ↓
+Schedule Oracle checks: Pemrograman K1 next class is Wednesday 08:00
+  ↓
+AI uses hint: deadline = 2026-01-08 08:00
+```
 
-The bot uses Gemini AI to classify messages into three types:
+### 4. Duplicate Detection
+```
+New: "LKP 15 - Recursion"
+Existing in DB: "LKP 15 - Programming Lab 15"
+  ↓
+Pre-filter: Same course ✓, same number ✓, same type ✓
+  ↓
+AI verification: "High confidence duplicate" → UPDATE existing
+```
 
-1. **AssignmentInfo** (New Assignment)
-   - Extracts: course name, title, deadline, description, parallel code
-   - Example: "Tugas Matematika Diskrit deadline 2025-12-25"
+---
 
-2. **AssignmentUpdate** (Update Existing)
-   - Extracts: reference keywords, changes, new deadline
-   - Matches to existing assignment using AI
-   - Example: "Matdis deadline diperpanjang jadi 2026-01-10"
+## 🔧 Configuration
 
-3. **Unrecognized**
-   - Messages that don't contain academic info
-   - Ignored by the bot
+### Whitelist System
+Only messages from whitelisted channels are processed (except commands):
+```env
+ACADEMIC_CHANNELS=120363xxxxx@newsletter,120363yyyyy@g.us
+```
 
-## How It Works
+### Rate Limiting
+Default: 5 commands per 30 seconds per user (configurable in `main.rs`)
 
-1. **Message Arrives**: WAHA sends webhook to bot
-2. **Duplicate Check**: Skip if already processed
-3. **Whitelist Check**: Only process if from academic channel (or is a command)
-4. **AI Classification**: Gemini determines if it's assignment info
-5. **Database**: Save or update assignment
-6. **Reply**: Confirm via WhatsApp
+### AI Model Selection
+Models are tried in order (edit `ai_extractor/mod.rs`):
+1. Groq Reasoning (openai/gpt-oss-120b)
+2. Groq Vision (if image attached)
+3. Groq Standard (llama-3.3-70b)
+4. Gemini (fallback)
 
-## Troubleshooting
+---
 
-**Bot not responding?**
-- Check WAHA is running
-- Verify webhook URL is correct
-- Check `WAHA_API_KEY`
+## 📊 Database Schema
 
-**Messages ignored?**
-- Make sure chat ID is in `ACADEMIC_CHANNELS`
-- Commands work from anywhere, regular messages only from whitelisted channels
+### Core Tables
+- **courses**: Course information with aliases
+- **assignments**: Assignment details with deadline, description, parallel
+- **user_completions**: Per-user completion status
+- **wa_logs**: Webhook event logs
 
-**Duplicate assignments?**
-- Bot checks for duplicates by title + course
-- If issue persists, check database logs
+### Key Features
+- UUID primary keys
+- JSONB for flexible metadata
+- Array columns for message_ids
+- Foreign key constraints
+
+---
+
+## 🤝 Contributing
+
+We welcome contributions! Here's how:
+
+1. **Fork** the repository
+2. **Create** a feature branch (`git checkout -b feature/amazing-feature`)
+3. **Commit** your changes (`git commit -m 'Add amazing feature'`)
+4. **Push** to the branch (`git push origin feature/amazing-feature`)
+5. **Open** a Pull Request
+
+### Development Guidelines
+- Run `cargo fmt` before committing
+- Run `cargo clippy` to check for issues
+- Add tests for new features
+- Update README if adding user-facing changes
+
+---
+
+## 📜 License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+---
+
+## 👥 Authors
+
+**Created by Gilang & Arya**
+
+- 💬 Questions? Open an issue on GitHub
+- 🌟 Like the project? Give us a star!
+- 🐛 Found a bug? Report it in Issues
+
+---
+
+## 🙏 Acknowledgments
+
+- **WAHA** - WhatsApp HTTP API
+- **Groq** - Lightning-fast inference
+- **Google Gemini** - Reliable fallback model
+- **Rust Community** - Amazing ecosystem
+
+---
+
+<div align="center">
+
+**Made with ❤️ and 🦀 Rust**
+
+[⬆ Back to Top](#-marbot---academic-assignment-bot)
+
+</div>
