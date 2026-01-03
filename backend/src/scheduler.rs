@@ -48,7 +48,7 @@ async fn run_reminder_task(pool: PgPool, greeting: &str) -> Result<(), Box<dyn s
     let mut message = String::new();
     message.push_str(greeting);
     message.push_str("\n*Pengingat Tugas*\n\n");
-    message.push_str("Keterangan:\n🔴 Deadline 0–2 hari\n🟢 Deadline > 2 hari\n⚪ Belum ada deadline\n\n");
+    //message.push_str("Keterangan:\n🔴 Deadline 0–2 hari\n🟢 Deadline > 2 hari\n⚪ Belum ada deadline\n\n");
 
     for (i, a) in assignments.iter().enumerate() {
         let status = status_dot(&a.deadline);
@@ -66,9 +66,9 @@ async fn run_reminder_task(pool: PgPool, greeting: &str) -> Result<(), Box<dyn s
             .map(|d| format!("📝 {}", preview_text(&d, 25)))
             .unwrap_or_default();
 
-        message.push_str(&format!("{} *[{}] [{}]*\n", status, i + 1, course));
         message.push_str(&format!("{} *[{}] [{}]*\n", status, i + 1, title));
         message.push_str(&format!("📌 {}\n", course));
+        message.push_str(&format!("⏰ {}\n", due_text));
         if !desc_line.is_empty() {
             message.push_str(&format!("{}\n", desc_line));
         }

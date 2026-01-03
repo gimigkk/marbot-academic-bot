@@ -75,6 +75,13 @@ pub fn build_classification_prompt(
         let mut hints = String::from("\n\nRESOLVED CONTEXT (HINTS - USE AS REFERENCE WHEN NEEDED)\n");
         hints.push_str("═══════════════════════════════════════════════════════════════════\n");
         
+        // ✅ NEW: Show quoted message context prominently
+        if let Some(ref quoted) = ctx.quoted_message_summary {
+            hints.push_str("✓ QUOTED MESSAGE REFERENCE:\n");
+            hints.push_str(&format!("  {}\n", quoted));
+            hints.push_str("  → User is replying to/updating this assignment\n\n");
+        }
+        
         if let Some(ref parallel) = ctx.parallel_code {
             hints.push_str(&format!(
                 "✓ Global Parallel: {} (confidence: {:.0}%, source: {})\n",
@@ -107,7 +114,8 @@ pub fn build_classification_prompt(
         }
         
         hints.push_str("\n⚠️ HOW TO USE HINTS:\n");
-        hints.push_str("- Hints are SUGGESTIONS based on schedule/patterns\n");
+        hints.push_str("- Hints are SUGGESTIONS based on schedule/patterns/quoted messages\n");
+        hints.push_str("- QUOTED MESSAGE: If present, this is the assignment being updated/referenced\n");
         hints.push_str("- For \"sebelum pertemuan\"/\"before next meeting\": Use the suggested deadline if available\n");
         hints.push_str("- For explicit dates (\"besok\", \"5 Januari\"): Calculate yourself using reference dates above\n");
         hints.push_str("- For parallels: Use hint when not explicitly mentioned in message\n");
@@ -150,6 +158,14 @@ Classify this message as:
 CLASSIFICATION GUIDELINES
 ═══════════════════════════════════════════════════════════════════
 
+**QUOTED MESSAGE HANDLING (PRIORITY):**
+- If QUOTED MESSAGE REFERENCE is present in context, the user is replying to a previous assignment
+- Common patterns when replying:
+  * "diundur" / "berubah" / "changed" = UPDATE to quoted assignment
+  * "diperjelas" / "clarification" = UPDATE with more details
+  * "ada lagi" / "another one" = NEW assignment (NOT updating the quoted one)
+- Extract course/parallel/existing info from quoted context to improve matching
+
 **MULTIPLE_ASSIGNMENTS (PRIORITY CHECK):**
 Signals:
 - Numbered lists: "1. Pemrog LKP 14...\n2. Kalkulus Tugas 3..."
@@ -170,20 +186,25 @@ NEW_ASSIGNMENT signals:
 - "ada tugas baru", "new assignment", clear announcement
 - Contains: course + deadline + description
 - Sequential numbering not in DB (LKP 15 when only LKP 14 exists)
+- "ada lagi" when replying = NEW, not update
 
 UPDATE_ASSIGNMENT patterns:
 - **Explicit change words**: "berubah", "ganti", "diundur", "dimajuin", "revisi", "update", "correction"
 - **Clarification with reference**: "Tugas yang kemarin", "assignment from yesterday"
+- **Replying to quoted message** with change indicators
 - **MUST have change language** - don't assume update just because assignment exists
 
 **Key distinction**:
 - "Ada tugas LKP 15 lagi" → NEW (re-announcement, check for duplicate)
 - "LKP 15 deadline berubah" → UPDATE (explicit change)
+- Replying with "diundur" → UPDATE (use quoted context)
+- Replying with "ada lagi yang ini" → NEW (different assignment)
 
 **Matching logic for updates:**
 Use semantic understanding, not exact strings:
 - "coding pake kertas" can match "Coding on Paper Assignment"
 - Match by: course + identifying keywords (topic/number)
+- If QUOTED MESSAGE present: strongly prioritize that assignment
 - If reasonable match in DB → UPDATE
 
 UNRECOGNIZED:
@@ -193,6 +214,7 @@ PARALLEL CODES
 ═══════════════════════════════════════════════════════════════════
 Valid codes (lowercase): k1, k2, k3, p1, p2, p3, r1, r2, r3, all, null
 Different codes = different assignments (K1 ≠ K2)
+Extract from quoted context if replying and not explicitly mentioned
 
 **CRITICAL: DESCRIPTION FIELD IS MANDATORY**
 ═══════════════════════════════════════════════════════════════════
@@ -222,14 +244,15 @@ UNRECOGNIZED:
 
 PRINCIPLES
 ═══════════════════════════════════════════════════════════════════
-1. **Check for multiple assignments FIRST** before single assignment
-2. **Semantic over literal**: Understand intent, not just keywords
-3. **Context matters**: Use DB and RESOLVED CONTEXT hints
-4. **ALWAYS GENERATE DESCRIPTIONS**: Never leave description field empty
-5. **Deadline format**: YYYY-MM-DD HH:MM (use provided time from hints, 23:59 for dates without time, NULL if no info)
-6. **Confidence-based**: High confidence → classify; Low → UNRECOGNIZED
-7. **Course boundaries**: Never match updates across different courses
-8. **When uncertain**: NEW > UPDATE (avoid bad matches); Classification > UNRECOGNIZED (avoid noise)
+1. **Check for QUOTED MESSAGE first** - prioritize context from replies
+2. **Check for multiple assignments SECOND** before single assignment
+3. **Semantic over literal**: Understand intent, not just keywords
+4. **Context matters**: Use DB, RESOLVED CONTEXT hints, and QUOTED references
+5. **ALWAYS GENERATE DESCRIPTIONS**: Never leave description field empty
+6. **Deadline format**: YYYY-MM-DD HH:MM (use provided time from hints, 23:59 for dates without time, NULL if no info)
+7. **Confidence-based**: High confidence → classify; Low → UNRECOGNIZED
+8. **Course boundaries**: Never match updates across different courses
+9. **When uncertain**: NEW > UPDATE (avoid bad matches); Classification > UNRECOGNIZED (avoid noise)
 
 Return ONLY valid JSON. No markdown, no explanations."#,
         current_datetime,
