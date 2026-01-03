@@ -14,6 +14,8 @@ use tokio::net::TcpListener;
 use sqlx::PgPool;
 use std::time::{Instant, Duration}; 
 use std::collections::HashMap;
+use chrono::{Datelike, Timelike};
+use chrono::Duration as ChronoDuration;
 
 pub mod models;
 pub mod scheduler;
@@ -262,120 +264,133 @@ async fn webhook(
 
     // ============= CLARIFICATION HANDLER =============
     if let Some(quoted) = payload.payload.get_quoted_message() {
-        // Check if this is a reply to EITHER the info message OR the template message
         let is_clarification_reply = quoted.text.contains("⚠️ *PERLU KLARIFIKASI*") 
             || quoted.text.contains("ID:") && quoted.text.contains("```");
         
         if is_clarification_reply {
             println!("📝 Clarification response detected from {}", sender_phone);
-            //println!("🔍 DEBUG: Quoted text: '{}'", &quoted.text[..quoted.text.len().min(200)]);
             
             if let Some(assignment_id) = clarification::extract_assignment_id_from_message(&quoted.text) {
-                //println!("🔍 Updating assignment: {}", assignment_id);
+                // Get current year for date parsing
+                let current_year = chrono::Local::now().year();
                 
-                let updates = clarification::parse_clarification_response(&payload.payload.body);
+                // Get the current assignment to check existing deadline
+                let current_assignment = crud::get_assignment_with_course_by_id(&state.pool, assignment_id).await.ok().flatten();
+                let current_deadline = current_assignment.as_ref()
+                    .and_then(|a| a.deadline)
+                    .map(|dt| dt.naive_utc());
 
-                if updates.is_empty() {
-                    let error_msg = "❌ Format tidak valid. Gunakan format:\n\
-                                    `Course: [nama]`\n\
-                                    `Title: [judul]`\n\
-                                    `Deadline: [YYYY-MM-DD]`\n\
-                                    `Parallel: [K1/K2/K3]`\n\
-                                    `Description: [keterangan]`\n\n\
-                                    _Cukup isi field yang kurang saja!_";
-                    
-                    if let Err(e) = send_reply(chat_id, error_msg).await {
-                        eprintln!("❌ Failed to send error: {}", e);
-                    }
-                    return StatusCode::OK;
-                }
+                // Parse the clarification response
+                match clarification::parse_clarification_response(&payload.payload.body, current_year, current_deadline) {
+                    Ok(updates) => {
+                        // Extract fields from updates HashMap
+                        let new_deadline = updates.get("deadline")
+                            .and_then(|d| crud::parse_deadline(d).ok());
+                        let new_title = updates.get("title").cloned();
+                        let new_description = updates.get("description").cloned();
+                        let new_parallel = updates.get("parallel_code").cloned();
 
-
-                let new_deadline = updates.get("deadline").and_then(|d| crud::parse_deadline(d).ok());
-                let new_title = updates.get("title").cloned();
-                let new_description = updates.get("description").cloned();
-                let new_parallel = updates.get("parallel_code").map(|p| p.to_lowercase());
-
-                let course_id = if let Some(course_name) = updates.get("course_name") {
-                    match crud::get_course_by_name(&state.pool, course_name).await {
-                        Ok(Some(course)) => Some(course.id),
-                        Ok(None) => {
-                            let error_msg = format!("❌ Mata kuliah '{}' tidak ditemukan.", course_name);
-                            if let Err(e) = send_reply(chat_id, &error_msg).await {
-                                eprintln!("❌ Failed to send error: {}", e);
-                            }
-                            return StatusCode::OK;
-                        }
-                        Err(e) => {
-                            eprintln!("❌ Failed to lookup course: {}", e);
-                            None
-                        }
-                    }
-                } else {
-                    None
-                };
-
-                match crud::update_assignment_fields(
-                    &state.pool,
-                    assignment_id,
-                    new_deadline,
-                    new_title.clone(),
-                    new_description.clone(),
-                    new_parallel.clone(),
-                    None,
-                ).await {
-                    Ok(_updated) => {
-                        if let Some(cid) = course_id {
-                            if let Err(e) = sqlx::query("UPDATE assignments SET course_id = $1 WHERE id = $2")
-                                .bind(cid).bind(assignment_id).execute(&state.pool).await {
-                                    eprintln!("❌ Failed to update course_id: {}", e);
+                        // Handle course_id lookup if course_name is provided
+                        let course_id = if let Some(course_name) = updates.get("course_name") {
+                            match crud::get_course_by_name(&state.pool, course_name).await {
+                                Ok(Some(course)) => Some(course.id),
+                                Ok(None) => {
+                                    let error_msg = format!("❌ Mata kuliah '{}' tidak ditemukan.", course_name);
+                                    let _ = send_reply(chat_id, &error_msg).await;
+                                    return StatusCode::OK;
                                 }
-                        }
-                        
-                        // ✅ FETCH THE COMPLETE UPDATED ASSIGNMENT
-                        if let Ok(Some(full_assignment)) = crud::get_assignment_with_course_by_id(&state.pool, assignment_id).await {
-                            let response = format!(
-                                "✅ *KLARIFIKASI TERSIMPAN*\n\
-                                \n\
-                                📝 *{}*\n\
-                                📚 {}\n\
-                                📄 {}\n\
-                                ⏰ Deadline: {}\n\
-                                🧩 Parallel: {}\n\
-                                \n\
-                                _Terima kasih atas klarifikasinya!_",
-                                full_assignment.title,
-                                full_assignment.course_name,
-                                full_assignment.description.as_deref().unwrap_or("(tidak ada deskripsi)"),
-                                full_assignment.deadline
-                                    .map(|d| d.format("%Y-%m-%d %H:%M").to_string())
-                                    .unwrap_or("(belum ditentukan)".to_string()),
-                                full_assignment.parallel_code.as_deref().unwrap_or("(belum ditentukan)")
-                            );
-                            
-                            if let Err(e) = send_reply(chat_id, &response).await {
-                                eprintln!("❌ Failed to send confirmation: {}", e);
+                                Err(e) => {
+                                    eprintln!("❌ Failed to lookup course: {}", e);
+                                    None
+                                }
                             }
                         } else {
-                            // Fallback if fetch fails
-                            let response = "✅ *KLARIFIKASI TERSIMPAN*\n\n_Terima kasih atas klarifikasinya!_";
-                            let _ = send_reply(chat_id, response).await;
+                            None
+                        };
+
+                        // Update the assignment
+                        match crud::update_assignment_fields(
+                            &state.pool,
+                            assignment_id,
+                            new_deadline,
+                            new_title,
+                            new_description,
+                            new_parallel,
+                            None,
+                        ).await {
+                            Ok(_) => {
+                                // Update course_id if provided
+                                if let Some(cid) = course_id {
+                                    let _ = sqlx::query("UPDATE assignments SET course_id = $1 WHERE id = $2")
+                                        .bind(cid)
+                                        .bind(assignment_id)
+                                        .execute(&state.pool)
+                                        .await;
+                                }
+                                
+                                // Fetch complete updated assignment for confirmation
+                                if let Ok(Some(full_assignment)) = crud::get_assignment_with_course_by_id(&state.pool, assignment_id).await {
+                                    let deadline_display = full_assignment.deadline
+                                        .map(|d| {
+                                            // Convert UTC to Indonesia timezone (GMT+7)
+                                            let indonesia_time = d + ChronoDuration::hours(7);
+                                            indonesia_time.format("%Y-%m-%d %H:%M WIB").to_string()
+                                        })
+                                        .unwrap_or("(belum ditentukan)".to_string());
+
+                                    let response = format!(
+                                        "✅ *KLARIFIKASI TERSIMPAN*\n\
+                                        \n\
+                                        📝 *{}*\n\
+                                        📚 {}\n\
+                                        📄 {}\n\
+                                        ⏰ {}\n\
+                                        🧩 Parallel: {}\n\
+                                        \n\
+                                        _Terima kasih atas klarifikasinya!_",
+                                        full_assignment.title,
+                                        full_assignment.course_name,
+                                        full_assignment.description.as_deref().unwrap_or("(tidak ada deskripsi)"),
+                                        deadline_display,
+                                        full_assignment.parallel_code.as_deref().unwrap_or("(belum ditentukan)")
+                                    );
+                                    
+                                    let _ = send_reply(chat_id, &response).await;
+                                } else {
+                                    let _ = send_reply(chat_id, "✅ *KLARIFIKASI TERSIMPAN*\n\n_Terima kasih atas klarifikasinya!_").await;
+                                }
+                            }
+                            Err(e) => {
+                                let error_msg = format!("❌ Gagal menyimpan: {}", e);
+                                let _ = send_reply(chat_id, &error_msg).await;
+                            }
                         }
                     }
-                    Err(e) => {
-                        let error_msg = format!("❌ Gagal menyimpan: {}", e);
-                        if let Err(e) = send_reply(chat_id, &error_msg).await {
-                            eprintln!("❌ Failed to send error: {}", e);
+                    Err(err_type) => {
+                        match err_type.as_str() {
+                            "cancelled" => {
+                                let cancel_msg = clarification::generate_cancellation_message(assignment_id);
+                                let _ = send_reply(chat_id, &cancel_msg).await;
+                            }
+                            "no_data" => {
+                                let parse_fail_msg = clarification::generate_parse_failed_message();
+                                let _ = send_reply(chat_id, &parse_fail_msg).await;
+                            }
+                            "no_date" => {
+                                let no_date_msg = clarification::generate_no_date_message();
+                                let _ = send_reply(chat_id, &no_date_msg).await;
+                            }
+                            _ => {
+                                let _ = send_reply(chat_id, "❌ Terjadi kesalahan saat memproses klarifikasi.").await;
+                            }
                         }
                     }
                 }
 
                 return StatusCode::OK;
-            }
-            
-            else {
-                println!("⚠️  DEBUG: Could not extract assignment ID from quoted message");  // ADD THIS LINE
-                return StatusCode::OK;  // Still stop processing even if ID extraction fails
+            } else {
+                println!("⚠️  Could not extract assignment ID from quoted message");
+                return StatusCode::OK;
             }
         }
     }
@@ -883,7 +898,10 @@ async fn handle_single_assignment(
                 };
                 
                 let deadline_str = deadline_parsed
-                    .map(|d| format!("\n⏰ {}", d.format("%Y-%m-%d %H:%M")))
+                    .map(|d| {
+                        let indonesia_time = d + ChronoDuration::hours(7);
+                        format!("\n⏰ {}", indonesia_time.format("%Y-%m-%d %H:%M WIB"))
+                    })
                     .unwrap_or_default();
                 
                 let parallel_str = parallel_for_display
