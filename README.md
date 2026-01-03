@@ -2,7 +2,7 @@
 
 <div align="center">
 
-```
+<pre>
 ███╗   ███╗ █████╗ ██████╗ ██████╗  ██████╗ ████████╗
 ████╗ ████║██╔══██╗██╔══██╗██╔══██╗██╔═══██╗╚══██╔══╝
 ██╔████╔██║███████║██████╔╝██████╔╝██║   ██║   ██║   
@@ -11,7 +11,7 @@
 ╚═╝     ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝  ╚═════╝    ╚═╝   
                                                      
          WhatsApp Academic Assistant v1.0          
-```
+</pre>
 
 [![Rust](https://img.shields.io/badge/rust-%23000000.svg?style=for-the-badge&logo=rust&logoColor=white)](https://www.rust-lang.org/)
 [![PostgreSQL](https://img.shields.io/badge/postgres-%23316192.svg?style=for-the-badge&logo=postgresql&logoColor=white)](https://www.postgresql.org/)
