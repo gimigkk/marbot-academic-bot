@@ -21,7 +21,13 @@ fn build_context_assignments_list(
             let deadline = a.deadline
                 .map(|d| d.format("%Y-%m-%d %H:%M").to_string())
                 .unwrap_or_else(|| "No deadline".to_string());
-            let parallel = a.parallel_code.as_deref().unwrap_or("N/A");
+            
+            // ✅ Handle array of parallel codes
+            let parallel = if a.parallel_codes.is_empty() {
+                "N/A".to_string()
+            } else {
+                format!("[{}]", a.parallel_codes.join(", "))
+            };
             
             let course_name = a.course_id
                 .and_then(|id| course_map.get(&id))
@@ -29,7 +35,7 @@ fn build_context_assignments_list(
                 .unwrap_or("Unknown Course");
             
             format!(
-                "- Course: {}, Title: \"{}\", Deadline: {}, Parallel: {}, Desc: \"{}\"",
+                "- Course: {}, Title: \"{}\", Deadline: {}, Parallels: {}, Desc: \"{}\"",
                 course_name, a.title, deadline, parallel, truncate_for_log(&a.description, 80)
             )
         })
@@ -75,17 +81,20 @@ pub fn build_classification_prompt(
         let mut hints = String::from("\n\nRESOLVED CONTEXT (HINTS - USE AS REFERENCE WHEN NEEDED)\n");
         hints.push_str("═══════════════════════════════════════════════════════════════════\n");
         
-        // ✅ NEW: Show quoted message context prominently
+        // ✅ Show quoted message context prominently
         if let Some(ref quoted) = ctx.quoted_message_summary {
             hints.push_str("✓ QUOTED MESSAGE REFERENCE:\n");
             hints.push_str(&format!("  {}\n", quoted));
             hints.push_str("  → User is replying to/updating this assignment\n\n");
         }
         
-        if let Some(ref parallel) = ctx.parallel_code {
+        // ✅ Handle array of parallel codes
+        if !ctx.parallel_codes.is_empty() {
             hints.push_str(&format!(
-                "✓ Global Parallel: {} (confidence: {:.0}%, source: {})\n",
-                parallel, ctx.parallel_confidence * 100.0, ctx.parallel_source
+                "✓ Global Parallels: [{}] (confidence: {:.0}%, source: {})\n",
+                ctx.parallel_codes.join(", "), 
+                ctx.parallel_confidence * 100.0, 
+                ctx.parallel_source
             ));
         }
         
@@ -94,8 +103,9 @@ pub fn build_classification_prompt(
             for course_hint in &ctx.course_hints {
                 hints.push_str(&format!("  • {}", course_hint.course_name));
                 
-                if let Some(ref parallel) = course_hint.parallel_code {
-                    hints.push_str(&format!(" → Parallel: {}", parallel));
+                // ✅ Handle array of parallel codes
+                if !course_hint.parallel_codes.is_empty() {
+                    hints.push_str(&format!(" → Parallels: [{}]", course_hint.parallel_codes.join(", ")));
                 }
                 
                 if let Some(ref deadline) = course_hint.deadline_hint {
@@ -173,14 +183,21 @@ Signals:
 - Bullet points with different assignments
 - "ada 2 tugas", "3 assignments today"
 
-Extract each as separate assignment with ALL fields (course, title, deadline, description, parallel)
+**What qualifies as an assignment:**
+Must be ACTIONABLE WORK requiring submission or completion:
+- YES: Deliverables like homework, lab report, project, paper, presentation, quiz (to be taken), assignment, forms to fill (EPBM, surveys)
+- YES: Has submission requirement, grading component, or mandatory completion
+- NO: Informational like exam schedules (UTS/UAS), video uploads (unless watching is required for grade), reading materials, class cancellations
+- NO: Pure resources like links to materials, tutorials, lecture notes (unless submission required)
 
-**DEADLINE HANDLING:**
-- **If no deadline info exists in EITHER the message OR hints → deadline MUST be NULL**
-- If deadline hint is provided in RESOLVED CONTEXT, you MAY use it if appropriate
-- For dates WITHOUT specific time (e.g., "besok", "deadline Jumat") → USE 23:59 (end of day)
-- For dates WITH specific time (e.g., "jam 10 pagi") → USE that time
-- NEVER hallucinate dates when none are mentioned
+Extract each qualifying assignment with ALL fields (course, title, deadline, description, parallel_codes)
+
+**DEADLINE EXTRACTION:**
+Extract deadline from the message text.
+- Explicit dates: "24 Jan 2026 16:00" → use exactly
+- Relative with time context: "besok di awal kelas" → tomorrow at class start time (check hints for time)
+- Simple relative: "besok" → tomorrow 23:59
+- No deadline mentioned → null
 
 NEW_ASSIGNMENT signals:
 - "ada tugas baru", "new assignment", clear announcement
@@ -212,9 +229,16 @@ UNRECOGNIZED:
 
 PARALLEL CODES
 ═══════════════════════════════════════════════════════════════════
-Valid codes (lowercase): k1, k2, k3, p1, p2, p3, r1, r2, r3, all, null
-Different codes = different assignments (K1 ≠ K2)
+Valid codes (lowercase): k1, k2, k3, k4, p1, p2, p3, p4, r1, r2, r3, r4, all
+Return as ARRAY - assignments can target multiple parallels
+Different codes = different target groups
 Extract from quoted context if replying and not explicitly mentioned
+
+Examples:
+- "Tugas untuk k1 dan k2" → ["k1", "k2"]
+- "Semua kelas" → ["all"]
+- "Kelas k1, k3" → ["k1", "k3"]
+- No mention → []
 
 **CRITICAL: DESCRIPTION FIELD IS MANDATORY**
 ═══════════════════════════════════════════════════════════════════
@@ -228,16 +252,16 @@ MULTIPLE_ASSIGNMENTS:
 {{
   "type": "multiple_assignments",
   "assignments": [
-    {{ "course_name": "Pemrograman", "title": "LKP 14", "deadline": "2025-12-31 08:00", "description": "Programming lab assignment 14", "parallel_code": "k1" }},
-    {{ "course_name": "Kalkulus", "title": "Problem Set 5", "deadline": null, "description": "Calculus problem set 5", "parallel_code": null }}
+    {{ "course_name": "Pemrograman", "title": "LKP 14", "deadline": "2025-12-31 08:00", "description": "Programming lab assignment 14", "parallel_codes": ["k1", "k2"] }},
+    {{ "course_name": "Kalkulus", "title": "Problem Set 5", "deadline": null, "description": "Calculus problem set 5", "parallel_codes": [] }}
   ]
 }}
 
 NEW_ASSIGNMENT (single):
-{{"type":"assignment_info","course_name":"Pemrograman","title":"LKP 14","deadline":"2025-12-31 23:59","description":"Programming lab assignment 14","parallel_code":"k1"}}
+{{"type":"assignment_info","course_name":"Pemrograman","title":"LKP 14","deadline":"2025-12-31 23:59","description":"Programming lab assignment 14","parallel_codes":["k1"]}}
 
 UPDATE_ASSIGNMENT:
-{{"type":"assignment_update","reference_keywords":["CourseName","identifier"],"changes":"what changed","new_deadline":"2025-12-30 14:00","new_title":null,"new_description":null,"parallel_code":"all"}}
+{{"type":"assignment_update","reference_keywords":["CourseName","identifier"],"changes":"what changed","new_deadline":"2025-12-30 14:00","new_title":null,"new_description":null,"parallel_codes":["all"]}}
 
 UNRECOGNIZED:
 {{"type":"unrecognized"}}
@@ -252,7 +276,9 @@ PRINCIPLES
 6. **Deadline format**: YYYY-MM-DD HH:MM (use provided time from hints, 23:59 for dates without time, NULL if no info)
 7. **Confidence-based**: High confidence → classify; Low → UNRECOGNIZED
 8. **Course boundaries**: Never match updates across different courses
-9. **When uncertain**: NEW > UPDATE (avoid bad matches); Classification > UNRECOGNIZED (avoid noise)
+9. **Parallel codes as arrays**: Always return arrays, even for single parallel
+10. **When uncertain**: NEW > UPDATE (avoid bad matches); Classification > UNRECOGNIZED (avoid noise)
+11. **Assignment = Actionable work**: Only classify items that require student action/submission, not informational messages
 
 Return ONLY valid JSON. No markdown, no explanations."#,
         current_datetime,
@@ -273,10 +299,16 @@ pub fn build_matching_prompt(
     keywords: &[String], 
     assignments: &[Assignment],
     course_map: &HashMap<Uuid, String>,
-    parallel_code: Option<&str>,  
+    parallel_codes: &[String],  // ✅ Changed from Option<&str>
 ) -> String {
     let assignments_list = assignments.iter().enumerate().map(|(i, a)| {
-        let parallel_str = a.parallel_code.as_deref().unwrap_or("N/A");
+        // ✅ Handle array of parallel codes
+        let parallel_str = if a.parallel_codes.is_empty() {
+            "N/A".to_string()
+        } else {
+            format!("[{}]", a.parallel_codes.join(", "))
+        };
+        
         let course_name = a.course_id.and_then(|id| course_map.get(&id)).map(|s| s.as_str()).unwrap_or("Unknown Course");
         
         let created_ago = Utc::now().signed_duration_since(a.created_at);
@@ -286,14 +318,19 @@ pub fn build_matching_prompt(
         
         let desc_preview = if a.description.is_empty() { "(no description)".to_string() } else { truncate_for_log(&a.description, 60) };
         
-        format!("#{}: {} | {} | \"{}\" | Parallel: {} | Desc: \"{}\" | {}", i + 1, a.id, course_name, a.title, parallel_str, desc_preview, time_ago)
+        format!("#{}: {} | {} | \"{}\" | Parallels: {} | Desc: \"{}\" | {}", i + 1, a.id, course_name, a.title, parallel_str, desc_preview, time_ago)
     }).collect::<Vec<_>>().join("\n");
     
     let gmt7 = FixedOffset::east_opt(7 * 3600).unwrap();
     let now = Utc::now().with_timezone(&gmt7);
     let current_time = now.format("%Y-%m-%d %H:%M:%S").to_string();
     
-    let parallel_info = parallel_code.map(|pc| format!("Parallel code in update: {}", pc)).unwrap_or_else(|| "Parallel code: (not specified)".to_string());
+    // ✅ Handle array of parallel codes
+    let parallel_info = if parallel_codes.is_empty() {
+        "Parallel codes: (not specified)".to_string()
+    } else {
+        format!("Parallel codes in update: [{}]", parallel_codes.join(", "))
+    };
     
     format!(
         r#"Match this update to an existing assignment.
@@ -314,12 +351,18 @@ pub fn build_duplicate_detection_prompt(
     title: &str,
     description: &str,
     course_name: &str,
-    parallel_code: Option<&str>,
+    parallel_codes: &[String],  // ✅ Changed from Option<&str>
     existing_assignments: &[Assignment],
     course_map: &HashMap<Uuid, String>,
 ) -> String {
     let assignments_list = existing_assignments.iter().enumerate().map(|(i, a)| {
-        let parallel_str = a.parallel_code.as_deref().unwrap_or("null");
+        // ✅ Handle array of parallel codes
+        let parallel_str = if a.parallel_codes.is_empty() {
+            "null".to_string()
+        } else {
+            format!("[{}]", a.parallel_codes.join(", "))
+        };
+        
         let course = a.course_id.and_then(|id| course_map.get(&id)).map(|s| s.as_str()).unwrap_or("Unknown");
         
         let desc_preview = if a.description.is_empty() { 
@@ -328,13 +371,16 @@ pub fn build_duplicate_detection_prompt(
             a.description.chars().take(100).collect::<String>()
         };
         
-        format!("{}. ID: {} | Course: {} | Title: \"{}\" | Parallel: {} | Desc: \"{}\"", 
+        format!("{}. ID: {} | Course: {} | Title: \"{}\" | Parallels: {} | Desc: \"{}\"", 
             i + 1, a.id, course, a.title, parallel_str, desc_preview)
     }).collect::<Vec<_>>().join("\n");
     
-    let parallel_info = parallel_code
-        .map(|pc| format!("Parallel: {}", pc))
-        .unwrap_or_else(|| "Parallel: null".to_string());
+    // ✅ Handle array of parallel codes
+    let parallel_info = if parallel_codes.is_empty() {
+        "Parallels: []".to_string()
+    } else {
+        format!("Parallels: [{}]", parallel_codes.join(", "))
+    };
     
     format!(
         r#"STRICT DUPLICATE DETECTION
@@ -353,7 +399,8 @@ CRITICAL RULES:
 1. Sequential numbers = DIFFERENT (LKP 15 ≠ LKP 14 ≠ LKP 17)
 2. Assignment types must match (quiz ≠ lab ≠ homework)
 3. Topics must be similar
-4. When uncertain → NOT duplicate (safer to create new)
+4. Parallel codes must overlap (assignment targeting [k1, k2] can match [k1] or [k1, k2])
+5. When uncertain → NOT duplicate (safer to create new)
 
 TRUE DUPLICATES (rare cases only):
 - Exact match: "LKP 15" = "LKP 15" ✓
@@ -365,6 +412,7 @@ NOT DUPLICATES:
 - Different numbers: "LKP 15" ≠ "LKP 14" ✗
 - Different types: "Quiz 5" ≠ "Lab 5" ✗
 - Different topics: "Data Structures" ≠ "Algorithms" ✗
+- No parallel overlap: [k1, k2] ≠ [k3, k4] ✗
 
 OUTPUT FORMAT:
 {{

@@ -231,11 +231,11 @@ pub async fn handle_command(
                             .filter(|d| !d.is_empty())
                             .unwrap_or_else(|| "—".to_string());
 
-                        let code_line = assignment
-                            .parallel_code
-                            .as_ref()
-                            .map(|c| format!("\n🧩 Pararel: {}", sanitize_wa_md(c)))
-                            .unwrap_or_default();
+                        let code_line = if !assignment.parallel_codes.is_empty() {
+                            format!("\n🧩 Parallel: {}", assignment.format_parallel_display())
+                        } else {
+                            String::new()
+                        };
 
                         CommandResponse::ForwardMessage {
                             message_id,
@@ -479,12 +479,12 @@ fn format_assignments_list(
             .map(|d| format!("📝 {}", preview_text(&d, 25)))
             .unwrap_or_default();
 
-        let code_line = a
-            .parallel_code
-            .as_ref()
-            .map(|c| format!("🧩 Kode: {}", sanitize_wa_md(c)))
-            .unwrap_or_default();
-
+        let code_line = if !a.parallel_codes.is_empty() {
+            format!("🧩 Kode: {}", a.format_parallel_display())
+        } else {
+            String::new()
+        };
+        
         response.push_str(&format!("{} *[{}] [{}]*\n", status_emoji, i + 1, title_fmt));
         response.push_str(&format!("📌 {}\n", course));
         response.push_str(&format!("⏰ Deadline: {}\n", due_text));
