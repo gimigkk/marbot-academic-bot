@@ -1,7 +1,6 @@
 -- 1. Extension (Untuk UUID)
 create extension if not exists "uuid-ossp";
 
-
 -- TABEL 1: COURSES (Mata Kuliah)
 create table public.courses (
   id uuid default uuid_generate_v4() primary key,
@@ -34,8 +33,7 @@ create table public.assignments (
   description text not null, -- Deskripsi
   deadline timestamp with time zone,
 
-  -- Paralel
-  parallel_code text check (parallel_code = lower(parallel_code)),
+  parallel_codes text[], -- Pararel dalam bentuk array
 
   -- Sumber Chat
   sender_id text,           -- Nomor Pengirim
