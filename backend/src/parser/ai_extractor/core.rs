@@ -10,7 +10,7 @@ use once_cell::sync::Lazy;
 use super::prompts::*;
 use super::parsing::*;
 use super::{GROQ_REASONING_MODELS, GROQ_VISION_MODELS, GROQ_TEXT_MODELS, GEMINI_MODELS};
-use super::context_builder::build_context;  // Fixes build_context error
+use super::context_builder::build_context;
 
 
 pub static SCHEDULE_ORACLE: Lazy<ScheduleOracle> = Lazy::new(|| {
@@ -42,7 +42,7 @@ pub async fn extract_with_ai(
         println!("│ 💬 Quoted   : \x1b[35m\"{}\"\x1b[0m", truncate_for_log(quoted, 60));
     }
     
-    // NEW STAGE 1: Build context with quoted message
+    // STAGE 1: Build context with quoted message
     let context = match build_context(
         text, 
         sender_id, 
@@ -58,7 +58,11 @@ pub async fn extract_with_ai(
                 ctx.course_hints
                     .iter()
                     .map(|ch| {
-                        let parallel = ch.parallel_code.as_deref().unwrap_or("?");
+                        let parallel = if ch.parallel_codes.is_empty() {
+                            "?".to_string()
+                        } else {
+                            format!("[{}]", ch.parallel_codes.join(","))
+                        };
                         let deadline = ch.deadline_hint.as_deref().unwrap_or("?");
                         format!("{}:{}/{}", ch.course_name, parallel, deadline)
                     })
@@ -66,12 +70,17 @@ pub async fn extract_with_ai(
                     .join(", ")
             };
             
-            println!("│\n│ ✅ Context  : Parallel={:?} ({}), Courses=[{}]",
-                ctx.parallel_code, ctx.parallel_source, courses_summary);
+            let parallel_display = if ctx.parallel_codes.is_empty() {
+                "none".to_string()
+            } else {
+                format!("[{}]", ctx.parallel_codes.join(", "))
+            };
             
-            // ✅ Show quoted context if resolved
+            println!("│\n│ ✅ Context  : Parallel={} ({}), Courses=[{}]",
+                parallel_display, ctx.parallel_source, courses_summary);
+            
             if let Some(ref quoted_summary) = ctx.quoted_message_summary {
-                println!("│              {}", quoted_summary);
+                println!("│              Quoted: {}", quoted_summary);
             }
             
             Some(ctx)
@@ -90,7 +99,7 @@ pub async fn extract_with_ai(
         course_map, 
         &current_datetime, 
         &current_date,
-        context.as_ref()  // Pass Option<&MessageContext> with quoted info
+        context.as_ref()
     );
     
     println!("│ 🤖 Stage 2  : Extracting with AI...");
@@ -101,21 +110,20 @@ pub async fn extract_with_ai(
     println!("│ 📊 Context  : {} active assignments", active_assignments.len());
     println!("│ 📅 Time     : {}", current_datetime);
     
-    // [Rest of the function remains the same...]
-    // TIER 1: Try vision model if image present
+    // TIER 1: If image present, try Groq vision first, then fallback to Gemini text-only
     if let Some(img) = image_base64 {
         match try_groq_vision(&prompt, img).await {
             Ok(classification) => {
                 match classification {
                     AIClassification::Unrecognized => {
                         println!("│ ℹ️  Vision Result: Unrecognized (image likely irrelevant)");
-                        println!("│ 🔄 Retrying with text-only analysis...");
+                        println!("│ 🔄 Retrying with Gemini text-only...");
                         
-                        match try_groq_reasoning(&prompt).await {
+                        match try_gemini_models(&prompt).await {
                             Ok(text_result) => {
                                 match text_result {
                                     AIClassification::Unrecognized => {
-                                        println!("│ ⚠️  Text-only: Still unrecognized");
+                                        println!("│ ⚠️  Gemini: Still unrecognized");
                                         println!("\x1b[1;30m└──────────────────────────────────────────────\x1b[0m");
                                         return Ok(AIClassification::Unrecognized);
                                     }
@@ -127,7 +135,7 @@ pub async fn extract_with_ai(
                                 }
                             }
                             Err(e) => {
-                                eprintln!("│ ⚠️  Text fallback failed: {}", e);
+                                eprintln!("│ ⚠️  Gemini fallback failed: {}", e);
                             }
                         }
                     }
@@ -140,66 +148,127 @@ pub async fn extract_with_ai(
             }
             Err(e) => {
                 eprintln!("│ ⚠️  Vision model error: {}", e);
-                println!("│ 🔄 Trying text-only...");
+                println!("│ 🔄 Trying Gemini text-only...");
                 
-                match try_groq_reasoning(&prompt).await {
+                match try_gemini_models(&prompt).await {
                     Ok(classification) => {
                         log_classification_success(&classification);
                         println!("\x1b[1;30m└──────────────────────────────────────────────\x1b[0m");
                         return Ok(classification);
                     }
                     Err(e) => {
-                        eprintln!("│ ⚠️  Text fallback failed: {}", e);
+                        eprintln!("│ ⚠️  Gemini fallback failed: {}", e);
                     }
                 }
             }
         }
     } else {
-        match try_groq_reasoning(&prompt).await {
+        // TIER 1: No image - try Gemini first
+        match try_gemini_models(&prompt).await {
             Ok(classification) => {
                 log_classification_success(&classification);
                 println!("\x1b[1;30m└──────────────────────────────────────────────\x1b[0m");
                 return Ok(classification);
             }
             Err(e) => {
-                eprintln!("│ ⚠️  Groq Reasoning failed: {}", e);
-                eprintln!("│ 🔄 Falling back to Gemini...");
+                eprintln!("│ ⚠️  Gemini failed: {}", e);
+                eprintln!("│ 🔄 Falling back to Groq...");
             }
         }
     }
     
-    // TIER 2: Gemini fallback
-    for (index, model) in GEMINI_MODELS.iter().enumerate() {
-        println!("│ 🔄 Model    : {} (Gemini Fallback {}/{})", model, index + 1, GEMINI_MODELS.len());
-        
-        match try_gemini_model(model, &prompt).await {
-            Ok(classification) => {
-                log_classification_success(&classification);
-                println!("\x1b[1;30m└──────────────────────────────────────────────\x1b[0m");
-                return Ok(classification);
-            }
-            Err(e) => {
-                eprintln!("│ ❌ Failed   : {}", e);
-                if index == GEMINI_MODELS.len() - 1 {
-                    println!("\x1b[1;30m└──────────────────────────────────────────────\x1b[0m");
-                    return Err("All models failed".to_string());
-                }
-            }
+    // TIER 2: Groq fallback (reasoning models)
+    match try_groq_reasoning(&prompt).await {
+        Ok(classification) => {
+            log_classification_success(&classification);
+            println!("\x1b[1;30m└──────────────────────────────────────────────\x1b[0m");
+            return Ok(classification);
+        }
+        Err(e) => {
+            eprintln!("│ ⚠️  Groq Reasoning failed: {}", e);
         }
     }
     
     println!("\x1b[1;30m└──────────────────────────────────────────────\x1b[0m");
-    Err("No models available".to_string())
+    Err("All models failed".to_string())
 }
 
-// ===== GROQ REASONING MODELS (PRIORITY) =====
+// ===== GEMINI MODELS (PRIORITY) =====
+
+async fn try_gemini_models(prompt: &str) -> Result<AIClassification, String> {
+    let api_key = std::env::var("GEMINI_API_KEY")
+        .map_err(|_| "GEMINI_API_KEY not set in .env".to_string())?;
+    
+    for (index, model) in GEMINI_MODELS.iter().enumerate() {
+        println!("│ 🔄 Model    : {} (Gemini {}/{})", model, index + 1, GEMINI_MODELS.len());
+        
+        let url = format!(
+            "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent?key={}",
+            model, api_key
+        );
+        
+        let request_body = json!({
+            "contents": [{"parts": [{"text": prompt}]}],
+            "generationConfig": {
+                "temperature": 0.2,
+                "maxOutputTokens": 4096,
+                "responseMimeType": "application/json"
+            }
+        });
+        
+        let client = reqwest::Client::new();
+        let response = match client.post(&url).json(&request_body).send().await {
+            Ok(r) => r,
+            Err(e) => {
+                eprintln!("│ \x1b[31m❌ REQUEST FAILED\x1b[0m : {}", e);
+                continue;
+            }
+        };
+        
+        let status = response.status();
+        
+        if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
+            eprintln!("│ ⚠️  RATE LIMIT : {}", model);
+            if index < GEMINI_MODELS.len() - 1 {
+                continue;
+            } else {
+                return Err("All Gemini models rate limited".to_string());
+            }
+        }
+        
+        if status.is_success() {
+            println!("│ \x1b[32m✅ SUCCESS\x1b[0m  : Gemini response");
+            
+            let gemini_response: GeminiResponse = response.json().await
+                .map_err(|e| format!("Failed to deserialize: {}", e))?;
+            
+            let ai_text = extract_ai_text(&gemini_response)?;
+            
+            let classification = parse_classification(ai_text)?;
+            
+            return Ok(classification);
+        }
+        
+        let error_text = response.text().await
+            .unwrap_or_else(|_| "Unknown error".to_string());
+        eprintln!("│ ❌ ERROR    : {} - {}", status, truncate_for_log(&error_text, 60));
+        
+        if index < GEMINI_MODELS.len() - 1 {
+            continue;
+        }
+    }
+    
+    Err("All Gemini models failed".to_string())
+}
+
+// ===== GROQ REASONING MODELS (FALLBACK) =====
 
 async fn try_groq_reasoning(prompt: &str) -> Result<AIClassification, String> {
     let api_key = std::env::var("GROQ_API_KEY")
         .map_err(|_| "GROQ_API_KEY not set in .env".to_string())?;
     
     for (index, model) in GROQ_REASONING_MODELS.iter().enumerate() {
-        println!("│ 🔄 Model    : {} (Reasoning {}/{})", model, index + 1, GROQ_REASONING_MODELS.len());
+        println!("│ 🔄 Model    : {} (Groq Reasoning {}/{})", model, index + 1, GROQ_REASONING_MODELS.len());
         
         let url = "https://api.groq.com/openai/v1/chat/completions";
         
@@ -211,7 +280,7 @@ async fn try_groq_reasoning(prompt: &str) -> Result<AIClassification, String> {
                     "content": prompt
                 }
             ],
-            "temperature": 0.6,  // Reasoning models work better at 0.5-0.7
+            "temperature": 0.6,
             "top_p": 0.95,
             "max_completion_tokens": 8192,
             "response_format": { "type": "json_object" }
@@ -242,7 +311,6 @@ async fn try_groq_reasoning(prompt: &str) -> Result<AIClassification, String> {
                 .map_err(|e| format!("Failed to deserialize: {}", e))?;
             
             let ai_text = extract_groq_text(&groq_response)?;
-            //println!("│ 📄 Result   : {}", truncate_for_log(&ai_text, 60));
             
             let classification = parse_classification(&ai_text)?;
             
@@ -277,14 +345,14 @@ async fn try_groq_reasoning(prompt: &str) -> Result<AIClassification, String> {
     try_groq_standard_text(prompt).await
 }
 
-// ===== GROQ STANDARD TEXT MODELS (FALLBACK) =====
+// ===== GROQ STANDARD TEXT MODELS (FINAL FALLBACK) =====
 
 async fn try_groq_standard_text(prompt: &str) -> Result<AIClassification, String> {
     let api_key = std::env::var("GROQ_API_KEY")
         .map_err(|_| "GROQ_API_KEY not set in .env".to_string())?;
     
     for (index, model) in GROQ_TEXT_MODELS.iter().enumerate() {
-        println!("│ 🔄 Model    : {} (Standard {}/{})", model, index + 1, GROQ_TEXT_MODELS.len());
+        println!("│ 🔄 Model    : {} (Groq Standard {}/{})", model, index + 1, GROQ_TEXT_MODELS.len());
         
         let url = "https://api.groq.com/openai/v1/chat/completions";
         
@@ -320,7 +388,6 @@ async fn try_groq_standard_text(prompt: &str) -> Result<AIClassification, String
                 .map_err(|e| format!("Failed to deserialize: {}", e))?;
             
             let ai_text = extract_groq_text(&groq_response)?;
-            //println!("│ 📄 Result   : {}", truncate_for_log(&ai_text, 60));
             
             let classification = parse_classification(&ai_text)?;
             
@@ -407,7 +474,6 @@ async fn try_groq_vision(prompt: &str, image_base64: &str) -> Result<AIClassific
                 .map_err(|e| format!("Failed to deserialize: {}", e))?;
             
             let ai_text = extract_groq_text(&groq_response)?;
-            //println!("│ 📄 Result   : {}", truncate_for_log(&ai_text, 60));
             
             let classification = parse_classification(&ai_text)?;
             
@@ -440,53 +506,6 @@ async fn try_groq_vision(prompt: &str, image_base64: &str) -> Result<AIClassific
     Err("All Groq vision models failed".to_string())
 }
 
-// ===== GEMINI FALLBACK =====
-
-async fn try_gemini_model(model: &str, prompt: &str) -> Result<AIClassification, String> {
-    let api_key = std::env::var("GEMINI_API_KEY")
-        .map_err(|_| "GEMINI_API_KEY not set in .env".to_string())?;
-    
-    let url = format!(
-        "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent?key={}",
-        model, api_key
-    );
-    
-    let request_body = json!({
-        "contents": [{"parts": [{"text": prompt}]}],
-        "generationConfig": {
-            "temperature": 0.2,
-            "maxOutputTokens": 4096,
-            "responseMimeType": "application/json"
-        }
-    });
-    
-    let client = reqwest::Client::new();
-    let response = client.post(&url).json(&request_body).send().await
-        .map_err(|e| format!("Request failed: {}", e))?;
-    
-    let status = response.status();
-    
-    if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
-        return Err("Rate limited".to_string());
-    }
-    
-    if !status.is_success() {
-        let error_text = response.text().await
-            .unwrap_or_else(|_| "Unknown error".to_string());
-        return Err(format!("Status {}: {}", status, truncate_for_log(&error_text, 60)));
-    }
-    
-    println!("│ \x1b[32m✅ SUCCESS\x1b[0m    : Gemini response");
-    
-    let gemini_response: GeminiResponse = response.json().await
-        .map_err(|e| format!("Failed to deserialize: {}", e))?;
-    
-    let ai_text = extract_ai_text(&gemini_response)?;
-    //println!("│ 📄 Result   : {}", truncate_for_log(ai_text, 60));
-    
-    parse_classification(ai_text)
-}
-
 // ===== MATCHING (GEMINI ONLY) =====
 
 pub async fn match_update_to_assignment(
@@ -494,17 +513,18 @@ pub async fn match_update_to_assignment(
     keywords: &[String],
     active_assignments: &[Assignment],
     course_map: &HashMap<Uuid, String>,
-    parallel_code: Option<&str>,
+    parallel_codes: &[String],
 ) -> Result<Option<Uuid>, String> {
     let api_key = std::env::var("GEMINI_API_KEY")
         .map_err(|_| "GEMINI_API_KEY not set in .env".to_string())?;
     
-    let prompt = build_matching_prompt(changes, keywords, active_assignments, course_map, parallel_code);
+    let prompt = build_matching_prompt(changes, keywords, active_assignments, course_map, parallel_codes);
     
     println!("\x1b[1;30m┌── 🤖 AI MATCHING (GEMINI ONLY) ─────────────\x1b[0m");
     println!("│ 🔍 Keywords   : {:?}", keywords);
-    if let Some(pc) = parallel_code {
-        println!("│ 🧩 Parallel   : {}", pc);
+    
+    if !parallel_codes.is_empty() {
+        println!("│ 🧩 Parallels  : [{}]", parallel_codes.join(", "));
     }
     
     for (index, model) in GEMINI_MODELS.iter().enumerate() {
@@ -572,17 +592,16 @@ pub async fn match_update_to_assignment(
 
 // ===== DEDUPLICATION AI =====
 
-/// Check if a new assignment is a duplicate (STRICT logic with better filtering)
 pub async fn check_duplicate_assignment(
     title: &str,
     description: &str,
     course_name: &str,
-    parallel_code: Option<&str>,
+    parallel_codes: &[String],
     existing_assignments: &[Assignment],
     course_map: &HashMap<Uuid, String>,
 ) -> Result<Option<Uuid>, String> {
     
-    // ===== PRE-FILTERING (keep quiet) =====
+    // ===== PRE-FILTERING =====
     let new_numbers = extract_numbers(title);
     let new_type = extract_assignment_type(title);
     
@@ -596,8 +615,12 @@ pub async fn check_duplicate_assignment(
             
             if !same_course { return false; }
             
-            if let (Some(new_p), Some(existing_p)) = (parallel_code, &a.parallel_code) {
-                if !new_p.eq_ignore_ascii_case(existing_p) { return false; }
+            if !parallel_codes.is_empty() && !a.parallel_codes.is_empty() {
+                let has_overlap = parallel_codes.iter()
+                    .any(|new_p| a.parallel_codes.iter()
+                        .any(|existing_p| new_p.eq_ignore_ascii_case(existing_p)));
+                
+                if !has_overlap { return false; }
             }
             
             let existing_numbers = extract_numbers(&a.title);
@@ -623,10 +646,10 @@ pub async fn check_duplicate_assignment(
     }
     
     if filtered.len() > 3 {
-        return Ok(None); // Too ambiguous
+        return Ok(None);
     }
     
-    // ===== AI CHECK (clean output) =====
+    // ===== AI CHECK =====
     let api_key = std::env::var("GEMINI_API_KEY")
         .map_err(|_| "GEMINI_API_KEY not set".to_string())?;
     
@@ -635,7 +658,7 @@ pub async fn check_duplicate_assignment(
         title,
         description,
         course_name,
-        parallel_code,
+        parallel_codes,
         &filtered_owned,
         course_map,
     );
@@ -672,7 +695,6 @@ pub async fn check_duplicate_assignment(
             let result: DuplicateCheckResult = serde_json::from_str(ai_text)
                 .map_err(|e| format!("JSON error: {}", e))?;
             
-            // Only return if high confidence
             if result.is_duplicate && result.confidence == "high" {
                 if let Some(id_str) = result.matched_assignment_id {
                     if let Ok(uuid) = Uuid::parse_str(&id_str) {
@@ -700,22 +722,39 @@ pub async fn check_duplicate_assignment(
     Err("No models available".to_string())
 }
 
-// ===== HELPERS =====
+// ===== LOGGING HELPER =====
 
 fn log_classification_success(classification: &AIClassification) {
     match classification {
         AIClassification::MultipleAssignments { assignments, .. } => {
             println!("│\n│ ✅ Result   : {} assignments detected", assignments.len());
             for (i, a) in assignments.iter().enumerate() {
-                println!("│    {}. {} - {}", i + 1, a.course_name, a.title);
+                let parallels = if a.parallel_codes.is_empty() {
+                    "N/A".to_string()
+                } else {
+                    format!("[{}]", a.parallel_codes.join(", "))
+                };
+                println!("│    {}. {} - {} (parallels: {})", i + 1, a.course_name, a.title, parallels);
             }
         }
-        AIClassification::AssignmentInfo { course_name, title, .. } => {
+        AIClassification::AssignmentInfo { course_name, title, parallel_codes, .. } => {
             let course_display = course_name.as_deref().unwrap_or("Unknown");
-            println!("│\n│ ✅ Result   : Single assignment ({} - {})", course_display, title);
+            let parallels = if parallel_codes.is_empty() {
+                "N/A".to_string()
+            } else {
+                format!("[{}]", parallel_codes.join(", "))
+            };
+            println!("│\n│ ✅ Result   : Single assignment ({} - {}, parallels: {})", 
+                course_display, title, parallels);
         }
-        AIClassification::AssignmentUpdate { reference_keywords, .. } => {
-            println!("│\n│ ✅ Result   : Update detected (keywords: {:?})", reference_keywords);
+        AIClassification::AssignmentUpdate { reference_keywords, parallel_codes, .. } => {
+            let parallels = if parallel_codes.is_empty() {
+                "N/A".to_string()
+            } else {
+                format!("[{}]", parallel_codes.join(", "))
+            };
+            println!("│\n│ ✅ Result   : Update detected (keywords: {:?}, parallels: {})", 
+                reference_keywords, parallels);
         }
         AIClassification::Unrecognized => {
             println!("│\n│ ℹ️ Result   : Unrecognized");

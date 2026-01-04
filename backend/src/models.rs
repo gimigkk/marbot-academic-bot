@@ -155,7 +155,7 @@ pub enum AIClassification {
         title: String,
         deadline: Option<String>,
         description: Option<String>,
-        parallel_code: Option<String>,
+        parallel_codes: Vec<String>,  // ✅ Changed from Option<String>
         #[serde(default)]
         #[serde(skip_serializing_if = "Option::is_none")]
         original_message: Option<String>,
@@ -175,7 +175,7 @@ pub enum AIClassification {
         new_title: Option<String>,
         new_deadline: Option<String>,
         new_description: Option<String>,
-        parallel_code: Option<String>,
+        parallel_codes: Vec<String>,  // ✅ Changed from Option<String>
         #[serde(default)]
         #[serde(skip_serializing_if = "Option::is_none")]
         original_message: Option<String>,
@@ -191,7 +191,7 @@ pub struct AssignmentData {
     pub title: String,
     pub deadline: Option<String>,
     pub description: Option<String>,
-    pub parallel_code: Option<String>,
+    pub parallel_codes: Vec<String>,  // ✅ Changed from Option<String>
 }
 
 // ===== DATABASE MODELS =====
@@ -217,7 +217,7 @@ pub struct Assignment {
     pub title: String,
     pub description: String,
     pub deadline: Option<DateTime<Utc>>,
-    pub parallel_code: Option<String>,
+    pub parallel_codes: Vec<String>,  // ✅ Changed from Option<String>
     pub sender_id: Option<String>,
     pub message_ids: Vec<String>,
 }
@@ -229,7 +229,7 @@ pub struct AssignmentDisplay {
     pub title: String,
     pub description: String,
     pub deadline: Option<DateTime<Utc>>,
-    pub parallel_code: Option<String>,
+    pub parallel_codes: Vec<String>,  // ✅ Changed from Option<String>
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -238,16 +238,16 @@ pub struct NewAssignment {
     pub title: String,
     pub description: String,
     pub deadline: Option<DateTime<Utc>>,
-    pub parallel_code: Option<String>,
+    pub parallel_codes: Vec<String>,  // ✅ Changed from Option<String>
     pub sender_id: Option<String>,
     pub message_id: String,
 }
 
-#[derive(Debug)]
+#[derive(Debug, FromRow, Serialize, Deserialize)]
 pub struct AssignmentWithCourse {
     pub id: uuid::Uuid,
     pub course_name: String,
-    pub parallel_code: Option<String>,
+    pub parallel_codes: Vec<String>,
     pub title: String,
     pub description: Option<String>,
     pub deadline: Option<DateTime<Utc>>,
@@ -259,6 +259,53 @@ pub struct AssignmentWithCourse {
 impl AssignmentWithCourse {
     pub fn deadline_is_missing(&self) -> bool {
         self.deadline.is_none()
+    }
+    
+    /// Format parallel codes for display
+    pub fn format_parallel_display(&self) -> String {
+        if self.parallel_codes.is_empty() {
+            "N/A".to_string()
+        } else {
+            format!("[{}]", self.parallel_codes.join(", "))
+        }
+    }
+}
+
+impl Assignment {
+    /// Format parallel codes for display
+    pub fn format_parallel_display(&self) -> String {
+        if self.parallel_codes.is_empty() {
+            "N/A".to_string()
+        } else {
+            format!("[{}]", self.parallel_codes.join(", "))
+        }
+    }
+    
+    /// Check if this assignment targets a specific parallel
+    pub fn targets_parallel(&self, parallel: &str) -> bool {
+        if self.parallel_codes.is_empty() {
+            return false;
+        }
+        
+        // "all" targets everyone
+        if self.parallel_codes.contains(&"all".to_string()) {
+            return true;
+        }
+        
+        // Check if the specific parallel is in the list
+        self.parallel_codes.iter()
+            .any(|p| p.eq_ignore_ascii_case(parallel))
+    }
+}
+
+impl AssignmentData {
+    /// Format parallel codes for display
+    pub fn format_parallel_display(&self) -> String {
+        if self.parallel_codes.is_empty() {
+            "N/A".to_string()
+        } else {
+            format!("[{}]", self.parallel_codes.join(", "))
+        }
     }
 }
 

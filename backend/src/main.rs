@@ -293,7 +293,14 @@ async fn webhook(
                             .and_then(|d| crud::parse_deadline(d).ok());
                         let new_title = updates.get("title").cloned();
                         let new_description = updates.get("description").cloned();
-                        let new_parallel = updates.get("parallel_code").cloned();
+                        
+                        // ✅ Parse parallel_codes from comma-separated string
+                        let new_parallel_codes = updates.get("parallel_codes")
+                            .map(|codes_str| {
+                                codes_str.split(',')
+                                    .map(|s| s.trim().to_lowercase())
+                                    .collect::<Vec<String>>()
+                            });
 
                         // Handle course_id lookup if course_name is provided
                         let course_id = if let Some(course_name) = updates.get("course_name") {
@@ -320,7 +327,7 @@ async fn webhook(
                             new_deadline,
                             new_title,
                             new_description,
-                            new_parallel,
+                            new_parallel_codes,
                             None,
                         ).await {
                             Ok(_) => {
@@ -357,7 +364,7 @@ async fn webhook(
                                         full_assignment.course_name,
                                         full_assignment.description.as_deref().unwrap_or("(tidak ada deskripsi)"),
                                         deadline_display,
-                                        full_assignment.parallel_code.as_deref().unwrap_or("(belum ditentukan)")
+                                        full_assignment.format_parallel_display()
                                     );
                                     
                                     let _ = send_reply(chat_id, &response).await;
@@ -552,11 +559,17 @@ async fn handle_ai_classification(
             
             for assignment in &assignments {
                 // Create a unique key: course + title + parallel
+                let parallel_key = if assignment.parallel_codes.is_empty() {
+                    "none".to_string()
+                } else {
+                    assignment.parallel_codes.join(",")
+                };
+                
                 let key = format!(
                     "{}::{}::{}",
                     assignment.course_name.to_lowercase(),
                     assignment.title.to_lowercase(),
-                    assignment.parallel_code.as_deref().unwrap_or("none")
+                    parallel_key
                 );
                 
                 if seen.insert(key) {
@@ -597,7 +610,7 @@ async fn handle_ai_classification(
                     assignment.title,
                     assignment.deadline,
                     assignment.description,
-                    assignment.parallel_code,
+                    assignment.parallel_codes,
                     &msg_id,
                     &sender_id,
                     debug_group_id.clone(),
@@ -607,7 +620,7 @@ async fn handle_ai_classification(
         }
         
         // Single assignment - USE AI FOR DUPLICATE DETECTION
-        AIClassification::AssignmentInfo { course_name, title, deadline, description, parallel_code, .. } => {
+        AIClassification::AssignmentInfo { course_name, title, deadline, description, parallel_codes, .. } => {
             let debug_group = debug_group_id.clone();
             
             tokio::spawn(async move {
@@ -617,7 +630,7 @@ async fn handle_ai_classification(
                     title,
                     deadline,
                     description,
-                    parallel_code,
+                    parallel_codes,
                     &message_id,
                     &sender_id,
                     debug_group,
@@ -632,7 +645,7 @@ async fn handle_ai_classification(
             new_deadline, 
             new_title, 
             new_description, 
-            parallel_code, 
+            parallel_codes, 
             .. 
         } => {
             let pool_clone = pool.clone();
@@ -666,7 +679,7 @@ async fn handle_ai_classification(
                             title,
                             new_description.as_deref().unwrap_or(""),
                             cname,
-                            parallel_code.as_deref(),
+                            &parallel_codes,
                             &active_assignments,
                             &course_map,
                         ).await;
@@ -683,7 +696,7 @@ async fn handle_ai_classification(
                                 deadline_parsed,
                                 None,
                                 new_description.clone(),
-                                parallel_code.clone(),
+                                if parallel_codes.is_empty() { None } else { Some(parallel_codes.clone()) },
                                 Some(msg_id.clone()),
                             ).await;
                             
@@ -704,7 +717,7 @@ async fn handle_ai_classification(
                     &reference_keywords,
                     &active_assignments,
                     &course_map,
-                    parallel_code.as_deref(),
+                    &parallel_codes,
                 ).await {
                     Ok(Some(assignment_id)) => {
                         let deadline_parsed = new_deadline.as_ref()
@@ -716,7 +729,7 @@ async fn handle_ai_classification(
                             deadline_parsed,
                             new_title.clone(),
                             new_description.clone(),
-                            parallel_code.clone(),
+                            if parallel_codes.is_empty() { None } else { Some(parallel_codes.clone()) },
                             Some(msg_id),
                         ).await {
                             println!("🔄 UPDATED: {} ({})", updated.title, changes);
@@ -758,7 +771,7 @@ async fn handle_single_assignment(
     title: String,
     deadline: Option<String>,
     description: Option<String>,
-    parallel_code: Option<String>,
+    parallel_codes: Vec<String>,
     message_id: &str,
     sender_id: &str,
     debug_group_id: Option<String>,
@@ -769,14 +782,22 @@ async fn handle_single_assignment(
     let deadline_parsed = deadline.as_ref()
         .and_then(|d| crud::parse_deadline(d).ok());
     let parallel_code_parsed = extract_parallel_code(&title);
-    let final_parallel = parallel_code.or(parallel_code_parsed);
+
+    // ✅ Build final parallel codes Vec - MORE EXPLICIT
+    let final_parallel_codes: Vec<String> = {
+        if !parallel_codes.is_empty() {
+            parallel_codes.clone()
+        } else if let Some(code) = parallel_code_parsed {
+            vec![code]
+        } else {
+            Vec::<String>::new()
+        }
+    };
     
     let course_id = if let Some(name) = &course_name {
         crud::get_course_by_name(&pool, name).await.ok().flatten().map(|c| c.id)
     } else { None };
     
-    // Replace logging in handle_single_assignment
-
     // ========================================
     // IMPROVED DUPLICATE DETECTION
     // ========================================
@@ -795,18 +816,14 @@ async fn handle_single_assignment(
                 .unwrap_or_default();
             
             if !existing_assignments.is_empty() {
-                //let match_start = std::time::Instant::now();
-                
                 let match_result = check_duplicate_assignment(
                     &title_clone,
                     &desc_clone,
                     cname,
-                    final_parallel.as_deref(),
+                    final_parallel_codes.as_slice(),
                     &existing_assignments,
                     &course_map,
                 ).await;
-                
-                //let match_duration = match_start.elapsed();
                 
                 match &match_result {
                     Ok(Some(id)) => {
@@ -818,7 +835,7 @@ async fn handle_single_assignment(
                             deadline_parsed, 
                             None,
                             Some(desc_clone.clone()), 
-                            final_parallel.as_ref().map(|s| s.clone()),
+                            if final_parallel_codes.is_empty() { None } else { Some(final_parallel_codes.clone()) },
                             Some(message_id.to_string())
                         ).await;
                         
@@ -837,10 +854,7 @@ async fn handle_single_assignment(
                         }
                         return;
                     }
-                    Ok(None) => {
-                        // println!("✨ NEW: {} (checked {} assignments in {:.2?})", 
-                        //     title_clone, existing_assignments.len(), match_duration);
-                    }
+                    Ok(None) => {}
                     Err(e) => {
                         println!("⚠️  Duplicate check failed: {} - creating new", e);
                     }
@@ -853,15 +867,12 @@ async fn handle_single_assignment(
     // CREATE NEW ASSIGNMENT (no duplicate found)
     // ========================================
     
-    // Clone parallel_code before moving it into NewAssignment
-    let parallel_for_display = final_parallel.clone();
-    
     let new_assignment = NewAssignment {
         course_id, 
         title: title_clone.clone(), 
         description: desc_clone.clone(),
         deadline: deadline_parsed, 
-        parallel_code: final_parallel,  // This moves final_parallel
+        parallel_codes: final_parallel_codes.clone(),
         sender_id: Some(sender_id.to_string()), 
         message_id: message_id.to_string()
     };
@@ -910,10 +921,11 @@ async fn handle_single_assignment(
                     })
                     .unwrap_or_default();
                 
-                let parallel_str = parallel_for_display
-                    .as_ref()
-                    .map(|p| format!("\n🧩 Parallel: {}", p.to_uppercase()))
-                    .unwrap_or_default();
+                let parallel_str = if !final_parallel_codes.is_empty() {
+                    format!("\n🧩 Parallel: {}", final_parallel_codes.join(", ").to_uppercase())
+                } else {
+                    String::new()
+                };
                 
                 let _ = send_reply(
                     debug_id, 
