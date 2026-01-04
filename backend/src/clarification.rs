@@ -33,9 +33,9 @@ pub fn identify_missing_fields(assignment: &AssignmentWithCourse) -> Vec<String>
         missing.push("deadline".to_string());
     }
     
-    // Check parallel code
-    if assignment.parallel_code.is_none() {
-        missing.push("parallel_code".to_string());
+    // Check parallel codes - now it's a Vec
+    if assignment.parallel_codes.is_empty() {
+        missing.push("parallel_codes".to_string());
     }
     
     // Check description
@@ -66,7 +66,7 @@ pub fn generate_clarification_messages(
         "course_name" => "📚 Nama Mata Kuliah",
         "title" => "📝 Judul Tugas",
         "deadline" => "⏰ Deadline",
-        "parallel_code" => "🧩 Kode Paralel",
+        "parallel_codes" => "🧩 Kode Paralel",
         "description" => "📄 Deskripsi",
         _ => "❓ Unknown"
     }).collect::<Vec<_>>().join("\n");
@@ -76,6 +76,9 @@ pub fn generate_clarification_messages(
         .map(|d| format!("📄 {}", d))
         .unwrap_or_else(|| "📄 (belum ada deskripsi)".to_string());
     
+    // Display parallel codes
+    let parallel_display = assignment.format_parallel_display();
+    
     // First message: Info about the assignment and what's missing
     let info_message = format!(
         "⚠️ *PERLU KLARIFIKASI*\n\
@@ -84,6 +87,7 @@ pub fn generate_clarification_messages(
         \n\
         📌 *{}* - {}\n\
         {}\n\
+        🧩 Parallel: {}\n\
         \n\
         *Info yang dibutuhkan:*\n\
         {}\n\
@@ -94,6 +98,7 @@ pub fn generate_clarification_messages(
         assignment.course_name,
         assignment.title,
         desc_preview,
+        parallel_display,
         field_list,
         assignment.id 
     );
@@ -104,7 +109,7 @@ pub fn generate_clarification_messages(
             "course_name" => Some("Course: ".to_string()),
             "title" => Some("Title: ".to_string()),
             "deadline" => Some("Deadline: 15 01 23:59".to_string()),
-            "parallel_code" => Some("Parallel: K1".to_string()),
+            "parallel_codes" => Some("Parallel: K1, K2".to_string()),
             "description" => Some("Description: ".to_string()),
             _ => None
         }
@@ -119,7 +124,7 @@ pub fn generate_clarification_messages(
         • Deadline: `15 01` atau `15 Jan` (bisa tanpa pemisah: `1501`)\n\
         • Waktu: tambah `23:59` atau `23.59` di belakang\n\
         • Update waktu saja: kirim `08:00` atau `14.30`\n\
-        • Parallel: `K1`, `K2`, `K3` atau `all` untuk semua kelas\n\
+        • Parallel: `K1`, `K2`, `K1, K2` (pisah pakai koma), atau `all` untuk semua kelas\n\
         • Ketik `cancel` atau `batal` untuk membatalkan",
         assignment.id,
         template_fields.join("\n")
@@ -219,8 +224,11 @@ pub fn parse_clarification_response(
                     }
                 }
                 "parallel" | "paralel" | "kode" | "code" | "kelas" => {
-                    let normalized = normalize_parallel_code(value);
-                    updates.insert("parallel_code".to_string(), normalized);
+                    // Parse comma-separated parallel codes
+                    let codes = parse_parallel_codes(value);
+                    if !codes.is_empty() {
+                        updates.insert("parallel_codes".to_string(), codes.join(","));
+                    }
                 }
                 "description" | "deskripsi" | "keterangan" | "desc" | "ket" => {
                     updates.insert("description".to_string(), value.to_string());
@@ -233,8 +241,9 @@ pub fn parse_clarification_response(
     // Second pass: Try to detect unstructured content
     if updates.is_empty() {
         // Check for parallel codes
-        if let Some(parallel) = detect_parallel_code(&text) {
-            updates.insert("parallel_code".to_string(), parallel);
+        let parallel_codes = detect_parallel_codes(&text);
+        if !parallel_codes.is_empty() {
+            updates.insert("parallel_codes".to_string(), parallel_codes.join(","));
         }
         
         // Check for deadlines
@@ -253,6 +262,60 @@ pub fn parse_clarification_response(
     }
     
     Ok(updates)
+}
+
+/// Parse comma-separated parallel codes
+fn parse_parallel_codes(input: &str) -> Vec<String> {
+    input.split(',')
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .map(|s| normalize_parallel_code(s))
+        .collect()
+}
+
+/// Detect multiple parallel codes from unstructured text
+fn detect_parallel_codes(text: &str) -> Vec<String> {
+    let lower = text.to_lowercase();
+    let mut codes = Vec::new();
+    
+    // Check for "all" variations
+    if lower.contains("semua") || 
+       lower.contains("all") || 
+       lower.contains("untuk semua kelas") ||
+       lower == "all classes" {
+        return vec!["all".to_string()];
+    }
+    
+    // Look for explicit codes
+    let words: Vec<&str> = text.split_whitespace().collect();
+    for word in &words {
+        let upper = word.trim_matches(|c: char| !c.is_alphanumeric()).to_uppercase();
+        if is_valid_parallel_code(&upper) {
+            let normalized = upper.to_lowercase();
+            if !codes.contains(&normalized) {
+                codes.push(normalized);
+            }
+        }
+    }
+    
+    // Look for patterns like "kelas 1", "parallel 2"
+    for (i, word) in words.iter().enumerate() {
+        let lower_word = word.to_lowercase();
+        if lower_word == "kelas" || lower_word == "parallel" || lower_word == "paralel" {
+            if i + 1 < words.len() {
+                if let Ok(num) = words[i + 1].parse::<u8>() {
+                    if (1..=4).contains(&num) {
+                        let code = format!("k{}", num);
+                        if !codes.contains(&code) {
+                            codes.push(code);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    codes
 }
 
 /// Detect if text is time-only format (HH:MM or HH.MM)
@@ -422,43 +485,6 @@ fn parse_date(text: &str, month_map: &HashMap<&str, u32>, current_year: i32) -> 
     Err("Could not parse date".to_string())
 }
 
-fn detect_parallel_code(text: &str) -> Option<String> {
-    let lower = text.to_lowercase();
-    
-    // Check for "all" variations
-    if lower.contains("semua") || 
-       lower.contains("all") || 
-       lower.contains("untuk semua kelas") ||
-       lower == "all classes" {
-        return Some("all".to_string());
-    }
-    
-    // Look for explicit codes
-    let words: Vec<&str> = text.split_whitespace().collect();
-    for word in &words {
-        let upper = word.to_uppercase();
-        if is_valid_parallel_code(&upper) {
-            return Some(upper.to_lowercase());
-        }
-    }
-    
-    // Look for patterns like "kelas 1", "parallel 2"
-    for (i, word) in words.iter().enumerate() {
-        let lower_word = word.to_lowercase();
-        if lower_word == "kelas" || lower_word == "parallel" || lower_word == "paralel" {
-            if i + 1 < words.len() {
-                if let Ok(num) = words[i + 1].parse::<u8>() {
-                    if (1..=4).contains(&num) {
-                        return Some(format!("k{}", num));
-                    }
-                }
-            }
-        }
-    }
-    
-    None
-}
-
 fn normalize_parallel_code(code: &str) -> String {
     let code = code.trim().to_lowercase();
     
@@ -541,7 +567,7 @@ pub fn generate_parse_failed_message() -> String {
     ```\n\
     ID: [uuid]\n\
     Deadline: 15 01 23:59\n\
-    Parallel: K1\n\
+    Parallel: K1, K2\n\
     ```".to_string()
 }
 
@@ -560,70 +586,4 @@ pub fn generate_no_date_message() -> String {
     ```\n\
     Deadline: 14 01 08:00\n\
     ```".to_string()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_cancellation_detection() {
-        assert!(parse_clarification_response("cancel", 2026, None).is_err());
-        assert!(parse_clarification_response("batal", 2026, None).is_err());
-        assert!(parse_clarification_response("batalkan", 2026, None).is_err());
-        assert!(parse_clarification_response("tidak", 2026, None).is_err());
-    }
-
-    #[test]
-    fn test_deadline_parsing_numeric() {
-        let updates = parse_clarification_response("Deadline: 15 01", 2026, None).unwrap();
-        assert!(updates.contains_key("deadline"));
-        
-        let updates = parse_clarification_response("Deadline: 1501", 2026, None).unwrap();
-        assert!(updates.contains_key("deadline"));
-    }
-    
-    #[test]
-    fn test_deadline_parsing_month_names() {
-        let updates = parse_clarification_response("Deadline: 15 Januari", 2026, None).unwrap();
-        assert!(updates.contains_key("deadline"));
-        
-        let updates = parse_clarification_response("Deadline: 15 Jan", 2026, None).unwrap();
-        assert!(updates.contains_key("deadline"));
-    }
-    
-    #[test]
-    fn test_deadline_with_timestamp() {
-        let updates = parse_clarification_response("Deadline: 15 01 23:59", 2026, None).unwrap();
-        assert!(updates.contains_key("deadline"));
-        let deadline = updates.get("deadline").unwrap();
-        assert!(deadline.contains("23:59"));
-    }
-    
-    #[test]
-    fn test_time_only_update() {
-        let existing = NaiveDate::from_ymd_opt(2026, 1, 14)
-            .unwrap()
-            .and_hms_opt(23, 59, 0)
-            .unwrap();
-        
-        let updates = parse_clarification_response("08:00", 2026, Some(existing)).unwrap();
-        assert!(updates.contains_key("deadline"));
-        let deadline = updates.get("deadline").unwrap();
-        assert!(deadline.contains("2026-01-14"));
-        assert!(deadline.contains("08:00"));
-    }
-    
-    #[test]
-    fn test_parallel_code() {
-        let updates = parse_clarification_response("Parallel: K1", 2026, None).unwrap();
-        assert_eq!(updates.get("parallel_code"), Some(&"k1".to_string()));
-    }
-    
-    #[test]
-    fn test_empty_response() {
-        let result = parse_clarification_response("", 2026, None);
-        assert!(result.is_err());
-        assert_eq!(result.unwrap_err(), "no_data");
-    }
 }

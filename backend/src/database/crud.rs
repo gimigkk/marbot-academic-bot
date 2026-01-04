@@ -17,7 +17,7 @@ pub async fn create_assignment(
 ) -> Result<String, sqlx::Error> {
     let mut tx = pool.begin().await?;
     
-    // A. Cari Course (ILIKE)
+    // A. Find Course
     let course = sqlx::query!(
         r#"
         SELECT id, name 
@@ -27,56 +27,67 @@ pub async fn create_assignment(
         "#,
         new_assignment.course_id
     )
-    .fetch_optional(&mut *tx)  // ✅ Use transaction
+    .fetch_optional(&mut *tx)
     .await?;
 
-    // Validasi Course
+    // Validate Course
     let real_course_name = match course {
         Some(c) => c.name,
         None => match new_assignment.course_id {
             Some(id) => {
-                tx.commit().await?;  // Commit before returning
+                tx.commit().await?;
                 return Ok(format!("Gagal: Mata kuliah dengan ID '{}' tidak ditemukan", id));
             }
             None => {
-                tx.commit().await?;  // Commit before returning
+                tx.commit().await?;
                 return Ok("Gagal: Mata kuliah tidak ditemukan (ID tidak ada)".to_string());
             }
         }
     };
     
-    // kode paralel (huruf kecil)
-    let clean_parallel = new_assignment.parallel_code.as_ref().map(|p| p.to_lowercase());
+    // ✅ FIXED: NewAssignment already has Vec<String>, just normalize to lowercase
+    let clean_parallel_codes: Vec<String> = new_assignment.parallel_codes
+        .iter()
+        .map(|p| p.to_lowercase())
+        .collect();
 
-    // B. Insert Tugas
+    // B. Insert Assignment
     sqlx::query!(
         r#"
         INSERT INTO assignments (
-            course_id, parallel_code, title, description, 
+            course_id, parallel_codes, title, description, 
             deadline, sender_id, message_ids
         )
         VALUES ($1, $2, $3, $4, $5, $6, ARRAY[$7])
         "#,
         new_assignment.course_id,
-        clean_parallel,
+        &clean_parallel_codes,
         new_assignment.title,
         new_assignment.description,
         new_assignment.deadline,
         new_assignment.sender_id,
         new_assignment.message_id
     )
-    .execute(&mut *tx)  // ✅ Use transaction
+    .execute(&mut *tx)
     .await?;
 
     tx.commit().await?;
-    Ok(format!("Sukses! Tugas '{}' berhasil disimpan ke matkul '{}'\n", new_assignment.title, real_course_name))
+    
+    let parallel_display = if clean_parallel_codes.is_empty() {
+        "no specific parallels".to_string()
+    } else {
+        format!("parallels: [{}]", clean_parallel_codes.join(", "))
+    };
+    
+    Ok(format!("Sukses! Tugas '{}' berhasil disimpan ke matkul '{}' ({})\n", 
+        new_assignment.title, real_course_name, parallel_display))
 }
 
 // ========================================
-// COMPLETION OPERATIONS (NEW)
+// COMPLETION OPERATIONS
 // ========================================
 
-/// Tandai tugas selesai
+/// Mark assignment as complete
 pub async fn mark_assignment_complete(
     pool: &PgPool,
     assignment_id: Uuid,
@@ -97,7 +108,7 @@ pub async fn mark_assignment_complete(
     Ok(result.rows_affected() > 0)
 }
 
-/// Tandai tugas belum selesai (Undo)
+/// Mark assignment as incomplete (Undo)
 pub async fn unmark_assignment_complete(
     pool: &PgPool,
     assignment_id: Uuid,
@@ -126,43 +137,41 @@ pub async fn get_last_completed_assignment(
     pool: &PgPool,
     user_id: &str
 ) -> Result<Option<AssignmentWithCourse>, sqlx::Error> {
-    let assignment = sqlx::query_as!(
-        AssignmentWithCourse,
+    let assignment = sqlx::query_as::<_, AssignmentWithCourse>(
         r#"
         SELECT 
             a.id,
             c.name as course_name,
-            a.parallel_code,
+            a.parallel_codes,
             a.title,
             a.description,  
-            a.deadline,  -- Now optional
+            a.deadline,
             a.message_ids,
             a.sender_id,
-            true as "is_completed!"
+            true as is_completed
         FROM assignments a
         JOIN courses c ON a.course_id = c.id
         JOIN user_completions uc ON uc.assignment_id = a.id
         WHERE uc.user_id = $1
         ORDER BY uc.completed_at DESC
         LIMIT 1
-        "#,
-        user_id
+        "#
     )
+    .bind(user_id)
     .fetch_optional(pool)
     .await?;
     
     Ok(assignment)
 }
 
-// 2. READ (Melihat SEMUA Tugas)
+/// Get all assignments
 pub async fn get_assignments(pool: &PgPool) -> Result<Vec<AssignmentDisplay>, sqlx::Error> {
-    let assignments = sqlx::query_as!(
-        AssignmentDisplay,
+    let assignments = sqlx::query_as::<_, AssignmentDisplay>(
         r#"
         SELECT 
             a.id, 
-            c.name as "course_name!", 
-            a.parallel_code, 
+            c.name as course_name, 
+            a.parallel_codes,
             a.title, 
             a.description, 
             a.deadline
@@ -189,13 +198,12 @@ pub async fn get_courses_map(pool: &PgPool) -> Result<HashMap<Uuid, String>, sql
 }
 
 /// Check if an assignment with this title already exists for a course
-/// Uses case-insensitive comparison to catch duplicates like "LKP 13" vs "lkp 13"
 pub async fn get_assignment_by_title_and_course(
     pool: &PgPool,
     title: &str,
     course_id: uuid::Uuid,
 ) -> Result<Option<Assignment>, sqlx::Error> {
-    let mut tx = pool.begin().await?;  // ✅ Start transaction
+    let mut tx = pool.begin().await?;
     
     let result = sqlx::query_as::<_, Assignment>(
         r#"
@@ -205,14 +213,14 @@ pub async fn get_assignment_by_title_and_course(
     )
     .bind(title)
     .bind(course_id)
-    .fetch_optional(&mut *tx)  // ✅ Use transaction instead of pool
+    .fetch_optional(&mut *tx)
     .await?;
     
-    tx.commit().await?;  // ✅ Commit transaction
+    tx.commit().await?;
     Ok(result)
 }
 
-/// Get active assignments (not past deadline) with course info
+/// Get active assignments (not past deadline)
 pub async fn get_active_assignments(pool: &PgPool) -> Result<Vec<Assignment>> {
     let now = Utc::now();
     
@@ -236,29 +244,28 @@ pub async fn get_active_assignments(pool: &PgPool) -> Result<Vec<Assignment>> {
 pub async fn get_active_assignments_sorted(pool: &PgPool) -> Result<Vec<AssignmentWithCourse>, sqlx::Error> {
     let now = Utc::now();
     
-    let assignments = sqlx::query_as!(
-        AssignmentWithCourse,
+    let assignments = sqlx::query_as::<_, AssignmentWithCourse>(
         r#"
         SELECT 
             a.id,
             c.name as course_name,
-            a.parallel_code,
+            a.parallel_codes,
             a.title,
             a.description,  
-            a.deadline,  -- Now optional (can be NULL)
+            a.deadline,
             a.message_ids,
             a.sender_id,
-            false as "is_completed!" -- Default false untuk scheduler
+            false as is_completed
         FROM assignments a
         JOIN courses c ON a.course_id = c.id
         WHERE a.deadline IS NULL OR a.deadline >= $1
         ORDER BY 
-            CASE WHEN a.deadline IS NULL THEN 0 ELSE 1 END,  -- NULL deadlines first
-            a.deadline ASC NULLS FIRST,  -- Then sort by deadline
+            CASE WHEN a.deadline IS NULL THEN 0 ELSE 1 END,
+            a.deadline ASC NULLS FIRST,
             c.name ASC
-        "#,
-        now
+        "#
     )
+    .bind(now)
     .fetch_all(pool)
     .await?;
     
@@ -276,49 +283,50 @@ pub async fn get_active_assignments_for_user(
     
     println!("🔍 Fetching assignments for user: {}", user_id);
     
-    // LEFT JOIN to check completion status for THIS specific user only
-    let assignments = sqlx::query_as!(
-        AssignmentWithCourse,
+    let assignments = sqlx::query_as::<_, AssignmentWithCourse>(
         r#"
         SELECT 
             a.id,
             c.name as course_name,
-            a.parallel_code,
+            a.parallel_codes,
             a.title,
             a.description,  
-            a.deadline,  -- Now optional (can be NULL)
+            a.deadline,
             a.message_ids,
             a.sender_id,
-            -- ✅ Check if THIS user has completed it
             EXISTS(
                 SELECT 1 FROM user_completions uc 
                 WHERE uc.assignment_id = a.id 
                 AND uc.user_id = $2
-            ) as "is_completed!" 
+            ) as is_completed
         FROM assignments a
         JOIN courses c ON a.course_id = c.id
         WHERE a.deadline IS NULL OR a.deadline >= $1
         ORDER BY 
-            CASE WHEN a.deadline IS NULL THEN 0 ELSE 1 END,  -- NULL deadlines at top
+            CASE WHEN a.deadline IS NULL THEN 0 ELSE 1 END,
             a.deadline ASC NULLS FIRST,
             c.name ASC
-        "#,
-        now,
-        user_id
+        "#
     )
+    .bind(now)
+    .bind(user_id)
     .fetch_all(pool)
     .await?;
     
     println!("✅ Found {} assignments for user {}", assignments.len(), user_id);
     
-    // Debug: Print completion status
     for (i, a) in assignments.iter().enumerate() {
         let deadline_str = match a.deadline {
             Some(d) => d.to_string(),
             None => "⚠️ NO DEADLINE".to_string()
         };
-        println!("  {}. {} - Deadline: {} - Completed: {}", 
-            i + 1, a.title, deadline_str, a.is_completed);
+        let parallel_display = if a.parallel_codes.is_empty() {
+            "N/A".to_string()
+        } else {
+            format!("[{}]", a.parallel_codes.join(", "))
+        };
+        println!("  {}. {} - Deadline: {} - Parallels: {} - Completed: {}", 
+            i + 1, a.title, deadline_str, parallel_display, a.is_completed);
     }
 
     println!("");
@@ -326,8 +334,8 @@ pub async fn get_active_assignments_for_user(
     Ok(assignments)
 }
 
-/// Get recent assignments for update matching (doesn't filter by deadline)
-/// Returns assignments sorted by recency (newest first)
+
+/// Get recent assignments for update matching
 pub async fn get_recent_assignments_for_update(
     pool: &PgPool,
     course_id: Option<uuid::Uuid>,
@@ -335,13 +343,12 @@ pub async fn get_recent_assignments_for_update(
     let mut tx = pool.begin().await?;
     
     let assignments = if let Some(cid) = course_id {
-        // Get assignments from specific course, prioritize recent ones
         sqlx::query_as::<_, Assignment>(
             r#"
             SELECT * FROM assignments
             WHERE course_id = $1 
-            AND deadline >= NOW() - INTERVAL '7 days'  -- Include assignments from last week
-            ORDER BY created_at DESC  -- Most recent first
+            AND deadline >= NOW() - INTERVAL '7 days'
+            ORDER BY created_at DESC
             LIMIT 10
             "#
         )
@@ -349,7 +356,6 @@ pub async fn get_recent_assignments_for_update(
         .fetch_all(&mut *tx)
         .await?
     } else {
-        // Get assignments across all courses
         sqlx::query_as::<_, Assignment>(
             r#"
             SELECT * FROM assignments
@@ -366,7 +372,6 @@ pub async fn get_recent_assignments_for_update(
     Ok(assignments)
 }
 
-
 /// Find course by name (case-insensitive)
 pub async fn get_course_by_name(
     pool: &PgPool,
@@ -382,14 +387,13 @@ pub async fn get_course_by_name(
     Ok(course)
 }
 
-/// Find course by name or alias (case-insensitive)
+/// Find course by name or alias
 pub async fn get_course_by_name_or_alias(
     pool: &PgPool,
     search_term: &str,
 ) -> Result<Option<Course>> {
     let search_lower = search_term.to_lowercase();
     
-    // Search by name OR any alias in the aliases array
     let course = sqlx::query_as::<_, Course>(
         r#"
         SELECT * FROM courses 
@@ -435,53 +439,47 @@ pub async fn get_all_courses_formatted(pool: &PgPool) -> Result<String> {
     Ok(format!("- {}", formatted))
 }
 
-/// Check if assignment already exists by message_id
+/// Get assignment with course by ID
 pub async fn get_assignment_with_course_by_id(
     pool: &PgPool,
     assignment_id: Uuid,
 ) -> Result<Option<AssignmentWithCourse>, sqlx::Error> {
-    let assignment = sqlx::query_as!(
-        AssignmentWithCourse,
+    let assignment = sqlx::query_as::<_, AssignmentWithCourse>(
         r#"
         SELECT 
             a.id,
             c.name as course_name,
-            a.parallel_code,
+            a.parallel_codes,
             a.title,
             a.description,  
-            a.deadline,  -- Now optional
+            a.deadline,
             a.message_ids,
             a.sender_id,
-            false as "is_completed!"
+            false as is_completed
         FROM assignments a
         JOIN courses c ON a.course_id = c.id
         WHERE a.id = $1
-        "#,
-        assignment_id
+        "#
     )
+    .bind(assignment_id)
     .fetch_optional(pool)
     .await?;
     
     Ok(assignment)
 }
 
-
-/// Find assignments by keywords (for update detection) - IMPROVED VERSION
+/// Find assignments by keywords (for update detection)
 pub async fn find_assignment_by_keywords(
     pool: &PgPool,
     keywords: &[String],
     course_id: Option<Uuid>,
 ) -> Result<Vec<Assignment>> {
     if keywords.is_empty() {
-        //println!("⚠️ No keywords provided for search");
         return Ok(vec![]);
     }
     
-    // Try different search strategies
-    
     // Strategy 1: Search by course + keywords
     if let Some(cid) = course_id {
-        //println!("🔍 Strategy 1: Searching by course_id + keywords");
         let patterns: Vec<String> = keywords
             .iter()
             .map(|kw| format!("%{}%", kw.to_lowercase()))
@@ -503,10 +501,6 @@ pub async fn find_assignment_by_keywords(
         query.push_str(&conditions.join(" AND "));
         query.push_str(") ORDER BY created_at DESC LIMIT 5");
         
-        // println!("🔍 Query: {}", query);
-        // println!("🔍 Course ID: {}", cid);
-        // println!("🔍 Keywords: {:?}", keywords);
-        
         let mut sql_query = sqlx::query_as::<_, Assignment>(&query).bind(cid);
         
         for pattern in &patterns {
@@ -516,13 +510,11 @@ pub async fn find_assignment_by_keywords(
         let assignments = sql_query.fetch_all(pool).await?;
         
         if !assignments.is_empty() {
-            //println!("✅ Found {} assignments with strategy 1", assignments.len());
             return Ok(assignments);
         }
     }
     
-    // Strategy 2: Search by keywords only (broader search)
-    println!("🔍 Strategy 2: Searching by keywords only");
+    // Strategy 2: Search by keywords only
     let patterns: Vec<String> = keywords
         .iter()
         .map(|kw| format!("%{}%", kw.to_lowercase()))
@@ -539,10 +531,8 @@ pub async fn find_assignment_by_keywords(
     
     let query = format!(
         "SELECT * FROM assignments WHERE {} ORDER BY created_at DESC LIMIT 5",
-        conditions.join(" OR ")  // Changed from AND to OR for broader matching
+        conditions.join(" OR ")
     );
-    
-    println!("🔍 Query: {}", query);
     
     let mut sql_query = sqlx::query_as::<_, Assignment>(&query);
     
@@ -552,8 +542,6 @@ pub async fn find_assignment_by_keywords(
     
     let assignments = sql_query.fetch_all(pool).await?;
     
-    println!("✅ Found {} matching assignments", assignments.len());
-    
     Ok(assignments)
 }
 
@@ -561,7 +549,7 @@ pub async fn find_assignment_by_keywords(
 // UPDATE OPERATIONS
 // ========================================
 
-/// Update specific fields of an assignment (simplified version)
+/// Update specific fields of an assignment
 #[allow(non_snake_case)]
 pub async fn update_assignment_fields(
     pool: &PgPool,
@@ -569,14 +557,14 @@ pub async fn update_assignment_fields(
     new_deadline: Option<DateTime<Utc>>,
     new_title: Option<String>,
     new_description: Option<String>,
-    new_parallel_code: Option<String>,
+    new_parallel_codes: Option<Vec<String>>,
     incoming_message_id: Option<String>,
 ) -> Result<Assignment> {
     println!("🔄 Updating assignment {}", id);
     println!("   Deadline: {:?}", new_deadline);
     println!("   Title: {:?}", new_title);
     println!("   Description: {:?}", new_description);
-    println!("   Parallel: {:?}", new_parallel_code);
+    println!("   Parallels: {:?}", new_parallel_codes);
     
     let mut tx = pool.begin().await?;
     
@@ -592,10 +580,15 @@ pub async fn update_assignment_fields(
     let final_deadline = new_deadline.or(current.deadline);
     let final_title = new_title.unwrap_or(current.title);
     let final_description = new_description.unwrap_or(current.description);
-    // Convert parallel code to lowercase for database constraint
-    let final_parallel = new_parallel_code
-        .map(|p| p.to_lowercase())
-        .or(current.parallel_code);
+    
+    // Handle parallel_codes properly
+    let final_parallel_codes: Vec<String> = if let Some(codes) = new_parallel_codes {
+        // Normalize new codes to lowercase
+        codes.iter().map(|c| c.to_lowercase()).collect()
+    } else {
+        // Keep current codes
+        current.parallel_codes
+    };
     
     // Single UPDATE query with all fields
     let assignment = sqlx::query_as::<_, Assignment>(
@@ -604,7 +597,7 @@ pub async fn update_assignment_fields(
         SET deadline = $2, 
             title = $3, 
             description = $4,
-            parallel_code = $5,
+            parallel_codes = $5,
             message_ids = CASE 
                             WHEN $6::text IS NOT NULL THEN array_append(message_ids, $6)
                             ELSE message_ids 
@@ -617,7 +610,7 @@ pub async fn update_assignment_fields(
     .bind(final_deadline)
     .bind(&final_title)
     .bind(&final_description)
-    .bind(final_parallel)
+    .bind(&final_parallel_codes)
     .bind(incoming_message_id)
     .fetch_one(&mut *tx)
     .await?;
@@ -629,12 +622,11 @@ pub async fn update_assignment_fields(
     Ok(assignment)
 }
 
-
 // ========================================
 // DELETE OPERATIONS
 // ========================================
 
-/// Hapus tugas berdasarkan ID
+/// Delete assignment by ID
 pub async fn delete_assignment(
     pool: &PgPool,
     id: Uuid,
@@ -646,14 +638,10 @@ pub async fn delete_assignment(
     .execute(pool)
     .await?;
 
-    // Mengembalikan true jika ada baris yang dihapus
     Ok(result.rows_affected() > 0)
 }
 
-
-
 /// Parse deadline string with TIMESTAMP support (YYYY-MM-DD HH:MM)
-/// Falls back to DATE format (YYYY-MM-DD) for backward compatibility
 #[allow(non_snake_case)]
 pub fn parse_deadline(deadline_str: &str) -> Result<DateTime<Utc>, String> {
     let deadline_str = deadline_str.trim();
@@ -679,4 +667,15 @@ pub fn parse_deadline(deadline_str: &str) -> Result<DateTime<Utc>, String> {
     }
     
     Err(format!("Failed to parse deadline '{}'. Expected format: 'YYYY-MM-DD HH:MM' or 'YYYY-MM-DD'", deadline_str))
+}
+
+// ========================================
+// ADDITIONAL HELPER IF NEEDED
+// ========================================
+
+/// Helper to normalize parallel codes
+pub fn normalize_parallel_codes(codes: Vec<String>) -> Vec<String> {
+    codes.iter()
+        .map(|c| c.to_lowercase())
+        .collect()
 }
