@@ -12,21 +12,21 @@ use super::GROQ_TEXT_MODELS;
 /// Minimal context needed for main AI prompt
 #[derive(Debug, Clone)]
 pub struct MessageContext {
-    pub parallel_code: Option<String>,
+    pub parallel_codes: Vec<String>,  // ✅ Changed from Option<String>
     pub parallel_confidence: f32,
     pub parallel_source: String,
     pub deadline_hint: Option<String>,
     pub deadline_type: String,
     pub course_hints: Vec<CourseHint>,
     pub courses_list: String,
-    pub quoted_message_summary: Option<String>,  // ✅ NEW: Summary of quoted message
+    pub quoted_message_summary: Option<String>,
 }
 
 /// Per-course context hints
 #[derive(Debug, Clone)]
 pub struct CourseHint {
     pub course_name: String,
-    pub parallel_code: Option<String>,
+    pub parallel_codes: Vec<String>,  // ✅ Changed from Option<String>
     pub deadline_hint: Option<String>,
     pub deadline_type: String,
 }
@@ -37,7 +37,7 @@ pub async fn build_context(
     sender_id: &str,
     pool: &PgPool,
     schedule_oracle: &ScheduleOracle,
-    quoted_message: Option<&str>,  // ✅ NEW: Optional quoted message
+    quoted_message: Option<&str>,
 ) -> Result<MessageContext, String> {
     
     let sender_history = get_sender_history(pool, sender_id).await
@@ -46,7 +46,6 @@ pub async fn build_context(
     let courses_list = get_courses_list(pool).await
         .unwrap_or_else(|_| "No courses available".to_string());
     
-    // ✅ NEW: Process quoted message if present
     let quoted_summary = if let Some(quoted) = quoted_message {
         extract_quoted_context(quoted, pool).await
             .ok()
@@ -58,7 +57,7 @@ pub async fn build_context(
         message, 
         &sender_history, 
         &courses_list,
-        quoted_summary.as_deref(),  // ✅ Pass quoted context to AI
+        quoted_summary.as_deref(),
     ).await?;
     
     let course_hints = calculate_course_hints(
@@ -89,27 +88,23 @@ pub async fn build_context(
     };
     
     Ok(MessageContext {
-        parallel_code: ai_hints.parallel_code,
+        parallel_codes: ai_hints.parallel_codes,  // ✅ Updated
         parallel_confidence: ai_hints.parallel_confidence,
         parallel_source: ai_hints.parallel_source,
         deadline_hint,
         deadline_type: global_deadline_type,
         course_hints,
         courses_list,
-        quoted_message_summary: quoted_summary,  // ✅ NEW
+        quoted_message_summary: quoted_summary,
     })
 }
 
-// ===== QUOTED MESSAGE CONTEXT (NEW) =====
+// ===== QUOTED MESSAGE CONTEXT =====
 
-/// Extract relevant context from quoted message
-/// Just returns the quoted text - let the main AI do the matching
 async fn extract_quoted_context(
     quoted_text: &str,
     _pool: &PgPool,
 ) -> Result<String, String> {
-    // Simply return truncated quoted text
-    // The main AI will handle intelligent matching
     let truncated = if quoted_text.len() > 200 {
         format!("{}...", &quoted_text[..200])
     } else {
@@ -162,17 +157,17 @@ async fn get_courses_list(pool: &PgPool) -> Result<String, sqlx::Error> {
 
 #[derive(Debug, Default)]
 struct SenderHistory {
-    parallel_patterns: Vec<(String, String, i32)>,
+    parallel_patterns: Vec<(String, Vec<String>, i32)>,  // ✅ Changed to Vec<String>
 }
 
 async fn get_sender_history(pool: &PgPool, sender_id: &str) -> Result<SenderHistory, sqlx::Error> {
     let records = sqlx::query!(
         r#"
-        SELECT c.name as course_name, a.parallel_code, COUNT(*) as count
+        SELECT c.name as course_name, a.parallel_codes, COUNT(*) as count
         FROM assignments a
         JOIN courses c ON a.course_id = c.id
-        WHERE a.sender_id = $1 AND a.parallel_code IS NOT NULL
-        GROUP BY c.name, a.parallel_code
+        WHERE a.sender_id = $1 AND a.parallel_codes IS NOT NULL
+        GROUP BY c.name, a.parallel_codes
         ORDER BY count DESC
         LIMIT 10
         "#,
@@ -184,10 +179,10 @@ async fn get_sender_history(pool: &PgPool, sender_id: &str) -> Result<SenderHist
     let mut history = SenderHistory::default();
     
     for record in records {
-        if let Some(parallel) = record.parallel_code {
+        if let Some(parallel_codes) = record.parallel_codes {
             history.parallel_patterns.push((
                 record.course_name,
-                parallel,
+                parallel_codes,
                 record.count.unwrap_or(0) as i32,
             ));
         }
@@ -200,7 +195,7 @@ async fn get_sender_history(pool: &PgPool, sender_id: &str) -> Result<SenderHist
 
 #[derive(Debug, Deserialize)]
 struct AIHints {
-    parallel_code: Option<String>,
+    parallel_codes: Vec<String>,  // ✅ Changed from Option<String>
     parallel_confidence: f32,
     parallel_source: String,
     course_hints: Vec<AICourseHint>,
@@ -209,7 +204,7 @@ struct AIHints {
 #[derive(Debug, Deserialize)]
 struct AICourseHint {
     course_name: String,
-    parallel_code: Option<String>,
+    parallel_codes: Vec<String>,  // ✅ Changed from Option<String>
     deadline_type: String,
 }
 
@@ -217,7 +212,7 @@ async fn call_context_resolver_ai(
     message: &str,
     sender_history: &SenderHistory,
     courses_list: &str,
-    quoted_context: Option<&str>,  // ✅ NEW parameter
+    quoted_context: Option<&str>,
 ) -> Result<AIHints, String> {
     
     let history_text = if sender_history.parallel_patterns.is_empty() {
@@ -225,14 +220,13 @@ async fn call_context_resolver_ai(
     } else {
         sender_history.parallel_patterns
             .iter()
-            .map(|(course, parallel, count)| {
-                format!("{}: {} ({}x)", course, parallel, count)
+            .map(|(course, parallels, count)| {
+                format!("{}: [{}] ({}x)", course, parallels.join(", "), count)
             })
             .collect::<Vec<_>>()
             .join(", ")
     };
     
-    // ✅ NEW: Include quoted context in prompt
     let quoted_section = quoted_context
         .map(|ctx| format!("\n\nQUOTED MESSAGE CONTEXT:\n{}\n(User is replying to/referencing this message)", ctx))
         .unwrap_or_default();
@@ -255,20 +249,30 @@ COURSE IDENTIFICATION:
 • If QUOTED MESSAGE CONTEXT is present, use it to identify which assignment is being referenced
 • Return empty array if no valid courses identified
 
-PARALLEL CLASS (per course):
-• Valid values: k1, k2, k3, p1, p2, p3, r1, r2, r3, or null
-• Priority: explicit mention > quoted context > sender history > null
-• Each course independent (don't assume shared parallel)
+PARALLEL CLASSES (per assignment):
+• Valid values: k1 - k4, p1 - p4, r1 - r4, all
+• Return as ARRAY (can be multiple): ["k1", "k2"] or ["all"]
+• Priority: explicit mention > quoted context > sender history > empty array
+• Each assignment independent (don't assume shared parallel)
+- Patterns to recognize:
+  - "semua kelas" / "all classes" = ["all"]
+  - "K1, K2, K3" = ["k1", "k2", "k3"]
+  - "K1/P1" or "K1 & P1" = ["k1", "p1"] (BOTH codes)
+  - "paralel 1, 2" = ["p1", "p2"] or ["k1", "k2"] based on context
 
-DEADLINE TYPE (per course):
-• "explicit": Specific date (2026-01-15, "5 Januari", "15 Desember")
-• "next_meeting": References next class ("sebelum pertemuan", "before class")
-• "relative": Relative time ("besok", "tomorrow", "minggu depan")
-• "unknown": Course mentioned without deadline
+DEADLINE TYPE (per assignment):
+- "explicit": Specific date (2026-01-15, "5 Januari", "15 Desember")
+- "next_meeting": References class time ("sebelum pertemuan", "before class", "di awal kelas", "at start of class", "saat kelas")
+- "relative": Relative time without class context ("besok", "tomorrow", "minggu depan" WITHOUT class reference)
+- "unknown": Course mentioned without deadline
 
 GLOBAL PARALLEL:
-• Set only if ALL courses share identical parallel
-• Otherwise null
+• Return array of parallels that apply to ALL courses
+• If courses have different parallels, return empty array
+• Examples:
+  - All courses mention k1 → ["k1"]
+  - Course A has k1, Course B has k2 → []
+  - All courses mention "all" → ["all"]
 
 USING QUOTED CONTEXT:
 • If message says "diundur" / "berubah" / "updated" and quotes a previous assignment, extract info from quoted context
@@ -276,20 +280,20 @@ USING QUOTED CONTEXT:
 
 Return JSON:
 {{
-  "parallel_code": string | null,
+  "parallel_codes": [string],
   "parallel_confidence": float,
   "parallel_source": "explicit" | "quoted_context" | "sender_history" | "unknown",
   "course_hints": [
     {{
       "course_name": string,
-      "parallel_code": string | null,
+      "parallel_codes": [string],
       "deadline_type": string
     }}
   ]
 }}"#,
         message,
         history_text,
-        quoted_section,  // ✅ Include quoted context
+        quoted_section,
         courses_list
     );
     
@@ -366,30 +370,30 @@ fn calculate_course_hints(
     for ai_course_hint in &hints.course_hints {
         println!("│");
         println!("│ 🎯 Processing: {}", ai_course_hint.course_name);
-        println!("│    Parallel: {:?}", ai_course_hint.parallel_code);
+        println!("│    Parallels: {:?}", ai_course_hint.parallel_codes);
         println!("│    Deadline Type: {}", ai_course_hint.deadline_type);
         
         let deadline_hint = match ai_course_hint.deadline_type.as_str() {
             "next_meeting" => {
-                let has_valid_parallel = ai_course_hint.parallel_code
-                    .as_ref()
-                    .map(|p| p != "all" && p != "null" && !p.is_empty())
-                    .unwrap_or(false);
-                
-                if !has_valid_parallel {
+                // ✅ Handle array of parallels for next_meeting
+                if ai_course_hint.parallel_codes.is_empty() {
                     println!("│    ⏭️  Result: Skipped (needs parallel for schedule)");
                     None
+                } else if ai_course_hint.parallel_codes.contains(&"all".to_string()) {
+                    println!("│    ⏭️  Result: Skipped ('all' cannot determine specific schedule)");
+                    None
                 } else {
-                    let parallel = ai_course_hint.parallel_code.as_ref().unwrap();
+                    // Use first specific parallel to get schedule
+                    let parallel = &ai_course_hint.parallel_codes[0];
                     
                     if let Some((meeting_date, meeting_time)) = schedule_oracle
                         .get_next_meeting_with_time(&ai_course_hint.course_name, parallel, today)
                     {
                         let hint = format!("{} {}", meeting_date, meeting_time);
-                        println!("│    ✅ Result: Next meeting at {}", hint);
+                        println!("│    ✅ Result: Next meeting at {} (using parallel {})", hint, parallel);
                         Some(hint)
                     } else {
-                        println!("│    ⏭️  Result: No schedule found");
+                        println!("│    ⏭️  Result: No schedule found for parallel {}", parallel);
                         None
                     }
                 }
@@ -411,7 +415,7 @@ fn calculate_course_hints(
         
         course_hints.push(CourseHint {
             course_name: ai_course_hint.course_name.clone(),
-            parallel_code: ai_course_hint.parallel_code.clone(),
+            parallel_codes: ai_course_hint.parallel_codes.clone(),  // ✅ Updated
             deadline_hint,
             deadline_type: ai_course_hint.deadline_type.clone(),
         });
