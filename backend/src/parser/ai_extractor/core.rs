@@ -51,20 +51,36 @@ pub async fn extract_with_ai(
         quoted_message  
     ).await {
         Ok(ctx) => {
-            // Build a clean, compact context summary
+            // Build a detailed, compact context summary with per-parallel schedules
             let courses_summary = if ctx.course_hints.is_empty() {
                 "none".to_string()
             } else {
                 ctx.course_hints
                     .iter()
                     .map(|ch| {
-                        let parallel = if ch.parallel_codes.is_empty() {
-                            "?".to_string()
+                        if ch.parallel_schedules.is_empty() {
+                            // No schedule info - show parallels if available
+                            let parallel = if ch.parallel_codes.is_empty() {
+                                "?".to_string()
+                            } else {
+                                format!("[{}]", ch.parallel_codes.join(","))
+                            };
+                            format!("{}:{}", ch.course_name, parallel)
                         } else {
-                            format!("[{}]", ch.parallel_codes.join(","))
-                        };
-                        let deadline = ch.deadline_hint.as_deref().unwrap_or("?");
-                        format!("{}:{}/{}", ch.course_name, parallel, deadline)
+                            // Has per-parallel schedules - show each parallel's meeting time
+                            let schedules_str = ch.parallel_schedules
+                                .iter()
+                                .map(|ps| {
+                                    if let Some(ref meeting) = ps.next_meeting {
+                                        format!("{}:{}", ps.parallel_code, meeting)
+                                    } else {
+                                        format!("{}:?", ps.parallel_code)
+                                    }
+                                })
+                                .collect::<Vec<_>>()
+                                .join(",");
+                            format!("{}:[{}]", ch.course_name, schedules_str)
+                        }
                     })
                     .collect::<Vec<_>>()
                     .join(", ")

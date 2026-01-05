@@ -12,7 +12,7 @@ use super::GROQ_TEXT_MODELS;
 /// Minimal context needed for main AI prompt
 #[derive(Debug, Clone)]
 pub struct MessageContext {
-    pub parallel_codes: Vec<String>,  // ✅ Changed from Option<String>
+    pub parallel_codes: Vec<String>,
     pub parallel_confidence: f32,
     pub parallel_source: String,
     pub deadline_hint: Option<String>,
@@ -22,13 +22,20 @@ pub struct MessageContext {
     pub quoted_message_summary: Option<String>,
 }
 
-/// Per-course context hints
+/// Per-course context hints with per-parallel schedule info
 #[derive(Debug, Clone)]
 pub struct CourseHint {
     pub course_name: String,
-    pub parallel_codes: Vec<String>,  // ✅ Changed from Option<String>
-    pub deadline_hint: Option<String>,
+    pub parallel_codes: Vec<String>,
     pub deadline_type: String,
+    pub parallel_schedules: Vec<ParallelSchedule>,
+}
+
+/// Individual parallel schedule information
+#[derive(Debug, Clone)]
+pub struct ParallelSchedule {
+    pub parallel_code: String,
+    pub next_meeting: Option<String>,  // Format: "YYYY-MM-DD HH:MM"
 }
 
 /// Build context by querying DB + lightweight AI
@@ -66,7 +73,12 @@ pub async fn build_context(
     );
     
     let deadline_hint = if course_hints.len() == 1 {
-        course_hints.first().and_then(|h| h.deadline_hint.clone())
+        let hint = &course_hints[0];
+        if hint.parallel_schedules.len() == 1 {
+            hint.parallel_schedules[0].next_meeting.clone()
+        } else {
+            None
+        }
     } else {
         None
     };
@@ -88,7 +100,7 @@ pub async fn build_context(
     };
     
     Ok(MessageContext {
-        parallel_codes: ai_hints.parallel_codes,  // ✅ Updated
+        parallel_codes: ai_hints.parallel_codes,
         parallel_confidence: ai_hints.parallel_confidence,
         parallel_source: ai_hints.parallel_source,
         deadline_hint,
@@ -157,7 +169,7 @@ async fn get_courses_list(pool: &PgPool) -> Result<String, sqlx::Error> {
 
 #[derive(Debug, Default)]
 struct SenderHistory {
-    parallel_patterns: Vec<(String, Vec<String>, i32)>,  // ✅ Changed to Vec<String>
+    parallel_patterns: Vec<(String, Vec<String>, i32)>,
 }
 
 async fn get_sender_history(pool: &PgPool, sender_id: &str) -> Result<SenderHistory, sqlx::Error> {
@@ -195,7 +207,7 @@ async fn get_sender_history(pool: &PgPool, sender_id: &str) -> Result<SenderHist
 
 #[derive(Debug, Deserialize)]
 struct AIHints {
-    parallel_codes: Vec<String>,  // ✅ Changed from Option<String>
+    parallel_codes: Vec<String>,
     parallel_confidence: f32,
     parallel_source: String,
     course_hints: Vec<AICourseHint>,
@@ -204,7 +216,7 @@ struct AIHints {
 #[derive(Debug, Deserialize)]
 struct AICourseHint {
     course_name: String,
-    parallel_codes: Vec<String>,  // ✅ Changed from Option<String>
+    parallel_codes: Vec<String>,
     deadline_type: String,
 }
 
@@ -249,22 +261,22 @@ COURSE IDENTIFICATION:
 • If QUOTED MESSAGE CONTEXT is present, use it to identify which assignment is being referenced
 • Return empty array if no valid courses identified
 
-PARALLEL CLASSES (per assignment):
+PARALLEL CLASSES (per course):
 • Valid values: k1 - k4, p1 - p4, r1 - r4, all
 • Return as ARRAY (can be multiple): ["k1", "k2"] or ["all"]
 • Priority: explicit mention > quoted context > sender history > empty array
-• Each assignment independent (don't assume shared parallel)
-- Patterns to recognize:
-  - "semua kelas" / "all classes" = ["all"]
-  - "K1, K2, K3" = ["k1", "k2", "k3"]
-  - "K1/P1" or "K1 & P1" = ["k1", "p1"] (BOTH codes)
-  - "paralel 1, 2" = ["p1", "p2"] or ["k1", "k2"] based on context
+• Each course independent (don't assume shared parallel)
+• Examples:
+  - "Tugas PBO untuk k1 dan k2" → ["k1", "k2"]
+  - "Semua kelas" → ["all"]
+  - "Kelas k1, k2, k3" → ["k1", "k2", "k3"]
+  - No mention → []
 
 DEADLINE TYPE (per course):
-- "explicit": Contains specific temporal info (dates, day names, times)
-- "next_meeting": References class session timing
-- "relative": Vague future reference without specific day/time
-- "unknown": Course mentioned without deadline
+• "explicit": Contains specific temporal info (dates, day names with times, specific times)
+• "next_meeting": References class session timing ("sebelum pertemuan", "before class", "di awal kelas", "saat kuliah")
+• "relative": Vague future reference ("besok", "minggu depan", "nanti" - WITHOUT specific details)
+• "unknown": Course mentioned without deadline
 
 GLOBAL PARALLEL:
 • Return array of parallels that apply to ALL courses
@@ -355,7 +367,7 @@ fn parse_ai_hints(json_text: &str) -> Result<AIHints, String> {
         .map_err(|e| format!("Failed to parse AI hints: {}", e))
 }
 
-// ===== DEADLINE CALCULATION (PER-COURSE) =====
+// ===== DEADLINE CALCULATION WITH PER-PARALLEL SCHEDULES =====
 
 fn calculate_course_hints(
     hints: &AIHints,
@@ -373,51 +385,62 @@ fn calculate_course_hints(
         println!("│    Parallels: {:?}", ai_course_hint.parallel_codes);
         println!("│    Deadline Type: {}", ai_course_hint.deadline_type);
         
-        let deadline_hint = match ai_course_hint.deadline_type.as_str() {
+        let parallel_schedules = match ai_course_hint.deadline_type.as_str() {
             "next_meeting" => {
-                // ✅ Handle array of parallels for next_meeting
                 if ai_course_hint.parallel_codes.is_empty() {
                     println!("│    ⏭️  Result: Skipped (needs parallel for schedule)");
-                    None
+                    vec![]
                 } else if ai_course_hint.parallel_codes.contains(&"all".to_string()) {
                     println!("│    ⏭️  Result: Skipped ('all' cannot determine specific schedule)");
-                    None
+                    vec![]
                 } else {
-                    // Use first specific parallel to get schedule
-                    let parallel = &ai_course_hint.parallel_codes[0];
+                    // Get schedule for EACH parallel
+                    let mut schedules = Vec::new();
                     
-                    if let Some((meeting_date, meeting_time)) = schedule_oracle
-                        .get_next_meeting_with_time(&ai_course_hint.course_name, parallel, today)
-                    {
-                        let hint = format!("{} {}", meeting_date, meeting_time);
-                        println!("│    ✅ Result: Next meeting at {} (using parallel {})", hint, parallel);
-                        Some(hint)
-                    } else {
-                        println!("│    ⏭️  Result: No schedule found for parallel {}", parallel);
-                        None
+                    for parallel in &ai_course_hint.parallel_codes {
+                        if let Some((meeting_date, meeting_time)) = schedule_oracle
+                            .get_next_meeting_with_time(&ai_course_hint.course_name, parallel, today)
+                        {
+                            let next_meeting = format!("{} {}", meeting_date, meeting_time);
+                            println!("│    ✅ {}: Next meeting at {}", parallel.to_uppercase(), next_meeting);
+                            
+                            schedules.push(ParallelSchedule {
+                                parallel_code: parallel.clone(),
+                                next_meeting: Some(next_meeting),
+                            });
+                        } else {
+                            println!("│    ⏭️  {}: No schedule found", parallel.to_uppercase());
+                            
+                            schedules.push(ParallelSchedule {
+                                parallel_code: parallel.clone(),
+                                next_meeting: None,
+                            });
+                        }
                     }
+                    
+                    schedules
                 }
             },
             "relative" => {
-                let hint = format!("{} 23:59", today + Duration::days(1));
-                println!("│    ✅ Result: Tomorrow EOD ({})", hint);
-                Some(hint)
+                // For relative deadlines, no per-parallel differentiation needed
+                println!("│    ✅ Result: Relative deadline (main AI will parse)");
+                vec![]
             },
             "explicit" => {
                 println!("│    📅 Result: Explicit date (main AI will parse)");
-                None
+                vec![]
             },
             _ => {
-                println!("│    ❓ Result: Unknown type (no hint generated)");
-                None
+                println!("│    ❓ Result: Unknown type");
+                vec![]
             }
         };
         
         course_hints.push(CourseHint {
             course_name: ai_course_hint.course_name.clone(),
-            parallel_codes: ai_course_hint.parallel_codes.clone(),  // ✅ Updated
-            deadline_hint,
+            parallel_codes: ai_course_hint.parallel_codes.clone(),
             deadline_type: ai_course_hint.deadline_type.clone(),
+            parallel_schedules,
         });
     }
     
