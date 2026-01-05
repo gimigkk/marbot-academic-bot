@@ -321,7 +321,7 @@ Send Confirmation Message
 - **Database**: PostgreSQL + SQLx (compile-time query verification)
 - **Async Runtime**: Tokio
 - **AI Models**: 
-  - **Gemini** (gemini-1.5-flash) - PRIMARY model, fast and reliable
+  - **Gemini** (gemini-3-flash) - PRIMARY model, fast and reliable
   - **Groq Reasoning** (openai/gpt-oss-120b) - 120B parameter model for complex logic
   - **Groq Standard** (llama-3.3-70b) - fast text processing fallback
   - **Groq Vision** (llama-3.2-90b-vision) - multimodal support
