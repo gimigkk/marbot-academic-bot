@@ -152,6 +152,33 @@ pub fn build_classification_prompt(
     format!(
         r#"You are a bilingual (Indonesian/English) academic assistant that extracts structured assignment information from WhatsApp messages.
 
+
+WHAT IS AN ASSIGNMENT?
+═══════════════════════════════════════════════════════════════════
+An assignment requires students to PRODUCE or SUBMIT something that will be EVALUATED.
+
+Core question: "What tangible work must students CREATE or HAND IN?"
+
+THREE REQUIREMENTS (all must be true):
+1. **Action Required**: Students must DO something (not just consume/attend)
+2. **Deliverable Exists**: Something concrete is produced/submitted
+3. **Evaluation Expected**: The work will be checked, graded, or assessed
+
+Common patterns that are NOT assignments:
+- Passive consumption: reading, watching, listening (without output)
+- Informational messages: schedules, announcements, resource links
+- Attendance requirements: showing up (unless presenting deliverable work)
+
+If the message describes:
+- What students must CREATE → likely assignment
+- What students should KNOW or ATTEND → likely not assignment
+- What resources are AVAILABLE → likely not assignment
+
+When uncertain, ask: "Will the instructor check if students submitted something?"
+- Yes → Assignment
+- No → Unrecognized
+
+
 CONTEXT
 ═══════════════════════════════════════════════════════════════════
 Current time (GMT+7): {}
@@ -174,41 +201,25 @@ TASK
 ═══════════════════════════════════════════════════════════════════
 Classify this message as:
 1. **MULTIPLE_ASSIGNMENTS** - Message contains 2+ assignments (CHECK FIRST)
-2. **NEW_ASSIGNMENT** - Announcing a single new task
-3. **UPDATE_ASSIGNMENT** - Modifying/clarifying existing assignment
+2. **ASSIGNMENT_INFO** - Announcing a single new task
+3. **ASSIGNMENT_UPDATE** - Modifying/clarifying existing assignment
 4. **UNRECOGNIZED** - Not about assignments
-
-
-WHAT IS AN ASSIGNMENT?
-═══════════════════════════════════════════════════════════════════
-An assignment is WORK that students must COMPLETE or SUBMIT. It has a deliverable.
-
-✓ IS AN ASSIGNMENT (has deliverable/action required):
-- Homework, exercises, problem sets to solve and submit
-- Lab reports, projects, presentations to create
-- Quizzes/exams students must take (action: take the test)
-- Forms, surveys students must fill out
-- Code, documents, files to upload/submit
-- Reading followed by written response/summary
-
-✗ NOT AN ASSIGNMENT (informational only):
-- Class schedule changes ("besok online", "kelas dipindah")
-- Meeting time announcements ("jam 10 kuliah online")
-- Exam schedules without tasks ("ujian tanggal X") - just informing when
-- Attendance reminders without submission ("wajib hadir") - attendance ≠ submission
-- Resource sharing without required output ("baca ini", "link materi")
-- General announcements, cancellations, room changes
-
-KEY DISTINCTION:
-Ask: "What must students CREATE, COMPLETE, or SUBMIT?"
-- If answer is tangible work → ASSIGNMENT
-- If answer is "just show up" or "be informed" → UNRECOGNIZED
-
-Attendance requirements are NOT assignments unless they involve submitting proof/work.
 
 
 CLASSIFICATION GUIDELINES
 ═══════════════════════════════════════════════════════════════════
+**STEP 0: VERIFY IT'S AN ASSIGNMENT (MANDATORY FIRST CHECK)**
+Apply the THREE REQUIREMENTS from "WHAT IS AN ASSIGNMENT?":
+1. Action required (not passive consumption)
+2. Deliverable exists (concrete output)
+3. Evaluation expected (will be checked/graded)
+
+If any requirement is missing → UNRECOGNIZED
+
+Focus on the distinction:
+- Creating/submitting work → Assignment
+- Consuming content/attending → Not assignment
+- Sharing resources → Not assignment
 
 **QUOTED MESSAGE HANDLING (PRIORITY):**
 - If QUOTED MESSAGE REFERENCE is present in context, the user is replying to a previous assignment
@@ -313,10 +324,10 @@ MULTIPLE_ASSIGNMENTS:
   ]
 }}
 
-NEW_ASSIGNMENT (single):
+ASSIGNMENT_INFO (single):
 {{"type":"assignment_info","course_name":"Pemrograman","title":"LKP 14","deadline":"2025-12-31 23:59","description":"Programming lab assignment 14","parallel_codes":["k1"]}}
 
-UPDATE_ASSIGNMENT:
+ASSIGNMENT_UPDATE:
 {{"type":"assignment_update","reference_keywords":["CourseName","identifier"],"changes":"what changed","new_deadline":"2025-12-30 14:00","new_title":null,"new_description":null,"parallel_codes":["all"]}}
 
 UNRECOGNIZED:
