@@ -86,14 +86,32 @@ pub async fn extract_with_ai(
                     .join(", ")
             };
             
-            let parallel_display = if ctx.parallel_codes.is_empty() {
+            // Show course-level parallels with source
+            let parallel_summary = if ctx.course_hints.is_empty() {
                 "none".to_string()
             } else {
-                format!("[{}]", ctx.parallel_codes.join(", "))
+                let courses_with_parallels: Vec<String> = ctx.course_hints
+                    .iter()
+                    .filter(|ch| !ch.parallel_codes.is_empty())
+                    .map(|ch| {
+                        let course_abbr = ch.course_name
+                            .split_whitespace()
+                            .take(2)
+                            .collect::<Vec<_>>()
+                            .join(" ");
+                        format!("{}:[{}]", course_abbr, ch.parallel_codes.join(","))
+                    })
+                    .collect();
+                
+                if courses_with_parallels.is_empty() {
+                    "none".to_string()
+                } else {
+                    courses_with_parallels.join(", ")
+                }
             };
             
-            println!("│\n│ ✅ Context  : Parallel={} ({}), Courses=[{}]",
-                parallel_display, ctx.parallel_source, courses_summary);
+            println!("│\n│ ✅ Context  : Detected={} ({}), Schedules=[{}]",
+                parallel_summary, ctx.parallel_source, courses_summary);
             
             if let Some(ref quoted_summary) = ctx.quoted_message_summary {
                 println!("│              Quoted: {}", quoted_summary);

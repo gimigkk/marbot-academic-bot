@@ -231,12 +231,13 @@ pub(super) fn is_valid_json_object(s: &str) -> bool {
         && s.matches('{').count() == s.matches('}').count()
 }
 
-pub(super) fn truncate_for_log(text: &str, max_len: usize) -> String {
-    let clean_text = text.replace('\n', " ");
-    if clean_text.len() <= max_len {
-        clean_text
+pub(super) fn truncate_for_log(text: &str, max_chars: usize) -> String {
+    let char_count = text.chars().count();
+    if char_count <= max_chars {
+        text.to_string()
     } else {
-        format!("{}...", &clean_text[..max_len])
+        // Use chars().take() to handle Unicode properly
+        text.chars().take(max_chars).collect::<String>() + "..."
     }
 }
 

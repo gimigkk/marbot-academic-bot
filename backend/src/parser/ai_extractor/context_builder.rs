@@ -243,8 +243,13 @@ async fn call_context_resolver_ai(
         .map(|ctx| format!("\n\nQUOTED MESSAGE CONTEXT:\n{}\n(User is replying to/referencing this message)", ctx))
         .unwrap_or_default();
     
+    // Research-backed prompt design:
+    // - Constraint-based (not example-heavy) to avoid overfitting
+    // - Task definition + annotation guidelines approach
+    // - Minimal examples (1-2) with diversity to prevent bias
+    // - Generic enough to handle variations
     let prompt = format!(
-        r#"Analyze this academic message and extract structured course information.
+        r#"Extract structured course information from an academic message.
 
 MESSAGE: "{}"
 SENDER HISTORY: {}{}
@@ -252,69 +257,75 @@ SENDER HISTORY: {}{}
 AVAILABLE COURSES:
 {}
 
-TASK: Identify courses mentioned and classify deadline information.
+=== TASK DEFINITION ===
+Identify courses and classify deadline information as structured JSON.
 
-COURSE IDENTIFICATION:
-• Match against AVAILABLE COURSES list (check both full names and aliases in [aka: ...])
-• Always use the FULL course name, not the alias
-• Assignment titles and project names are NOT courses
-• If QUOTED MESSAGE CONTEXT is present, use it to identify which assignment is being referenced
-• Return empty array if no valid courses identified
+=== ENTITY EXTRACTION GUIDELINES ===
 
-PARALLEL CLASSES (per course):
-• Valid values: k1 - k4, p1 - p4, r1 - r4, all
-• Return as ARRAY (can be multiple): ["k1", "k2"] or ["all"]
-• Priority: explicit mention > quoted context > sender history > empty array
-• Each course independent (don't assume shared parallel)
-• Examples:
-  - "Tugas PBO untuk k1 dan k2" → ["k1", "k2"]
-  - "Semua kelas" → ["all"]
-  - "Kelas k1, k2, k3" → ["k1", "k2", "k3"]
-  - No mention → []
+1. COURSE IDENTIFICATION
+   • Match against AVAILABLE COURSES list only
+   • Use full course name, never alias (check [aka: ...] for aliases)
+   • Assignment/project titles are NOT courses
+   • If QUOTED CONTEXT present, use it to identify referenced assignment
+   • Return empty array if no valid courses found
 
-DEADLINE TYPE (per course):
-• "explicit": ABSOLUTE date references (calendar dates, specific date-month combinations)
-  Examples: "5 Januari", "Jumat 10 Januari", "10 January 2026", "tanggal 15"
-  
-• "next_meeting": References class session timing
-  Examples: "sebelum pertemuan", "before class", "di awal kelas", "saat kuliah", "before next session"
-  
-• "relative": RELATIVE temporal references (relative to current date/time)
-  Examples: "besok", "lusa", "minggu depan", "nanti", "hari ini"
-  Note: STILL relative even with specific times ("besok jam 10" = relative + time)
-  
-• "unknown": Course mentioned without any deadline information
+2. PARALLEL CLASS CODES (per course)
+   • Definition: Valid codes are k1-k4, p1-p4, r1-r4, or "all"
+   • Format: Return as array, can contain multiple: ["k1", "k2"] or ["all"]
+   • Extraction priority order:
+     a) Explicit mention in message (highest priority)
+     b) Quoted context reference
+     c) Sender history pattern
+     d) No information → empty array []
+   
+   • Recognition patterns:
+     - Look for [parallel_code] appearing immediately after course name/alias
+     - Extract from phrases like "untuk [code]", "kelas [code]", "[code] dan [code]"
+     - Keywords "semua kelas"/"all classes" → ["all"]
+     - Standalone codes without course context → ignore
+   
+   • Independence: Each course has independent parallels
+   • Example extractions:
+     - "Struktur Data P1" → course: "Struktur Data", parallel_codes: ["p1"]
+     - "Tugas PBO untuk k1 dan k2" → parallel_codes: ["k1", "k2"]
+     - "Semua kelas" → parallel_codes: ["all"]
 
-Key distinction:
-- Absolute date (5 Jan, Friday 10th) → explicit
-- Relative term (tomorrow, next week) → relative (even with time: "tomorrow 10am")
-- Class-based reference (before class) → next_meeting
+3. DEADLINE TYPE CLASSIFICATION (per course)
+   • "explicit": Absolute calendar dates
+     - Contains: specific date-month, day of week + date, "tanggal [number]"
+     - Examples: "5 Januari", "Jumat 10 Januari", "tanggal 15"
+   
+   • "next_meeting": Class session references WITHOUT relative time terms
+     - Contains: "sebelum pertemuan", "before class", "di awal kelas", "saat kuliah", "di class"
+     - Must NOT contain relative terms (besok, minggu depan, etc.)
+   
+   • "relative": Relative temporal references
+     - Contains: "besok", "lusa", "minggu depan", "nanti", "hari ini", "tomorrow"
+     - Note: "besok sebelum kelas" is RELATIVE (besok = relative term)
+   
+   • "unknown": Course mentioned without deadline info
 
-GLOBAL PARALLEL:
-• Return array of parallels that apply to ALL courses
-• If courses have different parallels, return empty array
-• Examples:
-  - All courses mention k1 → ["k1"]
-  - Course A has k1, Course B has k2 → []
-  - All courses mention "all" → ["all"]
+4. GLOBAL PARALLEL CODES
+   • Return parallels common to ALL courses
+   • If courses have different parallels → empty array
+   • Single course scenario → empty array (not global)
 
-USING QUOTED CONTEXT:
-• If message says "diundur" / "berubah" / "updated" and quotes a previous assignment, extract info from quoted context
-• Treat quoted assignment info as the reference point for updates
-
-Return JSON:
+=== OUTPUT FORMAT ===
+Return JSON only:
 {{
-  "parallel_codes": [string],
-  "parallel_confidence": float,
+  "parallel_codes": [string],  // Global parallels or []
+  "parallel_confidence": float,  // 0.0-1.0
   "parallel_source": "explicit" | "quoted_context" | "sender_history" | "unknown",
   "course_hints": [
     {{
-      "course_name": string,
-      "parallel_codes": [string],
-      "deadline_type": string
+      "course_name": string,  // Full name from AVAILABLE COURSES
+      "parallel_codes": [string],  // Course-specific parallels
+      "deadline_type": "explicit" | "next_meeting" | "relative" | "unknown"
     }}
   ]
-}}"#,
+}}
+
+Apply these guidelines to extract information. Focus on the constraints defined above rather than pattern matching."#,
         message,
         history_text,
         quoted_section,
