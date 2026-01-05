@@ -22,7 +22,6 @@ fn build_context_assignments_list(
                 .map(|d| d.format("%Y-%m-%d %H:%M").to_string())
                 .unwrap_or_else(|| "No deadline".to_string());
             
-            // ✅ Handle array of parallel codes
             let parallel = if a.parallel_codes.is_empty() {
                 "N/A".to_string()
             } else {
@@ -81,14 +80,14 @@ pub fn build_classification_prompt(
         let mut hints = String::from("\n\nRESOLVED CONTEXT (HINTS - USE AS REFERENCE WHEN NEEDED)\n");
         hints.push_str("═══════════════════════════════════════════════════════════════════\n");
         
-        // ✅ Show quoted message context prominently
+        // Show quoted message context prominently
         if let Some(ref quoted) = ctx.quoted_message_summary {
             hints.push_str("✓ QUOTED MESSAGE REFERENCE:\n");
             hints.push_str(&format!("  {}\n", quoted));
             hints.push_str("  → User is replying to/updating this assignment\n\n");
         }
         
-        // ✅ Handle array of parallel codes
+        // Global parallels
         if !ctx.parallel_codes.is_empty() {
             hints.push_str(&format!(
                 "✓ Global Parallels: [{}] (confidence: {:.0}%, source: {})\n",
@@ -98,18 +97,29 @@ pub fn build_classification_prompt(
             ));
         }
         
+        // Per-course hints with per-parallel schedules
         if !ctx.course_hints.is_empty() {
-            hints.push_str("\n✓ Per-Course Hints:\n");
+            hints.push_str("\n✓ Per-Course Schedule Information:\n");
             for course_hint in &ctx.course_hints {
-                hints.push_str(&format!("  • {}", course_hint.course_name));
+                hints.push_str(&format!("  • Course: {}\n", course_hint.course_name));
                 
-                // ✅ Handle array of parallel codes
+                // Show parallel codes
                 if !course_hint.parallel_codes.is_empty() {
-                    hints.push_str(&format!(" → Parallels: [{}]", course_hint.parallel_codes.join(", ")));
+                    hints.push_str(&format!("    Parallels: [{}]\n", course_hint.parallel_codes.join(", ")));
                 }
                 
-                if let Some(ref deadline) = course_hint.deadline_hint {
-                    hints.push_str(&format!(" → Suggested deadline: {}", deadline));
+                hints.push_str(&format!("    Deadline Type: {}\n", course_hint.deadline_type));
+                
+                // Show per-parallel schedules if available
+                if !course_hint.parallel_schedules.is_empty() {
+                    hints.push_str("    Next Meetings:\n");
+                    for ps in &course_hint.parallel_schedules {
+                        if let Some(ref meeting) = ps.next_meeting {
+                            hints.push_str(&format!("      - {}: {}\n", ps.parallel_code.to_uppercase(), meeting));
+                        } else {
+                            hints.push_str(&format!("      - {}: No schedule found\n", ps.parallel_code.to_uppercase()));
+                        }
+                    }
                 }
                 
                 hints.push('\n');
@@ -118,18 +128,21 @@ pub fn build_classification_prompt(
         
         if let Some(ref deadline) = ctx.deadline_hint {
             hints.push_str(&format!(
-                "\n✓ Deadline Suggestion (single assignment): {}\n",
+                "✓ Deadline Suggestion (single assignment only): {}\n\n",
                 deadline
             ));
         }
         
-        hints.push_str("\n⚠️ HOW TO USE HINTS:\n");
+        hints.push_str("⚠️ HOW TO USE SCHEDULE HINTS:\n");
         hints.push_str("- Hints are SUGGESTIONS based on schedule/patterns/quoted messages\n");
         hints.push_str("- QUOTED MESSAGE: If present, this is the assignment being updated/referenced\n");
-        hints.push_str("- For \"sebelum pertemuan\"/\"before next meeting\": Use the suggested deadline if available\n");
-        hints.push_str("- For explicit dates (\"besok\", \"5 Januari\"): Calculate yourself using reference dates above\n");
+        hints.push_str("- For \"sebelum pertemuan\"/\"before next meeting\": Use the provided next meeting times\n");
+        hints.push_str("- **CRITICAL: If parallels have DIFFERENT next meeting times, SPLIT into separate assignments**\n");
+        hints.push_str("  Example: P1→Thu 10:00, P2→Thu 13:00, P3→Tue 13:00\n");
+        hints.push_str("  → Create 2 assignments: [P3→Tue 13:00] and [P1,P2→Thu 10:00]\n");
+        hints.push_str("- For explicit dates (\"besok\", \"5 Januari\"): Calculate yourself using reference dates\n");
         hints.push_str("- For parallels: Use hint when not explicitly mentioned in message\n");
-        hints.push_str("- IMPORTANT: Deadline format must be YYYY-MM-DD HH:MM (include time from hint)\n");
+        hints.push_str("- IMPORTANT: Deadline format must be YYYY-MM-DD HH:MM (include time)\n");
         hints.push_str("═══════════════════════════════════════════════════════════════════");
         hints
     } else {
@@ -165,6 +178,35 @@ Classify this message as:
 3. **UPDATE_ASSIGNMENT** - Modifying/clarifying existing assignment
 4. **UNRECOGNIZED** - Not about assignments
 
+
+WHAT IS AN ASSIGNMENT?
+═══════════════════════════════════════════════════════════════════
+An assignment is WORK that students must COMPLETE or SUBMIT. It has a deliverable.
+
+✓ IS AN ASSIGNMENT (has deliverable/action required):
+- Homework, exercises, problem sets to solve and submit
+- Lab reports, projects, presentations to create
+- Quizzes/exams students must take (action: take the test)
+- Forms, surveys students must fill out
+- Code, documents, files to upload/submit
+- Reading followed by written response/summary
+
+✗ NOT AN ASSIGNMENT (informational only):
+- Class schedule changes ("besok online", "kelas dipindah")
+- Meeting time announcements ("jam 10 kuliah online")
+- Exam schedules without tasks ("ujian tanggal X") - just informing when
+- Attendance reminders without submission ("wajib hadir") - attendance ≠ submission
+- Resource sharing without required output ("baca ini", "link materi")
+- General announcements, cancellations, room changes
+
+KEY DISTINCTION:
+Ask: "What must students CREATE, COMPLETE, or SUBMIT?"
+- If answer is tangible work → ASSIGNMENT
+- If answer is "just show up" or "be informed" → UNRECOGNIZED
+
+Attendance requirements are NOT assignments unless they involve submitting proof/work.
+
+
 CLASSIFICATION GUIDELINES
 ═══════════════════════════════════════════════════════════════════
 
@@ -183,21 +225,35 @@ Signals:
 - Bullet points with different assignments
 - "ada 2 tugas", "3 assignments today"
 
-**What qualifies as an assignment:**
-Must be ACTIONABLE WORK requiring submission or completion:
-- YES: Deliverables like homework, lab report, project, paper, presentation, quiz (to be taken), assignment, forms to fill (EPBM, surveys)
-- YES: Has submission requirement, grading component, or mandatory completion
-- NO: Informational like exam schedules (UTS/UAS), video uploads (unless watching is required for grade), reading materials, class cancellations
-- NO: Pure resources like links to materials, tutorials, lecture notes (unless submission required)
+**CRITICAL: Apply "WHAT IS AN ASSIGNMENT?" filter:**
+- For MULTIPLE_ASSIGNMENTS, verify each item meets the assignment definition.
+- Informational messages about schedules, attendance, or resources are NOT assignments.
+- Only extract items where students must produce or submit deliverable work.
 
-Extract each qualifying assignment with ALL fields (course, title, deadline, description, parallel_codes)
+Extract each ACTUAL assignment as separate item with ALL fields (course, title, deadline, description, parallel_codes)
 
-**DEADLINE EXTRACTION:**
-Extract deadline from the message text.
-- Explicit dates: "24 Jan 2026 16:00" → use exactly
-- Relative with time context: "besok di awal kelas" → tomorrow at class start time (check hints for time)
-- Simple relative: "besok" → tomorrow 23:59
-- No deadline mentioned → null
+**HANDLING MULTIPLE PARALLELS WITH DIFFERENT SCHEDULES:**
+When a single announcement targets multiple parallels (e.g., "P1, P2, P3") and:
+- Deadline is "sebelum pertemuan" / "before next meeting" / similar class-time reference
+- Context shows DIFFERENT next meeting times for each parallel
+
+You MUST split into separate assignments grouped by deadline:
+  Example Context: P1→Thu 10:00, P2→Thu 13:00, P3→Tue 13:00
+  Create TWO assignments:
+  1. {{"parallel_codes": ["p3"], "deadline": "2026-01-07 13:00", ...}}
+  2. {{"parallel_codes": ["p1", "p2"], "deadline": "2026-01-09 10:00", ...}}
+
+Group parallels with the SAME deadline together. Each unique deadline = separate assignment.
+
+**DEADLINE HANDLING:**
+- Extract deadline from the MESSAGE TEXT as primary source
+- Context hints are suggestions for ambiguous cases
+- For dates WITHOUT specific time (e.g., "besok", "deadline Jumat") → USE 23:59 (end of day)
+- For dates WITH specific time (e.g., "jam 10 pagi", "16:00") → USE that time
+- For "before next meeting" with schedule hints → USE the provided meeting time
+- **If multiple parallels have different meeting times → SPLIT assignments as described above**
+- NEVER hallucinate dates when none are mentioned
+- Format: YYYY-MM-DD HH:MM (always include time)
 
 NEW_ASSIGNMENT signals:
 - "ada tugas baru", "new assignment", clear announcement
@@ -270,15 +326,15 @@ PRINCIPLES
 ═══════════════════════════════════════════════════════════════════
 1. **Check for QUOTED MESSAGE first** - prioritize context from replies
 2. **Check for multiple assignments SECOND** before single assignment
-3. **Semantic over literal**: Understand intent, not just keywords
-4. **Context matters**: Use DB, RESOLVED CONTEXT hints, and QUOTED references
-5. **ALWAYS GENERATE DESCRIPTIONS**: Never leave description field empty
-6. **Deadline format**: YYYY-MM-DD HH:MM (use provided time from hints, 23:59 for dates without time, NULL if no info)
-7. **Confidence-based**: High confidence → classify; Low → UNRECOGNIZED
-8. **Course boundaries**: Never match updates across different courses
-9. **Parallel codes as arrays**: Always return arrays, even for single parallel
-10. **When uncertain**: NEW > UPDATE (avoid bad matches); Classification > UNRECOGNIZED (avoid noise)
-11. **Assignment = Actionable work**: Only classify items that require student action/submission, not informational messages
+3. **Split assignments when parallels have different schedules** - critical for accuracy
+4. **Semantic over literal**: Understand intent, not just keywords
+5. **Context matters**: Use DB, RESOLVED CONTEXT hints, and QUOTED references
+6. **ALWAYS GENERATE DESCRIPTIONS**: Never leave description field empty
+7. **Deadline format**: YYYY-MM-DD HH:MM (use provided time from hints, 23:59 for dates without time, NULL if no info)
+8. **Confidence-based**: High confidence → classify; Low → UNRECOGNIZED
+9. **Course boundaries**: Never match updates across different courses
+10. **Parallel codes as arrays**: Always return arrays, even for single parallel
+11. **When uncertain**: NEW > UPDATE (avoid bad matches); Classification > UNRECOGNIZED (avoid noise)
 
 Return ONLY valid JSON. No markdown, no explanations."#,
         current_datetime,
@@ -299,10 +355,9 @@ pub fn build_matching_prompt(
     keywords: &[String], 
     assignments: &[Assignment],
     course_map: &HashMap<Uuid, String>,
-    parallel_codes: &[String],  // ✅ Changed from Option<&str>
+    parallel_codes: &[String],
 ) -> String {
     let assignments_list = assignments.iter().enumerate().map(|(i, a)| {
-        // ✅ Handle array of parallel codes
         let parallel_str = if a.parallel_codes.is_empty() {
             "N/A".to_string()
         } else {
@@ -325,7 +380,6 @@ pub fn build_matching_prompt(
     let now = Utc::now().with_timezone(&gmt7);
     let current_time = now.format("%Y-%m-%d %H:%M:%S").to_string();
     
-    // ✅ Handle array of parallel codes
     let parallel_info = if parallel_codes.is_empty() {
         "Parallel codes: (not specified)".to_string()
     } else {
@@ -351,12 +405,11 @@ pub fn build_duplicate_detection_prompt(
     title: &str,
     description: &str,
     course_name: &str,
-    parallel_codes: &[String],  // ✅ Changed from Option<&str>
+    parallel_codes: &[String],
     existing_assignments: &[Assignment],
     course_map: &HashMap<Uuid, String>,
 ) -> String {
     let assignments_list = existing_assignments.iter().enumerate().map(|(i, a)| {
-        // ✅ Handle array of parallel codes
         let parallel_str = if a.parallel_codes.is_empty() {
             "null".to_string()
         } else {
@@ -375,7 +428,6 @@ pub fn build_duplicate_detection_prompt(
             i + 1, a.id, course, a.title, parallel_str, desc_preview)
     }).collect::<Vec<_>>().join("\n");
     
-    // ✅ Handle array of parallel codes
     let parallel_info = if parallel_codes.is_empty() {
         "Parallels: []".to_string()
     } else {

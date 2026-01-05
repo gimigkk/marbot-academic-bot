@@ -216,7 +216,7 @@ pub fn calculate_word_overlap(s1: &str, s2: &str) -> f32 {
 pub(super) fn get_current_datetime() -> String {
     let gmt7 = FixedOffset::east_opt(7 * 3600).unwrap();
     let now = Utc::now().with_timezone(&gmt7);
-    now.format("%Y-%m-%d %H:%M:%S").to_string()
+    now.format("%A, %Y-%m-%d %H:%M:%S").to_string()
 }
 
 pub(super) fn get_current_date() -> String {
