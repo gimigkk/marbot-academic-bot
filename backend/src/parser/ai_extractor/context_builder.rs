@@ -273,10 +273,22 @@ PARALLEL CLASSES (per course):
   - No mention → []
 
 DEADLINE TYPE (per course):
-• "explicit": Contains specific temporal info (dates, day names with times, specific times)
-• "next_meeting": References class session timing ("sebelum pertemuan", "before class", "di awal kelas", "saat kuliah")
-• "relative": Vague future reference ("besok", "minggu depan", "nanti" - WITHOUT specific details)
-• "unknown": Course mentioned without deadline
+• "explicit": ABSOLUTE date references (calendar dates, specific date-month combinations)
+  Examples: "5 Januari", "Jumat 10 Januari", "10 January 2026", "tanggal 15"
+  
+• "next_meeting": References class session timing
+  Examples: "sebelum pertemuan", "before class", "di awal kelas", "saat kuliah", "before next session"
+  
+• "relative": RELATIVE temporal references (relative to current date/time)
+  Examples: "besok", "lusa", "minggu depan", "nanti", "hari ini"
+  Note: STILL relative even with specific times ("besok jam 10" = relative + time)
+  
+• "unknown": Course mentioned without any deadline information
+
+Key distinction:
+- Absolute date (5 Jan, Friday 10th) → explicit
+- Relative term (tomorrow, next week) → relative (even with time: "tomorrow 10am")
+- Class-based reference (before class) → next_meeting
 
 GLOBAL PARALLEL:
 • Return array of parallels that apply to ALL courses
@@ -386,7 +398,11 @@ fn calculate_course_hints(
         println!("│    Deadline Type: {}", ai_course_hint.deadline_type);
         
         let parallel_schedules = match ai_course_hint.deadline_type.as_str() {
-            "next_meeting" => {
+            "next_meeting" | "relative" => {
+                // Both types benefit from schedule hints
+                // "next_meeting" = deadline is literally the next meeting time
+                // "relative" = deadline is relative (besok, minggu depan) - provide next meeting as reference
+                
                 if ai_course_hint.parallel_codes.is_empty() {
                     println!("│    ⏭️  Result: Skipped (needs parallel for schedule)");
                     vec![]
@@ -394,15 +410,22 @@ fn calculate_course_hints(
                     println!("│    ⏭️  Result: Skipped ('all' cannot determine specific schedule)");
                     vec![]
                 } else {
-                    // Get schedule for EACH parallel
+                    // Get immediate next meeting for EACH parallel
                     let mut schedules = Vec::new();
+                    
+                    let hint_type = if ai_course_hint.deadline_type == "next_meeting" {
+                        "Next meeting"
+                    } else {
+                        "Schedule reference"
+                    };
                     
                     for parallel in &ai_course_hint.parallel_codes {
                         if let Some((meeting_date, meeting_time)) = schedule_oracle
                             .get_next_meeting_with_time(&ai_course_hint.course_name, parallel, today)
                         {
                             let next_meeting = format!("{} {}", meeting_date, meeting_time);
-                            println!("│    ✅ {}: Next meeting at {}", parallel.to_uppercase(), next_meeting);
+                            println!("│    ✅ {}: {} at {}", 
+                                parallel.to_uppercase(), hint_type, next_meeting);
                             
                             schedules.push(ParallelSchedule {
                                 parallel_code: parallel.clone(),
@@ -420,11 +443,6 @@ fn calculate_course_hints(
                     
                     schedules
                 }
-            },
-            "relative" => {
-                // For relative deadlines, no per-parallel differentiation needed
-                println!("│    ✅ Result: Relative deadline (main AI will parse)");
-                vec![]
             },
             "explicit" => {
                 println!("│    📅 Result: Explicit date (main AI will parse)");
