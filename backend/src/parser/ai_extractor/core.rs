@@ -188,7 +188,7 @@ pub async fn extract_with_ai(
             }
             Err(e) => {
                 eprintln!("│ ⚠️  Gemini failed: {}", e);
-                eprintln!("│ 🔄 Falling back to Groq...");
+                eprintln!("\n│ 🔄 Falling back to Groq...");
             }
         }
     }
@@ -216,13 +216,6 @@ async fn try_gemini_models(prompt: &str) -> Result<AIClassification, String> {
         .map_err(|_| "GEMINI_API_KEY not set in .env".to_string())?;
     
     for (index, model) in GEMINI_MODELS.iter().enumerate() {
-        println!("│ 🔄 Model    : {} (Gemini {}/{})", model, index + 1, GEMINI_MODELS.len());
-        
-        let url = format!(
-            "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent?key={}",
-            model, api_key
-        );
-        
         let request_body = json!({
             "contents": [{"parts": [{"text": prompt}]}],
             "generationConfig": {
@@ -232,11 +225,17 @@ async fn try_gemini_models(prompt: &str) -> Result<AIClassification, String> {
             }
         });
         
+        let url = format!(
+            "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent?key={}",
+            model, api_key
+        );
+        
         let client = reqwest::Client::new();
         let response = match client.post(&url).json(&request_body).send().await {
             Ok(r) => r,
             Err(e) => {
-                eprintln!("│ \x1b[31m❌ REQUEST FAILED\x1b[0m : {}", e);
+                eprintln!("│ \x1b[31m❌ REQUEST FAILED\x1b[0m : {} (Gemini {}/{})", model, index + 1, GEMINI_MODELS.len());
+                eprintln!("│    Error: {}", e);
                 continue;
             }
         };
@@ -244,7 +243,7 @@ async fn try_gemini_models(prompt: &str) -> Result<AIClassification, String> {
         let status = response.status();
         
         if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
-            eprintln!("│ ⚠️  RATE LIMIT : {}", model);
+            eprintln!("│ ⚠️  R-LIMIT  : {} (Gemini {}/{})", model, index + 1, GEMINI_MODELS.len());
             if index < GEMINI_MODELS.len() - 1 {
                 continue;
             } else {
@@ -253,7 +252,7 @@ async fn try_gemini_models(prompt: &str) -> Result<AIClassification, String> {
         }
         
         if status.is_success() {
-            println!("│ \x1b[32m✅ SUCCESS\x1b[0m  : Gemini response");
+            println!("│ \x1b[32m✅ SUCCESS\x1b[0m  : {} (Gemini {}/{})", model, index + 1, GEMINI_MODELS.len());
             
             let gemini_response: GeminiResponse = response.json().await
                 .map_err(|e| format!("Failed to deserialize: {}", e))?;
@@ -267,7 +266,8 @@ async fn try_gemini_models(prompt: &str) -> Result<AIClassification, String> {
         
         let error_text = response.text().await
             .unwrap_or_else(|_| "Unknown error".to_string());
-        eprintln!("│ ❌ ERROR    : {} - {}", status, truncate_for_log(&error_text, 60));
+        eprintln!("│ ❌ ERROR    : {} (Gemini {}/{}) - {}", model, index + 1, GEMINI_MODELS.len(), status);
+        eprintln!("│    {}", truncate_for_log(&error_text, 60));
         
         if index < GEMINI_MODELS.len() - 1 {
             continue;
@@ -284,8 +284,6 @@ async fn try_groq_reasoning(prompt: &str) -> Result<AIClassification, String> {
         .map_err(|_| "GROQ_API_KEY not set in .env".to_string())?;
     
     for (index, model) in GROQ_REASONING_MODELS.iter().enumerate() {
-        println!("│ 🔄 Model    : {} (Groq Reasoning {}/{})", model, index + 1, GROQ_REASONING_MODELS.len());
-        
         let url = "https://api.groq.com/openai/v1/chat/completions";
         
         let request_body = json!({
@@ -313,15 +311,26 @@ async fn try_groq_reasoning(prompt: &str) -> Result<AIClassification, String> {
         {
             Ok(r) => r,
             Err(e) => {
-                eprintln!("│ \x1b[31m❌ REQUEST FAILED\x1b[0m : {}", e);
+                eprintln!("│ \x1b[31m❌ REQUEST FAILED\x1b[0m : {} (Groq Reasoning {}/{})", model, index + 1, GROQ_REASONING_MODELS.len());
+                eprintln!("│    Error: {}", e);
                 continue;
             }
         };
         
         let status = response.status();
         
+        if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
+            eprintln!("│ ⚠️  R-LIMIT  : {} (Groq Reasoning {}/{})", model, index + 1, GROQ_REASONING_MODELS.len());
+            if index < GROQ_REASONING_MODELS.len() - 1 {
+                continue;
+            } else {
+                eprintln!("│ 🔄 Reasoning models exhausted, trying standard models...");
+                return try_groq_standard_text(prompt).await;
+            }
+        }
+        
         if status.is_success() {
-            println!("│ \x1b[32m✅ SUCCESS\x1b[0m  : Groq Reasoning response");
+            println!("│ \x1b[32m✅ SUCCESS\x1b[0m  : {} (Groq Reasoning {}/{})", model, index + 1, GROQ_REASONING_MODELS.len());
             
             let groq_response: GroqResponse = response.json().await
                 .map_err(|e| format!("Failed to deserialize: {}", e))?;
@@ -338,19 +347,10 @@ async fn try_groq_reasoning(prompt: &str) -> Result<AIClassification, String> {
             return Ok(classification);
         }
         
-        if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
-            eprintln!("│ ⚠️  RATE LIMIT : {}", model);
-            if index < GROQ_REASONING_MODELS.len() - 1 {
-                continue;
-            } else {
-                eprintln!("│ 🔄 Reasoning models exhausted, trying standard models...");
-                return try_groq_standard_text(prompt).await;
-            }
-        }
-        
         let error_text = response.text().await
             .unwrap_or_else(|_| "Unknown error".to_string());
-        eprintln!("│ ❌ ERROR    : {} - {}", status, truncate_for_log(&error_text, 60));
+        eprintln!("│ ❌ ERROR    : {} (Groq Reasoning {}/{}) - {}", model, index + 1, GROQ_REASONING_MODELS.len(), status);
+        eprintln!("│    {}", truncate_for_log(&error_text, 60));
         
         if index < GROQ_REASONING_MODELS.len() - 1 {
             continue;
@@ -368,8 +368,6 @@ async fn try_groq_standard_text(prompt: &str) -> Result<AIClassification, String
         .map_err(|_| "GROQ_API_KEY not set in .env".to_string())?;
     
     for (index, model) in GROQ_TEXT_MODELS.iter().enumerate() {
-        println!("│ 🔄 Model    : {} (Groq Standard {}/{})", model, index + 1, GROQ_TEXT_MODELS.len());
-        
         let url = "https://api.groq.com/openai/v1/chat/completions";
         
         let request_body = json!({
@@ -390,15 +388,25 @@ async fn try_groq_standard_text(prompt: &str) -> Result<AIClassification, String
         {
             Ok(r) => r,
             Err(e) => {
-                eprintln!("│ \x1b[31m❌ REQUEST FAILED\x1b[0m : {}", e);
+                eprintln!("│ \x1b[31m❌ REQUEST FAILED\x1b[0m : {} (Groq Standard {}/{})", model, index + 1, GROQ_TEXT_MODELS.len());
+                eprintln!("│    Error: {}", e);
                 continue;
             }
         };
         
         let status = response.status();
         
+        if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
+            eprintln!("│ ⚠️  R-LIMIT  : {} (Groq Standard {}/{})", model, index + 1, GROQ_TEXT_MODELS.len());
+            if index < GROQ_TEXT_MODELS.len() - 1 {
+                continue;
+            } else {
+                return Err("All Groq standard models rate limited".to_string());
+            }
+        }
+        
         if status.is_success() {
-            println!("│ \x1b[33m⚠️  STANDARD\x1b[0m : Using non-reasoning model");
+            println!("│ \x1b[33m⚠️  STANDARD\x1b[0m : {} (Groq Standard {}/{})", model, index + 1, GROQ_TEXT_MODELS.len());
             
             let groq_response: GroqResponse = response.json().await
                 .map_err(|e| format!("Failed to deserialize: {}", e))?;
@@ -415,18 +423,10 @@ async fn try_groq_standard_text(prompt: &str) -> Result<AIClassification, String
             return Ok(classification);
         }
         
-        if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
-            eprintln!("│ ⚠️  RATE LIMIT : {}", model);
-            if index < GROQ_TEXT_MODELS.len() - 1 {
-                continue;
-            } else {
-                return Err("All Groq standard models rate limited".to_string());
-            }
-        }
-        
         let error_text = response.text().await
             .unwrap_or_else(|_| "Unknown error".to_string());
-        eprintln!("│ ❌ ERROR    : {} - {}", status, truncate_for_log(&error_text, 60));
+        eprintln!("│ ❌ ERROR    : {} (Groq Standard {}/{}) - {}", model, index + 1, GROQ_TEXT_MODELS.len(), status);
+        eprintln!("│    {}", truncate_for_log(&error_text, 60));
         
         if index < GROQ_TEXT_MODELS.len() - 1 {
             continue;
@@ -443,8 +443,6 @@ async fn try_groq_vision(prompt: &str, image_base64: &str) -> Result<AIClassific
         .map_err(|_| "GROQ_API_KEY not set in .env".to_string())?;
     
     for (index, model) in GROQ_VISION_MODELS.iter().enumerate() {
-        println!("│ 🔄 Model    : {} (Vision {}/{})", model, index + 1, GROQ_VISION_MODELS.len());
-        
         let url = "https://api.groq.com/openai/v1/chat/completions";
         
         let request_body = json!({
@@ -476,15 +474,25 @@ async fn try_groq_vision(prompt: &str, image_base64: &str) -> Result<AIClassific
         {
             Ok(r) => r,
             Err(e) => {
-                eprintln!("│ \x1b[31m❌ REQUEST FAILED\x1b[0m : {}", e);
+                eprintln!("│ \x1b[31m❌ REQUEST FAILED\x1b[0m : {} (Vision {}/{})", model, index + 1, GROQ_VISION_MODELS.len());
+                eprintln!("│    Error: {}", e);
                 continue;
             }
         };
         
         let status = response.status();
         
+        if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
+            eprintln!("│ ⚠️  R-LIMIT  : {} (Vision {}/{})", model, index + 1, GROQ_VISION_MODELS.len());
+            if index < GROQ_VISION_MODELS.len() - 1 {
+                continue;
+            } else {
+                return Err("All Groq vision models rate limited".to_string());
+            }
+        }
+        
         if status.is_success() {
-            println!("│ \x1b[32m✅ SUCCESS\x1b[0m  : Groq Vision response");
+            println!("│ \x1b[32m✅ SUCCESS\x1b[0m  : {} (Vision {}/{})", model, index + 1, GROQ_VISION_MODELS.len());
             
             let groq_response: GroqResponse = response.json().await
                 .map_err(|e| format!("Failed to deserialize: {}", e))?;
@@ -501,18 +509,10 @@ async fn try_groq_vision(prompt: &str, image_base64: &str) -> Result<AIClassific
             return Ok(classification);
         }
         
-        if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
-            eprintln!("│ ⚠️  RATE LIMIT : {}", model);
-            if index < GROQ_VISION_MODELS.len() - 1 {
-                continue;
-            } else {
-                return Err("All Groq vision models rate limited".to_string());
-            }
-        }
-        
         let error_text = response.text().await
             .unwrap_or_else(|_| "Unknown error".to_string());
-        eprintln!("│ ❌ ERROR    : {} - {}", status, truncate_for_log(&error_text, 60));
+        eprintln!("│ ❌ ERROR    : {} (Vision {}/{}) - {}", model, index + 1, GROQ_VISION_MODELS.len(), status);
+        eprintln!("│    {}", truncate_for_log(&error_text, 60));
         
         if index < GROQ_VISION_MODELS.len() - 1 {
             continue;
@@ -544,8 +544,6 @@ pub async fn match_update_to_assignment(
     }
     
     for (index, model) in GEMINI_MODELS.iter().enumerate() {
-        println!("│ 🔄 Model      : {} (Attempt {}/{})", model, index + 1, GEMINI_MODELS.len());
-        
         let url = format!(
             "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent?key={}",
             model, api_key
@@ -564,15 +562,26 @@ pub async fn match_update_to_assignment(
         let response = match client.post(&url).json(&request_body).send().await {
             Ok(r) => r,
             Err(e) => {
-                eprintln!("│ ❌ Failed   : {}", e);
+                eprintln!("│ ❌ Failed     : {} (Attempt {}/{})", model, index + 1, GEMINI_MODELS.len());
+                eprintln!("│    Error: {}", e);
                 continue;
             }
         };
         
         let status = response.status();
         
+        if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
+            eprintln!("│ ⚠️  R-LIMIT   : {} (Attempt {}/{})", model, index + 1, GEMINI_MODELS.len());
+            if index < GEMINI_MODELS.len() - 1 {
+                continue;
+            } else {
+                println!("\x1b[1;30m└──────────────────────────────────────────────\x1b[0m");
+                return Err("All Gemini models rate limited for matching.".to_string());
+            }
+        }
+        
         if status.is_success() {
-            println!("│ \x1b[32m✅ SUCCESS\x1b[0m    : Match analysis complete");
+            println!("│ \x1b[32m✅ SUCCESS\x1b[0m    : {} (Attempt {}/{})", model, index + 1, GEMINI_MODELS.len());
             
             let gemini_response: GeminiResponse = response.json().await
                 .map_err(|e| e.to_string())?;
@@ -584,15 +593,7 @@ pub async fn match_update_to_assignment(
             return Ok(result);
         }
         
-        if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
-            eprintln!("│ ⚠️  RATE LIMIT : {}", model);
-            if index < GEMINI_MODELS.len() - 1 {
-                continue;
-            } else {
-                println!("\x1b[1;30m└──────────────────────────────────────────────\x1b[0m");
-                return Err("All Gemini models rate limited for matching.".to_string());
-            }
-        }
+        eprintln!("│ ❌ ERROR     : {} (Attempt {}/{}) - {}", model, index + 1, GEMINI_MODELS.len(), status);
         
         if index < GEMINI_MODELS.len() - 1 {
             continue;
@@ -773,7 +774,7 @@ fn log_classification_success(classification: &AIClassification) {
                 reference_keywords, parallels);
         }
         AIClassification::Unrecognized => {
-            println!("│\n│ ℹ️ Result   : Unrecognized");
+            println!("│\n│ ℹ️  Result   : Unrecognized");
         }
     }
 }
