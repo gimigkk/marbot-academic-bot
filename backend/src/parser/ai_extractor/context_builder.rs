@@ -260,10 +260,10 @@ PARALLEL CLASSES (per assignment):
   - "K1/P1" or "K1 & P1" = ["k1", "p1"] (BOTH codes)
   - "paralel 1, 2" = ["p1", "p2"] or ["k1", "k2"] based on context
 
-DEADLINE TYPE (per assignment):
-- "explicit": Specific date (2026-01-15, "5 Januari", "15 Desember")
-- "next_meeting": References class time ("sebelum pertemuan", "before class", "di awal kelas", "at start of class", "saat kelas")
-- "relative": Relative time without class context ("besok", "tomorrow", "minggu depan" WITHOUT class reference)
+DEADLINE TYPE (per course):
+- "explicit": Contains specific temporal info (dates, day names, times)
+- "next_meeting": References class session timing
+- "relative": Vague future reference without specific day/time
 - "unknown": Course mentioned without deadline
 
 GLOBAL PARALLEL:
