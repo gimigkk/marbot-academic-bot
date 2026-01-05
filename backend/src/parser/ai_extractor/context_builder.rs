@@ -1,6 +1,6 @@
 // backend/src/parser/ai_extractor/context_builder.rs
 
-use chrono::{Duration, FixedOffset, Utc};
+use chrono::{FixedOffset, Utc};
 use serde::Deserialize;
 use serde_json::json;
 use sqlx::PgPool;
