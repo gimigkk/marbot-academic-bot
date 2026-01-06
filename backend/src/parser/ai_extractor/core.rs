@@ -35,11 +35,37 @@ pub async fn extract_with_ai(
     let current_date = get_current_date();
     
     println!("\n\x1b[1;30m┌── 🤖 AI PROCESSING ──────────────────────────\x1b[0m");
-    println!("│ 📝 Message  : \x1b[36m\"{}\"\x1b[0m", truncate_for_log(text, 60));
     
-    // Show quoted message if present
+    // Format message with escaped newlines
+    let message_display = text
+        .replace('\n', "\\n")
+        .chars()
+        .take(80)
+        .collect::<String>();
+    
+    let message_truncated = if text.len() > 60 {
+        format!("\"{}...\"", message_display)
+    } else {
+        format!("\"{}\"", message_display)
+    };
+    
+    println!("│ 📝 Message  : \x1b[36m{}\x1b[0m", message_truncated);
+    
+    // Show quoted message if present (also with escaped newlines)
     if let Some(quoted) = quoted_message {
-        println!("│ 💬 Quoted   : \x1b[35m\"{}\"\x1b[0m", truncate_for_log(quoted, 60));
+        let quoted_display = quoted
+            .replace('\n', "\\n")
+            .chars()
+            .take(80)
+            .collect::<String>();
+        
+        let quoted_truncated = if quoted.len() > 60 {
+            format!("\"{}...\"", quoted_display)
+        } else {
+            format!("\"{}\"", quoted_display)
+        };
+        
+        println!("│ 💬 Quoted   : \x1b[35m{}\x1b[0m", quoted_truncated);
     }
     
     // STAGE 1: Build context with quoted message

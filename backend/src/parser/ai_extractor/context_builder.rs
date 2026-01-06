@@ -1,13 +1,37 @@
 // backend/src/parser/ai_extractor/context_builder.rs
 
 use chrono::{FixedOffset, Utc};
+use regex::Regex;
 use serde::Deserialize;
 use serde_json::json;
 use sqlx::PgPool;
+use once_cell::sync::Lazy;
 
 use super::schedule_oracle::ScheduleOracle;
 use super::parsing::{extract_groq_text, GroqResponse};
 use super::GROQ_TEXT_MODELS;
+
+// Compile regex once at startup for performance
+static PARALLEL_CODE_REGEX: Lazy<Regex> = Lazy::new(|| {
+    // Match k1-k4, p1-p4, r1-r4 (case-insensitive, word boundaries)
+    Regex::new(r"(?i)\b([kprs][1-4])\b").unwrap()
+});
+
+/// Extract ALL parallel codes from text (handles emojis, case-insensitive)
+pub fn extract_parallel_codes_from_text(text: &str) -> Vec<String> {
+    let mut codes = Vec::new();
+    
+    for cap in PARALLEL_CODE_REGEX.captures_iter(text) {
+        if let Some(code_match) = cap.get(1) {
+            let code = code_match.as_str().to_lowercase();
+            if !codes.contains(&code) {
+                codes.push(code);
+            }
+        }
+    }
+    
+    codes
+}
 
 /// Minimal context needed for main AI prompt
 #[derive(Debug, Clone)]
@@ -60,11 +84,15 @@ pub async fn build_context(
         None
     };
     
+    // Extract parallel codes from message text directly (GRAFKOM K2 case)
+    let text_extracted_parallels = extract_parallel_codes_from_text(message);
+    
     let ai_hints = call_context_resolver_ai(
         message, 
         &sender_history, 
         &courses_list,
         quoted_summary.as_deref(),
+        &text_extracted_parallels,
     ).await?;
     
     let course_hints = calculate_course_hints(
@@ -225,6 +253,7 @@ async fn call_context_resolver_ai(
     sender_history: &SenderHistory,
     courses_list: &str,
     quoted_context: Option<&str>,
+    text_extracted_parallels: &[String],
 ) -> Result<AIHints, String> {
     
     let history_text = if sender_history.parallel_patterns.is_empty() {
@@ -243,16 +272,17 @@ async fn call_context_resolver_ai(
         .map(|ctx| format!("\n\nQUOTED MESSAGE CONTEXT:\n{}\n(User is replying to/referencing this message)", ctx))
         .unwrap_or_default();
     
-    // Research-backed prompt design:
-    // - Constraint-based (not example-heavy) to avoid overfitting
-    // - Task definition + annotation guidelines approach
-    // - Minimal examples (1-2) with diversity to prevent bias
-    // - Generic enough to handle variations
+    let parallel_hint = if !text_extracted_parallels.is_empty() {
+        format!("\n\nEXTRACTED PARALLEL CODES FROM MESSAGE: [{}]", text_extracted_parallels.join(", "))
+    } else {
+        String::new()
+    };
+    
     let prompt = format!(
         r#"Extract structured course information from an academic message.
 
 MESSAGE: "{}"
-SENDER HISTORY: {}{}
+SENDER HISTORY: {}{}{}
 
 AVAILABLE COURSES:
 {}
@@ -273,20 +303,23 @@ Identify courses and classify deadline information as structured JSON.
    • Definition: Valid codes are k1-k4, p1-p4, r1-r4, or "all"
    • Format: Return as array, can contain multiple: ["k1", "k2"] or ["all"]
    • Extraction priority order:
-     a) Explicit mention in message (highest priority)
-     b) Quoted context reference
-     c) Sender history pattern
-     d) No information → empty array []
+     a) EXTRACTED PARALLEL CODES (if provided above) - HIGHEST PRIORITY
+     b) Explicit mention in message
+     c) Quoted context reference
+     d) Sender history pattern
+     e) No information → empty array []
    
    • Recognition patterns:
-     - Look for [parallel_code] appearing immediately after course name/alias
-     - Extract from phrases like "untuk [code]", "kelas [code]", "[code] dan [code]"
+     - If EXTRACTED PARALLEL CODES provided, use those as strong hints
+     - Course abbreviations: "GRAFKOM K2" means parallel k2 for that course
+     - Phrases: "untuk [code]", "kelas [code]", "[code] dan [code]"
      - Keywords "semua kelas"/"all classes" → ["all"]
      - Standalone codes without course context → ignore
    
    • Independence: Each course has independent parallels
    • Example extractions:
-     - "Struktur Data P1" → course: "Struktur Data", parallel_codes: ["p1"]
+     - "🚨 GRAFKOM K2 🚨" + EXTRACTED: ["k2"] → parallel_codes: ["k2"]
+     - "Struktur Data P1" → parallel_codes: ["p1"]
      - "Tugas PBO untuk k1 dan k2" → parallel_codes: ["k1", "k2"]
      - "Semua kelas" → parallel_codes: ["all"]
 
@@ -297,6 +330,7 @@ Identify courses and classify deadline information as structured JSON.
    
    • "next_meeting": Class session references WITHOUT relative time terms
      - Contains: "sebelum pertemuan", "before class", "di awal kelas", "saat kuliah", "di class"
+     - "ketika praktikum", "waktu kelas", "during class"
      - Must NOT contain relative terms (besok, minggu depan, etc.)
    
    • "relative": Relative temporal references
@@ -325,10 +359,11 @@ Return JSON only:
   ]
 }}
 
-Apply these guidelines to extract information. Focus on the constraints defined above rather than pattern matching."#,
+Apply these guidelines to extract information. If EXTRACTED PARALLEL CODES provided, use them with high confidence."#,
         message,
         history_text,
         quoted_section,
+        parallel_hint,
         courses_list
     );
     
@@ -474,4 +509,41 @@ fn calculate_course_hints(
     }
     
     course_hints
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parallel_code_extraction() {
+        // Basic cases
+        assert_eq!(extract_parallel_codes_from_text("K1"), vec!["k1"]);
+        assert_eq!(extract_parallel_codes_from_text("p2"), vec!["p2"]);
+        
+        // With emojis (GRAFKOM case)
+        assert_eq!(
+            extract_parallel_codes_from_text("🚨 GRAFKOM K2 🚨"),
+            vec!["k2"]
+        );
+        
+        // Course abbreviations
+        assert_eq!(extract_parallel_codes_from_text("METCUAN K3"), vec!["k3"]);
+        assert_eq!(extract_parallel_codes_from_text("Pemrograman P1"), vec!["p1"]);
+        
+        // Multiple codes
+        assert_eq!(
+            extract_parallel_codes_from_text("K1 dan K2"),
+            vec!["k1", "k2"]
+        );
+        
+        // No code
+        assert_eq!(extract_parallel_codes_from_text("No code here").len(), 0);
+        
+        // Multiple different codes
+        assert_eq!(
+            extract_parallel_codes_from_text("K1, K2, P3"),
+            vec!["k1", "k2", "p3"]
+        );
+    }
 }
