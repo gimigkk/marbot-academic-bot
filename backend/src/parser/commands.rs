@@ -487,7 +487,7 @@ fn format_assignments_list(
         
         response.push_str(&format!("{} *[{}] [{}]*\n", status_emoji, i + 1, title_fmt));
         response.push_str(&format!("📌 {}\n", course));
-        response.push_str(&format!("⏰ Deadline: {}\n", due_text));
+        response.push_str(&format!("⏰ {}\n", due_text));
         
         if !desc_line.is_empty() {
             response.push_str(&format!("{}\n", desc_line));
@@ -545,7 +545,7 @@ fn humanize_deadline(deadline: &Option<DateTime<Utc>>) -> String {
             
             let delta = (due - now).num_days();
             let date_str = format_date_id(due);
-            let time_str = deadline_gmt7.format("%d-%m %H:%M").to_string();
+            let time_str = deadline_gmt7.format("%H:%M").to_string();  // CHANGED: Removed %d-%m
 
             match delta {
                 0 => format!("Hari ini ({} {})", date_str, time_str),
