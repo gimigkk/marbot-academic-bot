@@ -252,12 +252,29 @@ async fn webhook(
     }
 
 
-    // Terminal logging
+    // Terminal logging with compact formatting
+    let body_display = payload.payload.body
+        .replace('\n', "\\n")
+        .chars()
+        .take(80)
+        .collect::<String>();
+
+    let body_truncated = if payload.payload.body.len() > 80 {
+        format!("\"{}...\"", body_display)
+    } else {
+        format!("\"{}\"", body_display)
+    };
+
+    let type_display = match &message_type {
+        MessageType::Command(cmd) => format!("Command({:?})", cmd),
+        MessageType::NeedsAI(_) => "NeedsAI".to_string(),
+    };
+
     println!("\n| Message from: \x1b[32m{}\x1b[0m", chat_id);
     println!("| Sender      : \x1b[32m{}\x1b[0m (\x1b[32m{}\x1b[0m)", sender_name, sender_phone);
-    println!("| Body        : \x1b[32m{}\x1b[0m", payload.payload.body);
-    println!("| Type        : \x1b[32m{:?}\x1b[0m\n", message_type);
-
+    println!("| Body        : \x1b[32m{}\x1b[0m", body_truncated);
+    println!("| Type        : \x1b[32m{}\x1b[0m\n", type_display);
+    
     // Extract quoted message for AI context
     let quoted_message_text = payload.payload.get_quoted_message()
         .map(|quoted| quoted.text.clone());

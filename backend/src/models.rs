@@ -264,9 +264,13 @@ impl AssignmentWithCourse {
     /// Format parallel codes for display
     pub fn format_parallel_display(&self) -> String {
         if self.parallel_codes.is_empty() {
-            "N/A".to_string()
+            "N/A".to_string()  // No parallel set = N/A
         } else {
-            format!("[{}]", self.parallel_codes.join(", "))
+            format!("[{}]", self.parallel_codes
+                .iter()
+                .map(|c| c.to_uppercase())  // ADD .to_uppercase() here
+                .collect::<Vec<_>>()
+                .join(", "))
         }
     }
 }
@@ -277,7 +281,11 @@ impl Assignment {
         if self.parallel_codes.is_empty() {
             "N/A".to_string()
         } else {
-            format!("[{}]", self.parallel_codes.join(", "))
+            format!("[{}]", self.parallel_codes
+                .iter()
+                .map(|c| c.to_uppercase()) 
+                .collect::<Vec<_>>()
+                .join(", "))
         }
     }
     
