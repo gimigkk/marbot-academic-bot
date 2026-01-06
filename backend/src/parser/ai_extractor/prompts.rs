@@ -306,7 +306,7 @@ PRIORITY 3: EXTRACTION RULES
 ═══════════════════════════════════════════════════════════════════
 
 TITLE EXTRACTION (CRITICAL - AVOID GENERIC TITLES):
-The title should be SPECIFIC and IDENTIFIABLE. Users will see this in a list.
+The title should be SPECIFIC and IDENTIFIABLE. Users will see this in a list. Minimum of 2 words, good at 3 words.
 
 BAD TITLES (too generic):
 - "Tugas" (what assignment?)
