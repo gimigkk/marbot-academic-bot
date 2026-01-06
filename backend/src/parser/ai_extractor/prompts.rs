@@ -135,11 +135,11 @@ pub fn build_classification_prompt(
         hints.push_str("HOW TO USE THESE HINTS:\n");
         hints.push_str("- Hints are SUGGESTIONS based on patterns and quoted messages\n");
         hints.push_str("- QUOTED MESSAGE: If present, user is updating/referencing that assignment\n");
-        hints.push_str("- For 'before next meeting' patterns: Use the provided meeting times EXACTLY\n");
+        hints.push_str("- For 'ketika praktikum'/'saat kelas'/'during class': Use the next meeting time\n");
+        hints.push_str("- For explicit times ('besok jam 13', '5 Jan 14:00'): Use that time WITH schedule date if available\n");
         hints.push_str("- If parallels have DIFFERENT meeting times: SPLIT into separate assignments\n");
         hints.push_str("  Example: P1→Thu 10:00, P2→Thu 13:00, P3→Tue 13:00\n");
         hints.push_str("  Create 2 assignments: [P3→Tue 13:00] and [P1,P2→Thu 10:00]\n");
-        hints.push_str("- For explicit dates ('besok', '5 Januari'): Calculate using reference dates below\n");
         hints.push_str("- For parallels: Use hint when not explicitly mentioned\n");
         hints.push_str("═══════════════════════════════════════════════════════════════════");
         hints
@@ -170,6 +170,7 @@ ASSIGNMENTS (require deliverable work):
 - Quizzes, exams, projects, coding assignments, problem sets
 - "Submit X by date Y", "hand in Z", "upload your work", "turn in"
 - "Kumpulkan laporan", "submit report", "deadline tugas"
+- "Tugas dikumpulkan ketika praktikum" (assignment collected during class)
 
 NOT ASSIGNMENTS (no deliverable to submit):
 - CLASS SESSIONS: "praktikum besok", "kelas hari ini", "lecture tomorrow", "lab session Friday"
@@ -178,9 +179,9 @@ NOT ASSIGNMENTS (no deliverable to submit):
 - READING/VIEWING: "baca chapter 5", "watch this video", "prepare reading" (without submission)
 - RESOURCES: "here are the slides", "check the forum", "see course website"
 
-CRITICAL: If message only mentions WHEN/WHERE a class occurs → NOT an assignment
-Example: "UX Design P1 Praktikum besok siang" → Class schedule (NOT assignment)
-Example: "Submit lab report before praktikum besok" → Assignment (deliverable exists)
+CRITICAL DISTINCTION:
+- "Praktikum besok" → Class schedule (NO assignment)
+- "Tugas dikumpulkan ketika praktikum" → Assignment (deliverable EXISTS)
 
 ═══════════════════════════════════════════════════════════════════
 CONTEXT
@@ -231,6 +232,11 @@ Common patterns to REJECT (false positives):
 - "Topik diskusi minggu ini" → Informational
 - "Pertemuan zoom jam 2" → Class session
 
+Common patterns to ACCEPT (true assignments):
+- "Tugas dikumpulkan ketika praktikum" → Has deliverable (collected during class)
+- "Submit before next class" → Has deliverable
+- "Kumpulkan di pertemuan berikutnya" → Has deliverable
+
 ONLY proceed to PRIORITY 2 if all three requirements are met.
 
 ═══════════════════════════════════════════════════════════════════
@@ -258,12 +264,12 @@ CRITICAL: Apply THREE REQUIREMENTS test to EACH item
 - Extract only items where students must submit work
 
 HANDLING MULTIPLE PARALLELS WITH DIFFERENT SCHEDULES:
-When announcement targets multiple parallels AND deadline is "before next meeting":
+When announcement targets multiple parallels AND deadline is "ketika praktikum"/"saat kelas":
 - If context shows DIFFERENT meeting times → SPLIT into separate assignments
 - Group parallels with SAME deadline together
 
 Example:
-  Message: "P1, P2, P3 submit before next class"
+  Message: "P1, P2, P3 submit ketika praktikum"
   Context: P1→Thu 10:00, P2→Thu 13:00, P3→Tue 13:00
   Create TWO assignments:
     1. {{"parallel_codes": ["p3"], "deadline": "2026-01-07 13:00", ...}}
@@ -299,44 +305,92 @@ Key distinction:
 PRIORITY 3: EXTRACTION RULES
 ═══════════════════════════════════════════════════════════════════
 
+TITLE EXTRACTION (CRITICAL - AVOID GENERIC TITLES):
+The title should be SPECIFIC and IDENTIFIABLE. Users will see this in a list.
+
+BAD TITLES (too generic):
+- "Tugas" (what assignment?)
+- "Tugas Pemrograman" (which one?)
+- "Assignment" (not specific)
+- "Praktikum" (which praktikum?)
+- "Latihan" (which exercise?)
+
+GOOD TITLES (specific and identifiable):
+- "LKP 15" (lab assignment number)
+- "Quiz 3" (quiz number)
+- "Tugas Berpasangan" (describes type)
+- "Laporan Praktikum P2" (specific report)
+- "Coding on Paper" (describes content)
+- "Tugas Individu Pertemuan 8" (specific meeting)
+- "Project Fase 2" (project phase)
+- "Essay Final" (final essay)
+- "Tugas Kelompok" (group assignment)
+
+TITLE EXTRACTION RULES:
+1. Look for IDENTIFIERS first:
+   - Numbers: "LKP 15", "Quiz 3", "Problem Set 5", "Latihan #5"
+   - Names: "Coding on Paper", "Binary Search Tree Assignment"
+   - Phases: "Project Fase 2", "Milestone 3"
+   - Meetings: "Pertemuan 8", "Week 10"
+
+2. If no identifier, use DESCRIPTIVE TYPE:
+   - "Tugas Berpasangan" (pair work)
+   - "Tugas Individu" (individual work)
+   - "Tugas Kelompok" (group work)
+   - "Laporan Praktikum" (lab report)
+   - "Essay Final" (final essay)
+
+3. NEVER use just "Tugas" or "Assignment" alone
+   - If minimal info: Add context like "Tugas Besar", "Tugas Akhir", "Mini Project"
+
+4. Keep titles CONCISE (2-5 words max)
+   - "Tugas Individu Pertemuan 8" ✓
+   - "Tugas individu untuk pertemuan ke-8 yang harus dikerjakan sendiri" ✗
+
 DEADLINE EXTRACTION (priority order):
-1. IF message references "before next meeting/class/praktikum":
-   → Use schedule hint time EXACTLY as provided
-   Example: Context shows "P1: 2026-01-08 10:00" → deadline is "2026-01-08 10:00"
-   
-2. IF message has explicit time ("besok jam 3", "tomorrow at 14:00", "jam 10 pagi"):
-   → Use that specific time with calculated date
-   Example: "besok jam 14:00" → "2026-01-06 14:00"
-   
-3. IF message has date but NO specific time ("besok", "Friday", "5 Januari"):
-   → Use 23:59 (end of day)
+
+1. WHEN-DURING patterns ("ketika", "saat", "during"):
+   IF message says "ketika praktikum"/"saat kelas"/"during class"/"waktu pertemuan":
+   → Use EXACT schedule hint time from context
+   Example: "dikumpulkan ketika praktikum" + Context "K1: 2026-01-12 08:00" 
+   → deadline is "2026-01-12 08:00"
+
+2. EXPLICIT TIME with relative date ("besok jam X", "Jumat pukul Y"):
+   IF message has both date AND time:
+   → Check if schedule hint date is close to mentioned date
+   → IF schedule date exists AND is within 7 days of relative date:
+      Use schedule DATE with message TIME
+      Example: "besok jam 13:00" + Schedule "2026-01-12 08:00" 
+      → Use "2026-01-12 13:00" (schedule date, message time)
+   → ELSE: Use calculated relative date with message time
+      Example: "besok jam 13:00" (no nearby schedule) → "2026-01-06 13:00"
+
+3. DATE ONLY without specific time ("besok", "Friday", "minggu depan"):
+   → Use 23:59 (end of day) with calculated date
    Example: "deadline besok" → "2026-01-06 23:59"
-   
-4. IF no deadline information mentioned:
+
+4. NO deadline information:
    → Use null (do NOT guess or invent)
 
 Format: YYYY-MM-DD HH:MM (always include time component)
-
-CRITICAL: When using schedule hints for "before next meeting":
-- Use the EXACT time from the hint
-- Do NOT default to noon or any arbitrary time
-- If multiple parallels have different meeting times → SPLIT assignments
 
 PARALLEL CODES:
 - Valid codes (lowercase): k1, k2, k3, k4, p1, p2, p3, p4, r1, r2, r3, r4, all
 - Return as ARRAY (assignments can target multiple parallels)
 - Extract from message or use context hint if not explicitly mentioned
+- Look in course abbreviation section (e.g., "GRAFKOM K2" → ["k2"])
 
 Examples:
 - "Tugas untuk k1 dan k2" → ["k1", "k2"]
+- "GRAFKOM K2" → ["k2"]
 - "Semua kelas" → ["all"]
 - No mention + no context → []
 
 DESCRIPTION FIELD (MANDATORY):
 - NEVER leave empty or null
 - Generate meaningful description from message content
-- If minimal info: "[Course] [assignment type] [identifier]"
-- Example: "Pemrograman lab assignment 14" or "Kalkulus problem set 5"
+- Include submission details if mentioned
+- If minimal info: "[Course] assignment - [brief context]"
 
 ═══════════════════════════════════════════════════════════════════
 OUTPUT FORMATS
@@ -395,14 +449,16 @@ CORE PRINCIPLES
 2. Check QUOTED MESSAGE context first (if present)
 3. Check for MULTIPLE_ASSIGNMENTS before single assignment
 4. Split assignments when parallels have different schedules
-5. Use schedule hints EXACTLY for "before meeting" patterns
-6. NEVER leave description field empty
-7. Use semantic understanding (not literal matching)
-8. When uncertain: NEW > UPDATE (avoid bad matches)
-9. When uncertain: UNRECOGNIZED > false positive
-10. Course boundaries: Never match updates across different courses
+5. For "ketika praktikum" patterns: Use schedule time EXACTLY
+6. For "besok jam X" patterns: Use schedule DATE with message TIME if nearby
+7. NEVER use generic titles like "Tugas" alone - be SPECIFIC
+8. Extract parallel codes from course abbreviations (e.g., "GRAFKOM K2")
+9. Use semantic understanding (not literal matching)
+10. When uncertain: NEW > UPDATE (avoid bad matches)
+11. When uncertain: UNRECOGNIZED > false positive
+12. Course boundaries: Never match updates across different courses
 
-Return ONLY valid JSON. No markdown, no explanations."#,
+Return ONLY valid JSON. No markdown, no explanations, no commentary."#,
         current_datetime,
         current_date,
         tomorrow_str,
@@ -454,14 +510,23 @@ pub fn build_matching_prompt(
     
     format!(
         r#"Match this update to an existing assignment.
+
 CONTEXT
 Time: {} | Update: "{}" | Keywords: {:?}
 {}
+
 Assignments:
 {}
+
 TASK: Find which assignment this update refers to, or return null if no match.
-OUTPUT: {{"assignment_id":"uuid","confidence":"high","reason":"..."}} or {{"assignment_id":null,"confidence":"low","reason":"..."}}
-Return ONLY valid JSON."#,
+
+OUTPUT FORMAT (JSON only, no commentary):
+{{"assignment_id":"uuid","confidence":"high","reason":"..."}}
+
+OR if no match:
+{{"assignment_id":null,"confidence":"low","reason":"..."}}
+
+Return ONLY valid JSON. No markdown, no explanations."#,
         current_time, changes, keywords, parallel_info, assignments_list
     )
 }
@@ -513,7 +578,6 @@ CANDIDATES (pre-filtered by course/parallel/numbers/type):
 {}
 
 CRITICAL RULES:
-═══════════════════════════════════════════════════════════════════
 1. Sequential numbers = DIFFERENT (LKP 15 ≠ LKP 14 ≠ LKP 17)
 2. Assignment types must match (quiz ≠ lab ≠ homework)
 3. Topics must be similar
@@ -532,15 +596,24 @@ NOT DUPLICATES:
 - Different topics: "Data Structures" ≠ "Algorithms"
 - No parallel overlap: [k1, k2] ≠ [k3, k4]
 
-OUTPUT FORMAT:
+OUTPUT FORMAT (JSON only, no commentary or markdown):
 {{
-  "is_duplicate": boolean,
-  "confidence": "high" | "medium" | "low",
+  "is_duplicate": true,
+  "confidence": "high",
   "reason": "detailed explanation",
-  "matched_assignment_id": "uuid" or null
+  "matched_assignment_id": "uuid-here"
 }}
 
-Be STRICT. Default to false. Only mark as duplicate with HIGH confidence."#,
+OR if not duplicate:
+{{
+  "is_duplicate": false,
+  "confidence": "high",
+  "reason": "detailed explanation",
+  "matched_assignment_id": null
+}}
+
+Be STRICT. Default to false. Only mark as duplicate with HIGH confidence.
+Return ONLY valid JSON. No markdown, no explanations."#,
         course_name,
         title,
         description,
