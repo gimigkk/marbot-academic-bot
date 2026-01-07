@@ -37,7 +37,10 @@ create table public.assignments (
 
   -- Sumber Chat
   sender_id text,           -- Nomor Pengirim
-  message_ids text[] not null 
+  message_ids text[] not null,
+  
+  -- PENGINGAT DEADLINE 
+  reminder_1h_sent boolean not null default false
 );
 
 -- TABEL 3: WA LOGS (Debugging Purpose Only)
