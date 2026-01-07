@@ -90,7 +90,7 @@ async fn run_reminder_task(pool: PgPool, greeting: &str) -> Result<(), Box<dyn s
     }
 
     let client = reqwest::Client::new();
-    let waha_url = std::env::var("WAHA_URL").unwrap_or_else(|_| "http://localhost:3001".to_string());
+    let waha_url = std::env::var("WAHA_URL").unwrap_or_else(|_| "http://waha:3000".to_string());
     let api_key = std::env::var("WAHA_API_KEY").unwrap_or_else(|_| "devkey123".to_string());
 
     for chat_id in target_channels {
