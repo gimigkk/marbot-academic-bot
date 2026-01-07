@@ -14,8 +14,12 @@ RUN apt-get update && apt-get install -y \
     libssl-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Set SQLx to offline mode
-ENV SQLX_OFFLINE=true
+# Add this line - SQLx needs it during build
+ARG DATABASE_URL
+ENV DATABASE_URL=$DATABASE_URL
+
+# Set SQLx to offline mode false
+ENV SQLX_OFFLINE=false
 
 # Build in release mode
 RUN cargo build --release
