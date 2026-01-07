@@ -12,7 +12,9 @@ services:
       WAHA_URL: ${WAHA_URL:-http://waha:3000}
       WAHA_API_KEY: ${WAHA_API_KEY}
       GEMINI_API_KEY: ${GEMINI_API_KEY}
+      GROQ_API_KEY: ${GROQ_API_KEY}
       ACADEMIC_CHANNELS: ${ACADEMIC_CHANNELS}
+      DEBUG_GROUP_ID: ${DEBUG_GROUP_ID}
       RUST_LOG: ${RUST_LOG:-info}
     ports:
       - "3000:3000"
