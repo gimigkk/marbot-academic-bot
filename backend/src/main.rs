@@ -981,7 +981,7 @@ async fn handle_single_assignment(
 
 
 async fn send_reply(chat_id: &str, text: &str) -> Result<(), String> {
-    let waha_url = "http://localhost:3001/api/sendText";
+    let waha_url = format!("{}/api/sendText", std::env::var("WAHA_URL").unwrap_or_else(|_| "http://waha:3000".to_string()));
     let api_key = std::env::var("WAHA_API_KEY").unwrap_or_else(|_| "devkey123".to_string());
     let payload = SendTextRequest { chat_id: chat_id.to_string(), text: text.to_string(), session: "default".to_string() };
     let client = reqwest::Client::new();
@@ -996,7 +996,8 @@ fn extract_parallel_code(title: &str) -> Option<String> {
 }
 
 async fn fetch_image_from_url(url: &str, api_key: &str) -> Result<String, String> {
-    let url = url.replace("http://localhost:3000", "http://localhost:3001");
+    let waha_base = std::env::var("WAHA_URL").unwrap_or_else(|_| "http://waha:3000".to_string());
+    let url = url.replace("http://localhost:3000", &waha_base);
     let client = reqwest::Client::new();
     let res = client.get(&url).header("X-Api-Key", api_key).send().await.map_err(|e| e.to_string())?;
     
