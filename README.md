@@ -177,7 +177,7 @@ Point your WAHA webhook to: `http://your-server:3000/webhook`
 | `#done <number>` | Mark task as complete | `#done 3` |
 | `#undo` | Undo last completion | `#undo` |
 
-### Admin Commands (Academic Channels Only)
+### Admin Commands (Debug Channel Only)
 | Command | Description | Example |
 |---------|-------------|---------|
 | `#delete <number>` | Delete assignment | `#delete 5` |
