@@ -5,6 +5,7 @@ WORKDIR /app
 COPY Cargo.toml Cargo.lock ./
 COPY src ./src
 COPY migrations ./migrations
+COPY schedule.json ./schedule.json
 COPY .sqlx ./.sqlx
 
 # Install build dependencies
@@ -34,6 +35,7 @@ RUN apt-get update && apt-get install -y \
 # Copy binary from builder
 COPY --from=builder /app/target/release/marbot /app/marbot
 COPY --from=builder /app/migrations /app/migrations
+COPY --from=builder /app/schedule.json /app/schedule.json
 
 EXPOSE 3000
 
