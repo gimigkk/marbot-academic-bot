@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        DELETE FROM user_completions \n        WHERE assignment_id = $1 AND user_id = $2\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "9d6925010271b61cc9e50df1fcbf157623010bb2bfb37745798d91774107e3aa"
+}
