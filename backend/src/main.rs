@@ -1,6 +1,6 @@
 use axum::{
     extract::State,
-    routing::post,
+    routing::{post, get},
     Json,
     Router,
 };
@@ -58,6 +58,15 @@ struct AppState {
     spam_tracker: SpamTracker, 
     whitelist: Arc<Whitelist>,
     pool: PgPool,
+}
+
+// Health check endpoint for Docker
+async fn health_check() -> Json<serde_json::Value> {
+    use serde_json::json;
+    Json(json!({
+        "status": "healthy",
+        "timestamp": chrono::Utc::now().to_rfc3339()
+    }))
 }
 
 #[tokio::main]
@@ -131,6 +140,7 @@ async fn main() {
     
     let app = Router::new()
         .route("/webhook", post(webhook))
+        .route("/health", get(health_check))
         .with_state(state);
 
     let port = 3000;
