@@ -1,34 +1,46 @@
-// backend/src/scheduler.rs - Fixed for Optional Deadline
+// backend/src/scheduler.rs
 use tokio_cron_scheduler::{Job, JobScheduler, JobSchedulerError};
 use sqlx::PgPool;
 use crate::database::crud;
 use crate::models::SendTextRequest;
-
 use chrono::{DateTime, Datelike, Local, NaiveDate, Utc};
 
 pub async fn start_scheduler(pool: PgPool) -> Result<(), JobSchedulerError> {
     let sched = JobScheduler::new().await?;
 
-    // 07:00 WIB (00:00 UTC)
+    // 1. REMINDER HARIAN (UTC TIME)
+    // 07:00 WIB = 00:00 UTC
     let pool_pagi = pool.clone();
     sched.add(Job::new_async("0 0 0 * * *", move |_uuid, _l| {
         let pool = pool_pagi.clone();
         Box::pin(async move {
-            println!("⏰ REMINDER PAGI (07:00 WIB):");
+            println!("⏰ REMINDER PAGI (00:00 UTC / 07:00 WIB):");
             if let Err(e) = run_reminder_task(pool, "☀️ Selamat pagi Ilkomers!").await {
                 eprintln!("❌ Error reminder pagi: {}", e);
             }
         })
     })?).await?;
 
-    // 17:00 WIB (10:00 UTC)
+    // 17:00 WIB = 10:00 UTC
     let pool_sore = pool.clone();
     sched.add(Job::new_async("0 0 10 * * *", move |_uuid, _l| {
         let pool = pool_sore.clone();
         Box::pin(async move {
-            println!("⏰ REMINDER SORE (17:00 WIB):");
+            println!("⏰ REMINDER SORE (10:00 UTC / 17:00 WIB):");
             if let Err(e) = run_reminder_task(pool, "🌇 Selamat sore Ilkomers!").await {
                 eprintln!("❌ Error reminder sore: {}", e);
+            }
+        })
+    })?).await?;
+
+    // 2. REMINDER DEADLINE MEPET (H-1 JAM)
+    // Cek setiap 10 menit (Menit ke-1, 11, 21, dst)
+    let pool_urgent = pool.clone();
+    sched.add(Job::new_async("0 1/10 * * * *", move |_uuid, _l| {
+        let pool = pool_urgent.clone();
+        Box::pin(async move {
+            if let Err(e) = check_urgent_deadlines(pool).await {
+                eprintln!("❌ Error checking urgent deadlines: {}", e);
             }
         })
     })?).await?;
@@ -36,6 +48,8 @@ pub async fn start_scheduler(pool: PgPool) -> Result<(), JobSchedulerError> {
     sched.start().await?;
     Ok(())
 }
+
+// --- LOGIC REMINDER HARIAN ---
 
 async fn run_reminder_task(pool: PgPool, greeting: &str) -> Result<(), Box<dyn std::error::Error>> {
     let assignments = crud::get_active_assignments_sorted(&pool).await?;
@@ -48,7 +62,6 @@ async fn run_reminder_task(pool: PgPool, greeting: &str) -> Result<(), Box<dyn s
     let mut message = String::new();
     message.push_str(greeting);
     message.push_str("\n*Pengingat Tugas*\n\n");
-    //message.push_str("Keterangan:\n🔴 Deadline 0–2 hari\n🟢 Deadline > 2 hari\n⚪ Belum ada deadline\n\n");
 
     for (i, a) in assignments.iter().enumerate() {
         let status = status_dot(&a.deadline);
@@ -76,7 +89,75 @@ async fn run_reminder_task(pool: PgPool, greeting: &str) -> Result<(), Box<dyn s
     }
 
     message.push_str("_Semangat!_ 💪");
+    send_to_channels(message).await
+}
 
+// REMINDER H-1 JAM  ---
+async fn check_urgent_deadlines(pool: PgPool) -> Result<(), Box<dyn std::error::Error>> {
+    let now = Utc::now();
+    let one_hour_later = now + chrono::Duration::hours(1);
+
+    // 2. Query tugas deadline < 1 jam & belum diingatkan
+    let urgent_tasks = sqlx::query!(
+        r#"
+        SELECT 
+            a.id, a.title, c.name as course_name, a.deadline
+        FROM assignments a
+        JOIN courses c ON a.course_id = c.id
+        WHERE a.deadline > $1 
+          AND a.deadline <= $2 
+          AND a.reminder_1h_sent = FALSE
+        "#,
+        now,
+        one_hour_later
+    )
+    .fetch_all(&pool)
+    .await?;
+
+    if urgent_tasks.is_empty() {
+        return Ok(());
+    }
+
+    println!("🚨 Menemukan {} tugas deadline < 1 jam!", urgent_tasks.len());
+
+    for task in urgent_tasks {
+        let deadline_wib = task.deadline
+            .map(|d| d.with_timezone(&chrono::FixedOffset::east_opt(7 * 3600).unwrap()))
+            .unwrap(); 
+            
+        let time_str = deadline_wib.format("%H:%M").to_string();
+        
+        let message = format!(
+            "⚠️ *PENGINGAT DEADLINE < 1 JAM* ⚠️\n\n\
+            📌 *{}*\n\
+            📚 {}\n\
+            ⏰ Deadline: Pukul *{}* WIB\n\
+            \n\
+            _Segera kumpulkan sebelum portal ditutup!_",
+            sanitize_wa_md(&task.title),
+            sanitize_wa_md(&task.course_name),
+            time_str
+        );
+
+        // Kirim Pesan
+        send_to_channels(message).await?;
+
+        // Tandai sudah dikirim
+        sqlx::query!(
+            "UPDATE assignments SET reminder_1h_sent = TRUE WHERE id = $1",
+            task.id
+        )
+        .execute(&pool)
+        .await?;
+        
+        println!("✅ Reminder urgent dikirim untuk: {}", task.title);
+    }
+
+    Ok(())
+}
+
+// --- HELPER FUNCTIONS ---
+async fn send_to_channels(message: String) -> Result<(), Box<dyn std::error::Error>> {
     let channels_env = std::env::var("ACADEMIC_CHANNELS").unwrap_or_default();
     let target_channels: Vec<&str> = channels_env
         .split(',')
@@ -85,7 +166,7 @@ async fn run_reminder_task(pool: PgPool, greeting: &str) -> Result<(), Box<dyn s
         .collect();
 
     if target_channels.is_empty() {
-        println!("⚠️ ACADEMIC_CHANNELS kosong, skip kirim reminder.");
+        println!("⚠️ ACADEMIC_CHANNELS kosong, skip kirim.");
         return Ok(());
     }
 
@@ -100,7 +181,6 @@ async fn run_reminder_task(pool: PgPool, greeting: &str) -> Result<(), Box<dyn s
             session: "default".to_string(),
         };
 
-        println!("📤 Mengirim reminder ke {}", chat_id);
         let _ = client
             .post(format!("{}/api/sendText", waha_url))
             .header("X-Api-Key", &api_key)
@@ -108,34 +188,30 @@ async fn run_reminder_task(pool: PgPool, greeting: &str) -> Result<(), Box<dyn s
             .send()
             .await;
     }
-
     Ok(())
 }
 
-/// Status indicator based on deadline
 #[allow(non_snake_case)]
 fn status_dot(deadline: &Option<DateTime<Utc>>) -> &'static str {
     match deadline {
         Some(d) => {
             let days = days_left(d);
-            if days < 1 {
-                "🔴"
-            } else if days == 1 {
-                "🟠"
-            } else if days == 2 {
-                "🟡"
-            } else {
-                "🟢"
-            }
+            if days < 1 { "🔴" } 
+            else if days == 1 { "🟠" } 
+            else if days == 2 { "🟡" } 
+            else { "🟢" }
         }
-        None => "⚪" // No deadline set
+        None => "⚪"
     }
 }
 
 fn days_left(deadline_utc: &DateTime<Utc>) -> i64 {
-    let now = Local::now().date_naive();
-    let due = deadline_utc.with_timezone(&Local).date_naive();
-    (due - now).num_days()
+    // Force convert both to WIB (+7)
+    let wib_offset = chrono::FixedOffset::east_opt(7 * 3600).unwrap();
+    let now_wib = Utc::now().with_timezone(&wib_offset).date_naive();
+    let due_wib = deadline_utc.with_timezone(&wib_offset).date_naive();
+    
+    (due_wib - now_wib).num_days()
 }
 
 #[allow(non_snake_case)]
@@ -143,8 +219,10 @@ fn humanize_deadline(deadline: &Option<DateTime<Utc>>) -> String {
     match deadline {
         Some(deadline_utc) => {
             let delta = days_left(deadline_utc);
-            let due = deadline_utc.with_timezone(&Local).date_naive();
-            let date_str = format_date_id(due);
+            // Format tanggal juga pakai WIB
+            let wib_offset = chrono::FixedOffset::east_opt(7 * 3600).unwrap();
+            let due_wib = deadline_utc.with_timezone(&wib_offset).date_naive();
+            let date_str = format_date_id(due_wib);
 
             match delta {
                 0 => format!("Hari ini ({})", date_str),
@@ -170,26 +248,15 @@ fn format_date_id(date: NaiveDate) -> String {
 }
 
 fn preview_text(s: &str, max_chars: usize) -> String {
-    let one_line = s
-        .replace('\n', " ")
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ");
-
+    let one_line = s.replace('\n', " ").split_whitespace().collect::<Vec<_>>().join(" ");
     let mut out = String::new();
     for (i, ch) in one_line.chars().enumerate() {
-        if i >= max_chars {
-            out.push('…');
-            return out;
-        }
+        if i >= max_chars { out.push('…'); return out; }
         out.push(ch);
     }
     out
 }
 
 fn sanitize_wa_md(s: &str) -> String {
-    s.replace('*', "×")
-        .replace('_', " ")
-        .replace('~', "-")
-        .replace('`', "'")
+    s.replace('*', "×").replace('_', " ").replace('~', "-").replace('`', "'")
 }
