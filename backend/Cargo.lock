@@ -1165,6 +1165,28 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5e5032e24019045c762d3c0f28f5b6b8bbf38563a65908389bf7978758920897"
 
 [[package]]
+name = "marbot"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "axum",
+ "base64 0.21.7",
+ "chrono",
+ "dotenv",
+ "dotenvy",
+ "image",
+ "once_cell",
+ "regex",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "tokio",
+ "tokio-cron-scheduler",
+ "uuid",
+]
+
+[[package]]
 name = "matchit"
 version = "0.7.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2651,28 +2673,6 @@ name = "weezl"
 version = "0.1.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a28ac98ddc8b9274cb41bb4d9d4d5c425b6020c50c46f25559911905610b4a88"
-
-[[package]]
-name = "whatsapp-backend"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "axum",
- "base64 0.21.7",
- "chrono",
- "dotenv",
- "dotenvy",
- "image",
- "once_cell",
- "regex",
- "reqwest",
- "serde",
- "serde_json",
- "sqlx",
- "tokio",
- "tokio-cron-scheduler",
- "uuid",
-]
 
 [[package]]
 name = "whoami"
