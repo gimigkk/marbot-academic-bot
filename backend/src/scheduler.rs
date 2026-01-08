@@ -128,12 +128,12 @@ async fn check_urgent_deadlines(pool: PgPool) -> Result<(), Box<dyn std::error::
         let time_str = deadline_wib.format("%H:%M").to_string();
         
         let message = format!(
-            "⚠️ *PENGINGAT DEADLINE < 1 JAM* ⚠️\n\n\
+            "⚠️*JANGAN LUPA KUMPULKAN H-1 JAM*⚠️\n\n\
             📌 *{}*\n\
             📚 {}\n\
             ⏰ Deadline: Pukul *{}* WIB\n\
             \n\
-            _Segera kumpulkan sebelum portal ditutup!_",
+            _Segera kumpulkan!!!!_",
             sanitize_wa_md(&task.title),
             sanitize_wa_md(&task.course_name),
             time_str
