@@ -349,6 +349,11 @@ TITLE EXTRACTION RULES:
 
 DEADLINE EXTRACTION (priority order):
 
+COMMON ABBREVIATIONS IN INFORMAL MESSAGES:
+- "dl" typically means "deadline", not "dulu" (first/earlier)
+- Context: "tugas X dl besok" → assignment X, deadline tomorrow
+- Parse abbreviations based on context and position in sentence
+
 1. WHEN-DURING patterns ("ketika", "saat", "during"):
    IF message says "ketika praktikum"/"saat kelas"/"during class"/"waktu pertemuan":
    → Use EXACT schedule hint time from context
