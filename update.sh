@@ -28,16 +28,16 @@ set -a
 source .env
 set +a
 
-# Rebuild and restart
-log "🔨 Rebuilding containers..."
-docker compose down
-
-# Build with proper args
-log "🏗️  Building backend with DATABASE_URL..."
+# Only rebuild and restart backend (keep waha running to preserve WhatsApp session)
+log "🔨 Rebuilding backend container..."
 docker compose build --no-cache backend
 
-log "🚀 Starting all services..."
-docker compose up -d
+log "🚀 Restarting backend service..."
+docker compose up -d --no-deps backend
+
+# Ensure other services are still running
+log "🔍 Checking if waha and dozzle need to be started..."
+docker compose up -d waha dozzle
 
 # Wait for services to be healthy
 log "⏳ Waiting for services to start..."
