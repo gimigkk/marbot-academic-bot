@@ -627,10 +627,8 @@ async fn handle_ai_classification(
                 }
             }
             
-            // Process each unique assignment sequentially to avoid DB race conditions
+            // FIX: Use the SAME message_id for all assignments
             for (index, assignment) in unique_assignments.into_iter().enumerate() {
-                let msg_id = format!("{}-{}", message_id, index);
-                
                 handle_single_assignment(
                     pool.clone(),
                     Some(assignment.course_name),
@@ -638,7 +636,7 @@ async fn handle_ai_classification(
                     assignment.deadline,
                     assignment.description,
                     assignment.parallel_codes,
-                    &msg_id,
+                    &message_id,  // Use original message_id without modification
                     &sender_id,
                     debug_group_id.clone(),
                     index + 1,
