@@ -32,15 +32,15 @@ set +a
 log "🔨 Rebuilding backend container..."
 docker compose build --no-cache backend
 
-log "🚀 Restarting backend service..."
+log "🚀 Restarting backend service only..."
 docker compose up -d --no-deps backend
 
-# Ensure other services are still running
-log "🔍 Checking if waha and dozzle need to be started..."
-docker compose up -d waha dozzle
+# Ensure waha and dozzle are still running (won't restart if already up)
+log "🔍 Ensuring waha and dozzle are running..."
+docker compose up -d --no-recreate waha dozzle
 
-# Wait for services to be healthy
-log "⏳ Waiting for services to start..."
+# Wait for backend to be healthy
+log "⏳ Waiting for backend to start..."
 sleep 20
 
 # Check backend health
@@ -70,4 +70,4 @@ if docker compose ps | grep -qE "(Exit|unhealthy)"; then
 fi
 
 log "✅ Update completed successfully!"
-log "🎉 All services are running and healthy!"
+log "🎉 Backend restarted, waha session preserved!"
