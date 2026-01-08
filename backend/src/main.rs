@@ -38,19 +38,25 @@ type MessageCache = Arc<Mutex<HashSet<String>>>;
 type SpamTracker = Arc<Mutex<HashMap<String, (u32, Instant)>>>;
 
 
-const BANNER: &str = r#"
-\x1b[36m
+const BANNER_ART: &str = r#"
+███╗   ███╗ █████╗ ██████╗ 
+████╗ ████║██╔══██╗██╔══██╗
+██╔████╔██║███████║██████╔╝
+██║╚██╔╝██║██╔══██║██╔══██╗
+██║ ╚═╝ ██║██║  ██║██║  ██║
+╚═╝     ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝"#;
 
-███╗   ███╗ █████╗ ██████╗ ██████╗  ██████╗ ████████╗
-████╗ ████║██╔══██╗██╔══██╗██╔══██╗██╔═══██╗╚══██╔══╝
-██╔████╔██║███████║██████╔╝██████╔╝██║   ██║   ██║   
-██║╚██╔╝██║██╔══██║██╔══██╗██╔══██╗██║   ██║   ██║   
-██║ ╚═╝ ██║██║  ██║██║  ██║██████╔╝╚██████╔╝   ██║   
-╚═╝     ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝  ╚═════╝    ╚═╝   
-                                                     
+const BANNER_ART_BOT: &str = r#"
+██████╗  ██████╗ ████████╗
+██╔══██╗██╔═══██╗╚══██╔══╝
+██████╔╝██║   ██║   ██║   
+██╔══██╗██║   ██║   ██║   
+██████╔╝╚██████╔╝   ██║   
+╚═════╝  ╚═════╝    ╚═╝"#;
+
+const BANNER_SUBTITLE: &str = r#"
          [WhatsApp Academic Assistant v1.0]          
-              Created by Gilang & Arya     
-\x1b[0m"#;
+              Created by Gilang & Arya"#;
 
 #[derive(Clone)]
 struct AppState {
@@ -60,7 +66,7 @@ struct AppState {
     pool: PgPool,
 }
 
-// Health check endpoint for Docker
+/// Health check endpoint for Docker
 async fn health_check() -> Json<serde_json::Value> {
     use serde_json::json;
     Json(json!({
@@ -69,13 +75,85 @@ async fn health_check() -> Json<serde_json::Value> {
     }))
 }
 
+/// Check WAHA service health and authentication status
+async fn check_waha_health() -> String {
+    // Try multiple URLs in order of preference
+    let waha_urls = vec![
+        std::env::var("WAHA_URL").unwrap_or_else(|_| "http://waha:3000".to_string()),
+        "http://localhost:3001".to_string(),
+        "http://127.0.0.1:3001".to_string(),
+    ];
+    
+    let api_key = std::env::var("WAHA_API_KEY")
+        .unwrap_or_else(|_| "devkey123".to_string());
+    
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(3))
+        .build()
+        .unwrap();
+    
+    // Try each URL until one works
+    for waha_url in &waha_urls {
+        let session_url = format!("{}/api/sessions/default", waha_url);
+        
+        match client
+            .get(&session_url)
+            .header("X-Api-Key", &api_key)
+            .send()
+            .await
+        {
+            Ok(response) => {
+                if response.status().is_success() {
+                    if let Ok(session_data) = response.json::<serde_json::Value>().await {
+                        let status = session_data["status"].as_str().unwrap_or("UNKNOWN");
+                        
+                        return match status {
+                            "WORKING" => "\x1b[32m✅ AUTHENTICATED\x1b[0m".to_string(),
+                            "SCAN_QR_CODE" => "\x1b[33m⚠️  NEEDS QR SCAN\x1b[0m".to_string(),
+                            "STARTING" => "\x1b[36m🔄 STARTING...\x1b[0m".to_string(),
+                            "FAILED" => "\x1b[31m❌ FAILED\x1b[0m".to_string(),
+                            _ => format!("\x1b[33m⚠️  STATUS: {}\x1b[0m", status),
+                        };
+                    } else {
+                        return "\x1b[32m✅ CONNECTED\x1b[0m".to_string();
+                    }
+                } else if response.status().as_u16() == 401 {
+                    return "\x1b[31m❌ INVALID API KEY\x1b[0m".to_string();
+                }
+            }
+            Err(_) => {
+                // Try next URL
+                continue;
+            }
+        }
+    }
+    
+    // All URLs failed
+    "\x1b[31m❌ DOCKER NOT RUNNING\x1b[0m".to_string()
+}
+
 #[tokio::main]
 async fn main() {
     dotenv::dotenv().ok();
 
     // 1. Tampilan Awal (Clear Screen & Banner)
-    print!("\x1b[2J\x1b[1;1H"); 
-    println!("{}", BANNER);
+    print!("\x1b[2J\x1b[1;1H");
+
+    // Print MAR in white and BOT in Claude's orange side by side
+    let mar_lines: Vec<&str> = BANNER_ART.lines().collect();
+    let bot_lines: Vec<&str> = BANNER_ART_BOT.lines().collect();
+
+    for i in 0..mar_lines.len().max(bot_lines.len()) {
+        if i < mar_lines.len() {
+            print!("\x1b[97m{}", mar_lines[i]);  // Bright white for MAR
+        }
+        if i < bot_lines.len() {
+            print!("\x1b[38;2;224;128;79m{}", bot_lines[i]);  // Claude's orange #E0804F
+        }
+        println!("\x1b[0m");
+    }
+
+    println!("\x1b[90m{}\x1b[0m", BANNER_SUBTITLE);
     println!("\x1b[1;30m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\x1b[0m");
 
     // 2. Cek Environment Variables
@@ -85,15 +163,16 @@ async fn main() {
         "\x1b[31m❌ MISSING\x1b[0m"
     };
 
-    let waha_status = if std::env::var("WAHA_API_KEY").is_ok() {
-        "\x1b[32m✅ READY\x1b[0m"
-    } else {
-        "\x1b[33m⚠️  DEFAULT\x1b[0m"
-    };
-
     println!(" 🔧 \x1b[1mSYSTEM CHECK\x1b[0m");
     println!("    ├─ 🧠 Gemini AI    : {}", gemini_status);
-    println!("    ├─ 🔌 WAHA API     : {}", waha_status);
+
+    // WAHA Health Check
+    print!("    ├─ 🔌 WAHA API     : 🔌 Checking...");
+    std::io::stdout().flush().unwrap();
+
+    let waha_status = check_waha_health().await;
+    print!("\r    ├─ 🔌 WAHA API     : {}\x1b[K\n", waha_status);
+    std::io::stdout().flush().unwrap();
 
     // 3. Koneksi Database
     print!("    ├─ 🗄️  Database     : 🔌 Connecting...");
@@ -148,8 +227,8 @@ async fn main() {
 
     println!("\x1b[1;30m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\x1b[0m");
     println!(" 🚀 \x1b[1;32mMARBOT IS ONLINE!\x1b[0m");
-    println!("    📡 Listening on   : \x1b[36mhttp://0.0.0.0:{}\x1b[0m", port);
-    println!("    📍 Webhook URL    : \x1b[36mhttp://localhost:{}/webhook\x1b[0m", port);
+    println!("    📡 Listening on    : \x1b[36mhttp://0.0.0.0:{}\x1b[0m", port);
+    println!("    📍 Webhook URL     : \x1b[36mhttp://localhost:{}/webhook\x1b[0m", port);
     println!("\x1b[1;30m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\x1b[0m");
     println!("\nWaiting for incoming messages...\n");
 
