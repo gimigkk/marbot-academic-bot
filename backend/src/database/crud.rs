@@ -3,7 +3,7 @@ use uuid::Uuid;
 use chrono::{DateTime, Utc, FixedOffset, TimeZone, NaiveDateTime};
 use std::collections::HashMap;
 
-use crate::models::{Assignment, NewAssignment, Course, AssignmentDisplay, AssignmentWithCourse};
+use crate::models::{Assignment, NewAssignment, Course, AssignmentWithCourse};
 
 // ========================================
 // CREATE OPERATIONS
@@ -165,23 +165,18 @@ pub async fn get_last_completed_assignment(
 }
 
 /// Get all assignments
-pub async fn get_assignments(pool: &PgPool) -> Result<Vec<AssignmentDisplay>, sqlx::Error> {
-    let assignments = sqlx::query_as::<_, AssignmentDisplay>(
+pub async fn get_assignments(pool: &PgPool) -> Result<Vec<Assignment>> {
+    let assignments = sqlx::query_as::<_, Assignment>(
         r#"
-        SELECT 
-            a.id, 
-            c.name as course_name, 
-            a.parallel_codes,
-            a.title, 
-            a.description, 
-            a.deadline
-        FROM assignments a
-        JOIN courses c ON a.course_id = c.id
-        ORDER BY a.deadline ASC
+        SELECT a.* FROM assignments a
+        ORDER BY a.created_at DESC
+        LIMIT 20
         "#
     )
     .fetch_all(pool)
     .await?;
+
+    println!("✅ Found {} recent assignments", assignments.len());
 
     Ok(assignments)
 }
