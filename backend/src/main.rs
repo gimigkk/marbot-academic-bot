@@ -492,7 +492,7 @@ async fn webhook(
             
             // Context fetching
             let courses_list = crud::get_all_courses_formatted(&state.pool).await.unwrap_or_default();
-            let active_assignments = crud::get_active_assignments(&state.pool).await.unwrap_or_default();
+            let assignments = crud::get_assignments(&state.pool).await.unwrap_or_default();
             
             let course_map = sqlx::query_as::<_, (uuid::Uuid, String)>("SELECT id, name FROM courses")
                 .fetch_all(&state.pool).await.map(|rows| rows.into_iter().collect()).unwrap_or_default();
@@ -500,11 +500,11 @@ async fn webhook(
             // START MONITORING: AI Latency Timer
             let ai_start = Instant::now();
             
-            // ✅ NEW: Pass quoted message to AI
+            // Pass quoted message to AI
             match extract_with_ai(
                 &text, 
                 &courses_list, 
-                &active_assignments, 
+                &assignments, 
                 &course_map, 
                 image_base64.as_deref(),
                 sender_phone,   
