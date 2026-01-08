@@ -12,8 +12,8 @@ pub async fn start_scheduler(pool: PgPool) -> Result<(), JobSchedulerError> {
 
     // 1. REMINDER HARIAN (UTC TIME)    
     // URL Gambar untuk Pagi & Sore 
-    let image_pagi = "https://github.com/gimigkk/marbot-academic-bot/blob/6b2b72dca7ca954fe5e8eef81649d9fff24515c9/asset/pagi.jpg"; 
-    let image_sore = "https://github.com/gimigkk/marbot-academic-bot/blob/6b2b72dca7ca954fe5e8eef81649d9fff24515c9/asset/malam.jpg";
+    let image_pagi = "https://raw.githubusercontent.com/gimigkk/marbot-academic-bot/6b2b72dca7ca954fe5e8eef81649d9fff24515c9/asset/pagi.jpg"; 
+    let image_sore = "https://raw.githubusercontent.com/gimigkk/marbot-academic-bot/6b2b72dca7ca954fe5e8eef81649d9fff24515c9/asset/malam.jpg";
 
     // 07:00 WIB = 00:00 UTC
     let pool_pagi = pool.clone();
@@ -208,7 +208,7 @@ async fn send_to_channels(
                 chatId: chat_id.to_string(),
                 file: FileContent {
                     url: url.clone(),
-                    mimetype: "image/jpeg".to_string(), // Asumsi JPG, sesuaikan jika PNG
+                    mimetype: "image/jpeg".to_string(),
                     filename: "reminder.jpg".to_string(),
                 },
                 caption: message.clone(),
@@ -224,8 +224,6 @@ async fn send_to_channels(
                 
         } else {
             // === LOGIKA KIRIM TEKS BIASA ===
-            // println!("📤 Mengirim reminder teks ke {}", chat_id);
-            
             let payload = SendTextRequest {
                 chat_id: chat_id.to_string(),
                 text: message.clone(),
