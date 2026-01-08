@@ -2,16 +2,14 @@
 use tokio_cron_scheduler::{Job, JobScheduler, JobSchedulerError};
 use sqlx::PgPool;
 use crate::database::crud;
-// Pastikan import struct baru dari models
 use crate::models::{SendTextRequest, SendImageRequest, FileContent}; 
-
 use chrono::{DateTime, Datelike, Local, NaiveDate, Utc};
 
 pub async fn start_scheduler(pool: PgPool) -> Result<(), JobSchedulerError> {
     let sched = JobScheduler::new().await?;
 
     // 1. REMINDER HARIAN (UTC TIME)    
-    // URL Gambar untuk Pagi & Sore 
+    // URL Gambar untuk Pagi & Sore (Versi Raw Github)
     let image_pagi = "https://raw.githubusercontent.com/gimigkk/marbot-academic-bot/6b2b72dca7ca954fe5e8eef81649d9fff24515c9/asset/pagi.jpg"; 
     let image_sore = "https://raw.githubusercontent.com/gimigkk/marbot-academic-bot/6b2b72dca7ca954fe5e8eef81649d9fff24515c9/asset/malam.jpg";
 
@@ -32,7 +30,7 @@ pub async fn start_scheduler(pool: PgPool) -> Result<(), JobSchedulerError> {
     // 17:00 WIB = 10:00 UTC
     let pool_sore = pool.clone();
     let img_sore_url = image_sore.to_string();
-    sched.add(Job::new_async("0 0 10 * * *", move |_uuid, _l| {
+    sched.add(Job::new_async("0 0 11 * * *", move |_uuid, _l| {
         let pool = pool_sore.clone();
         let img = img_sore_url.clone();
         Box::pin(async move {
@@ -65,7 +63,7 @@ pub async fn start_scheduler(pool: PgPool) -> Result<(), JobSchedulerError> {
 async fn run_reminder_task(
     pool: PgPool, 
     greeting: &str, 
-    image_url: Option<String> // Parameter baru untuk URL gambar
+    image_url: Option<String> 
 ) -> Result<(), Box<dyn std::error::Error>> {
     
     let assignments = crud::get_active_assignments_sorted(&pool).await?;
@@ -158,7 +156,7 @@ async fn check_urgent_deadlines(pool: PgPool) -> Result<(), Box<dyn std::error::
             time_str
         );
 
-        // Kirim Pesan
+        // Kirim Pesan tanpa gambar (None)
         send_to_channels(message, None).await?;
 
         // Tandai sudah dikirim
@@ -177,7 +175,6 @@ async fn check_urgent_deadlines(pool: PgPool) -> Result<(), Box<dyn std::error::
 
 // --- HELPER FUNCTIONS ---
 
-// Update: Sekarang menerima Option<String> untuk image_url
 async fn send_to_channels(
     message: String, 
     image_url: Option<String>
