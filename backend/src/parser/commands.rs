@@ -16,7 +16,7 @@ use std::time::Instant;
 /// Handle bot commands and return response text or forward action
 pub enum CommandResponse {
     Text(String),
-    ForwardMessage { message_id: String, warning: String },
+    ForwardMessage { message_ids: Vec<String>, warning: String },
 }
 
 /// Get current time in GMT+7 (Indonesian timezone)
@@ -203,13 +203,15 @@ pub async fn handle_command(
                     } else {
                         let assignment = &incomplete[idx];
 
-                        let Some(message_id) = assignment.message_ids.last().cloned() else {
+                        if assignment.message_ids.is_empty() {
                             return CommandResponse::Text(
                                 "❌ Pesan asli untuk tugas ini belum tersimpan.\n\
                                 Coba cek daftar dengan *#todo*."
                                     .to_string(),
                             );
-                        };
+                        }
+
+                        let message_ids = assignment.message_ids.clone();
 
                         let status = status_dot(&assignment.deadline);
                         let done_status = if assignment.is_completed { 
@@ -238,7 +240,7 @@ pub async fn handle_command(
                         };
 
                         CommandResponse::ForwardMessage {
-                            message_id,
+                            message_ids,
                             warning: format!(
                                 "🧾 *Detail Tugas #{}*\nStatus: {}\n\n{} *{}*\n📌 {}\n⏰ Deadline: {}\n📝 {}{}\n\n\
                                 _Keterangan: 🔴 deadline 0–2 hari lagi • 🟢 deadline > 2 hari_",
