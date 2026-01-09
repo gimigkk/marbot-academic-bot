@@ -81,53 +81,59 @@ pub fn generate_clarification_messages(
     
     // First message: Info about the assignment and what's missing
     let info_message = format!(
-        "⚠️ *PERLU KLARIFIKASI*\n\
-        \n\
-        Tugas terdeteksi tapi ada info yang kurang:\n\
+        "*[PERLU KLARIFIKASI]*\n\
+        `ID: {}`\n\
         \n\
         📌 *{}* - {}\n\
         {}\n\
         🧩 Parallel: {}\n\
         \n\
         *Info yang dibutuhkan:*\n\
-        {}\n\
-        \n\
-        💡 Pesan berikutnya adalah template yang bisa langsung kamu copy & edit!\n\
-        \n\
-        `ID: {}`",  
+        {}",
+        assignment.id, 
         assignment.course_name,
         assignment.title,
         desc_preview,
         parallel_display,
         field_list,
-        assignment.id 
     );
     
-    // Second message: Template with helpful examples
-    let template_fields: Vec<String> = missing_fields.iter().filter_map(|f| {
-        match f.as_str() {
-            "course_name" => Some("Course: ".to_string()),
-            "title" => Some("Title: ".to_string()),
-            "deadline" => Some("Deadline: 15 01 23:59".to_string()),
-            "parallel_codes" => Some("Parallel: K1, K2".to_string()),
-            "description" => Some("Description: ".to_string()),
-            _ => None
+    // Build tips based on missing fields
+    let mut tips = Vec::new();
+
+    for field in missing_fields {
+        match field.as_str() {
+            "deadline" => {
+                tips.push("• Deadline: `15 01` atau `15 Jan` (bisa tanpa pemisah: `1501`)");
+                tips.push("• Waktu: tambah `23:59` atau `23.59` di belakang");
+                tips.push("• Update waktu saja: kirim `08:00` atau `14.30`");
+            }
+            "parallel_codes" => {
+                tips.push("• Parallel: `K1`, `K2`, `K1, K2` (pisah pakai koma), atau `all` untuk semua kelas");
+            }
+            "title" => {
+                tips.push("• Title: beri nama yang jelas dan spesifik");
+            }
+            "course_name" => {
+                tips.push("• Course: nama mata kuliah lengkap");
+            }
+            "description" => {
+                tips.push("• Description: jelaskan tugas dengan detail");
+            }
+            _ => {}
         }
-    }).collect();
-    
+    }
+
+    // Join tips with newlines
+    let tips_section = if !tips.is_empty() {
+        format!("\n📌 *Tips cepat:*\n{}", tips.join("\n"))
+    } else {
+        String::new()
+    };
+
     let template_message = format!(
-        "```\nID: {}\n{}\n```\n\
-        \n\
-        _(Reply pesan ini dengan info yang kurang)_\n\
-        \n\
-        📌 *Tips cepat:*\n\
-        • Deadline: `15 01` atau `15 Jan` (bisa tanpa pemisah: `1501`)\n\
-        • Waktu: tambah `23:59` atau `23.59` di belakang\n\
-        • Update waktu saja: kirim `08:00` atau `14.30`\n\
-        • Parallel: `K1`, `K2`, `K1, K2` (pisah pakai koma), atau `all` untuk semua kelas\n\
-        • Ketik `cancel` atau `batal` untuk membatalkan",
-        assignment.id,
-        template_fields.join("\n")
+        "_(Reply pesan ini dengan info yang kurang)_{}",
+        tips_section  // Conditionally added!
     );
     
     (info_message, template_message)
