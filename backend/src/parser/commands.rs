@@ -226,13 +226,13 @@ pub async fn handle_command(
                             .unwrap_or_else(|| "—".to_string());
 
                         let code_line = if !assignment.parallel_codes.is_empty() {
-                            format!("\n🧩 Parallel: {}", assignment.format_parallel_display())
+                            format!("{}", assignment.format_parallel_display())
                         } else {
-                            String::new()
+                            format!("null")
                         };
 
                         let summary = format!(
-                            "*[{}] - 🧩{}*\n_{}_\n\n{} {}", 
+                            "*[{}]* - 🧩{}\n_{}_\n\n{} {}", 
                             title, 
                             code_line, 
                             desc_full, 
