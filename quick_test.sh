@@ -40,13 +40,18 @@ send_image() {
     local img_url=$1
     local img_name=$2
     
-    CAPTION="🧪 *TEST: $img_name*
+    # Pre-calculate date to avoid JSON issues
+    local timestamp=$(date '+%d/%m/%Y %H:%M:%S')
+    
+    # Escape the caption for JSON (simple method)
+    CAPTION="🧪 TEST: $img_name
 
 Test pengiriman gambar dari terminal
-Waktu: $(date '+%d %b %Y, %H:%M:%S')
+Waktu: $timestamp
 
 ✅ Image attachment working!"
 
+    # Use printf to properly escape JSON
     PAYLOAD=$(cat <<EOF
 {
   "chatId": "$CHAT_ID",
@@ -55,7 +60,7 @@ Waktu: $(date '+%d %b %Y, %H:%M:%S')
     "mimetype": "image/jpeg",
     "filename": "$img_name"
   },
-  "caption": "$CAPTION",
+  "caption": $(printf '%s' "$CAPTION" | jq -Rs .),
   "session": "default"
 }
 EOF
