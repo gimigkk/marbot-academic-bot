@@ -88,7 +88,7 @@ pub fn generate_clarification_messages(
         {}\n\
         🧩 Parallel: {}\n\
         \n\
-        *Info yang dibutuhkan:*\n\
+        *[INFO KURANG:]*\n\
         {}",
         assignment.id, 
         assignment.course_name,
@@ -126,13 +126,13 @@ pub fn generate_clarification_messages(
 
     // Join tips with newlines
     let tips_section = if !tips.is_empty() {
-        format!("\n📌 *Tips cepat:*\n{}", tips.join("\n"))
+        format!("[*TIPS CEPAT:*]\n{}", tips.join("\n"))
     } else {
         String::new()
     };
 
     let template_message = format!(
-        "{}\n_(Reply pesan ini dengan info yang kurang)_",
+        "{}\n\n_(Reply pesan ini dengan info yang kurang)_",
         tips_section  // Conditionally added
     );
     
