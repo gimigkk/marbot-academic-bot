@@ -33,6 +33,15 @@ pub fn extract_parallel_codes_from_text(text: &str) -> Vec<String> {
     codes
 }
 
+/// Information about a quoted assignment from database
+#[derive(Debug, Clone)]
+pub struct QuotedAssignmentInfo {
+    pub assignment_id: uuid::Uuid,
+    pub course_name: String,
+    pub title: String,
+    pub parallel_codes: Vec<String>,
+}
+
 /// Minimal context needed for main AI prompt
 #[derive(Debug, Clone)]
 pub struct MessageContext {
@@ -44,6 +53,7 @@ pub struct MessageContext {
     pub course_hints: Vec<CourseHint>,
     pub courses_list: String,
     pub quoted_message_summary: Option<String>,
+    pub quoted_assignment_id: Option<uuid::Uuid>,
 }
 
 /// Per-course context hints with per-parallel schedule info
@@ -69,6 +79,7 @@ pub async fn build_context(
     pool: &PgPool,
     schedule_oracle: &ScheduleOracle,
     quoted_message: Option<&str>,
+    quoted_message_id: Option<&str>,
 ) -> Result<MessageContext, String> {
     
     let sender_history = get_sender_history(pool, sender_id).await
@@ -77,12 +88,20 @@ pub async fn build_context(
     let courses_list = get_courses_list(pool).await
         .unwrap_or_else(|_| "No courses available".to_string());
     
-    let quoted_summary = if let Some(quoted) = quoted_message {
-        extract_quoted_context(quoted, pool).await
-            .ok()
+    // Look up quoted assignment by message_id (reliable!)
+    let quoted_assignment = if let Some(msg_id) = quoted_message_id {
+        lookup_assignment_by_message_id(pool, msg_id).await.ok()
     } else {
         None
     };
+    
+    let quoted_summary = quoted_message.map(|q| {
+        if q.len() > 200 {
+            format!("{}...", &q[..200])
+        } else {
+            q.to_string()
+        }
+    });
     
     // Extract parallel codes from message text directly (GRAFKOM K2 case)
     let text_extracted_parallels = extract_parallel_codes_from_text(message);
@@ -93,6 +112,7 @@ pub async fn build_context(
         &courses_list,
         quoted_summary.as_deref(),
         &text_extracted_parallels,
+        quoted_assignment.as_ref(),
     ).await?;
     
     let course_hints = calculate_course_hints(
@@ -127,6 +147,8 @@ pub async fn build_context(
         }
     };
     
+    let quoted_assignment_id = quoted_assignment.as_ref().map(|a| a.assignment_id);
+    
     Ok(MessageContext {
         parallel_codes: ai_hints.parallel_codes,
         parallel_confidence: ai_hints.parallel_confidence,
@@ -136,22 +158,38 @@ pub async fn build_context(
         course_hints,
         courses_list,
         quoted_message_summary: quoted_summary,
+        quoted_assignment_id,
     })
 }
 
-// ===== QUOTED MESSAGE CONTEXT =====
+// ===== QUOTED ASSIGNMENT LOOKUP =====
 
-async fn extract_quoted_context(
-    quoted_text: &str,
-    _pool: &PgPool,
-) -> Result<String, String> {
-    let truncated = if quoted_text.len() > 200 {
-        format!("{}...", &quoted_text[..200])
-    } else {
-        quoted_text.to_string()
-    };
+async fn lookup_assignment_by_message_id(
+    pool: &PgPool,
+    message_id: &str,
+) -> Result<QuotedAssignmentInfo, sqlx::Error> {
+    let record = sqlx::query!(
+        r#"
+        SELECT 
+            a.id,
+            a.title,
+            a.parallel_codes,
+            c.name as course_name
+        FROM assignments a
+        JOIN courses c ON a.course_id = c.id
+        WHERE $1 = ANY(a.message_ids)
+        "#,
+        message_id
+    )
+    .fetch_one(pool)
+    .await?;
     
-    Ok(truncated)
+    Ok(QuotedAssignmentInfo {
+        assignment_id: record.id,
+        course_name: record.course_name,
+        title: record.title,
+        parallel_codes: record.parallel_codes.unwrap_or_default(),
+    })
 }
 
 // ===== COURSE LIST =====
@@ -254,6 +292,7 @@ async fn call_context_resolver_ai(
     courses_list: &str,
     quoted_context: Option<&str>,
     text_extracted_parallels: &[String],
+    quoted_assignment: Option<&QuotedAssignmentInfo>,
 ) -> Result<AIHints, String> {
     
     let history_text = if sender_history.parallel_patterns.is_empty() {
@@ -268,9 +307,26 @@ async fn call_context_resolver_ai(
             .join(", ")
     };
     
-    let quoted_section = quoted_context
-        .map(|ctx| format!("\n\nQUOTED MESSAGE CONTEXT:\n{}\n(User is replying to/referencing this message)", ctx))
-        .unwrap_or_default();
+    // Build quoted section with DB info (reliable!)
+    let quoted_section = if let Some(assignment) = quoted_assignment {
+        format!(
+            r#"
+
+QUOTED ASSIGNMENT (from database):
+  Course: {}
+  Title: {}
+  Current Parallels: [{}]
+  → User is updating/referencing this assignment
+  → YOU MUST extract ALL these parallel codes for schedule lookup"#,
+            assignment.course_name,
+            assignment.title,
+            assignment.parallel_codes.join(", ")
+        )
+    } else if let Some(ctx) = quoted_context {
+        format!("\n\nQUOTED MESSAGE CONTEXT:\n{}\n(User is replying to/referencing this message)", ctx)
+    } else {
+        String::new()
+    };
     
     let parallel_hint = if !text_extracted_parallels.is_empty() {
         format!("\n\nEXTRACTED PARALLEL CODES FROM MESSAGE: [{}]", text_extracted_parallels.join(", "))
@@ -287,50 +343,73 @@ SENDER HISTORY: {}{}{}
 AVAILABLE COURSES:
 {}
 
+=== CRITICAL INSTRUCTION ===
+If QUOTED ASSIGNMENT data is provided above, YOU MUST extract ALL its parallel codes.
+This is NOT optional. Schedule lookup requires complete parallel information.
+Example: If quoted shows [k1, k2, r3], extract ALL THREE, not just one.
+
 === TASK DEFINITION ===
 Identify courses and classify deadline information as structured JSON.
 
 === ENTITY EXTRACTION GUIDELINES ===
 
-1. COURSE IDENTIFICATION
+IMPORTANT: This message may reference ONE OR MORE assignments. Each assignment has:
+- Its own course
+- Its own set of parallel codes  
+- Its own deadline type
+
+Your job is to identify EACH DISTINCT ASSIGNMENT and extract their information SEPARATELY.
+
+1. ASSIGNMENT IDENTIFICATION
+   • If QUOTED ASSIGNMENT exists, user is likely updating/referencing that ONE assignment
+   • Otherwise, check if message describes multiple assignments or just one
+   • Each assignment entry should have ONE course
+
+2. COURSE IDENTIFICATION (per assignment)
    • Match against AVAILABLE COURSES list only
    • Use full course name, never alias (check [aka: ...] for aliases)
    • Assignment/project titles are NOT courses
-   • If QUOTED CONTEXT present, use it to identify referenced assignment
-   • Return empty array if no valid courses found
+   • If QUOTED ASSIGNMENT present, use that course name EXACTLY
 
-2. PARALLEL CLASS CODES (per course)
+3. PARALLEL CLASS CODES (per assignment) - CRITICAL
    • Definition: Valid codes are k1-k4, p1-p4, r1-r4, or "all"
-   • Format: Return as array, can contain multiple: ["k1", "k2"] or ["all"]
-   • Extraction priority order:
-     a) EXTRACTED PARALLEL CODES (if provided above) - HIGHEST PRIORITY
-     b) Explicit mention in message
-     c) Quoted context reference
-     d) Sender history pattern
-     e) No information → empty array []
+   • Format: Return as array, can contain multiple codes
+   • THESE ARE PER-ASSIGNMENT, NOT PER-COURSE
+   
+   • MANDATORY PRIORITY ORDER:
+     1. **QUOTED ASSIGNMENT parallels** → USE ALL OF THEM (highest priority)
+        - If quoted assignment has multiple codes, extract EVERY SINGLE ONE
+        - Do NOT drop any codes from quoted assignment
+        - These are from database, 100% reliable
+        - Example: Quoted has [k1, k2, k3] → YOU MUST RETURN [k1, k2, k3]
+        - Example: Quoted has [r1, r2] → YOU MUST RETURN [r1, r2]
+        - Example: Quoted has [k2, p1, p4] → YOU MUST RETURN [k2, p1, p4]
+     
+     2. **EXTRACTED PARALLEL CODES** (from message regex)
+        - If message explicitly mentions parallels, use those
+     
+     3. **SENDER HISTORY** (user's past pattern for this course)
+        - Fallback if no quoted assignment or explicit mention
+     
+     4. **Empty array** if no information available
    
    • Recognition patterns:
-     - If EXTRACTED PARALLEL CODES provided, use those as strong hints
-     - Course abbreviations: "GRAFKOM K2" means parallel k2 for that course
-     - Phrases: "untuk [code]", "kelas [code]", "[code] dan [code]"
+     - Course abbreviations: "GRAFKOM K2" → ["k2"], "METCUAN R1" → ["r1"]
+     - Explicit lists: "untuk k1, k2" → ["k1", "k2"]
      - Keywords "semua kelas"/"all classes" → ["all"]
-     - Standalone codes without course context → ignore
    
-   • Independence: Each course has independent parallels
-   • Example extractions:
-     - "🚨 GRAFKOM K2 🚨" + EXTRACTED: ["k2"] → parallel_codes: ["k2"]
-     - "Struktur Data P1" → parallel_codes: ["p1"]
-     - "Tugas PBO untuk k1 dan k2" → parallel_codes: ["k1", "k2"]
-     - "Semua kelas" → parallel_codes: ["all"]
+   • CRITICAL: When QUOTED ASSIGNMENT exists, extract its FULL parallel list
+     DO NOT extract only the first one or a subset. Extract ALL codes.
 
-3. DEADLINE TYPE CLASSIFICATION (per course)
+4. DEADLINE TYPE CLASSIFICATION (per assignment)
    • "explicit": Absolute calendar dates
      - Contains: specific date-month, day of week + date, "tanggal [number]"
      - Examples: "5 Januari", "Jumat 10 Januari", "tanggal 15"
    
    • "next_meeting": Class session references WITHOUT relative time terms
-     - Contains: "sebelum pertemuan", "before class", "di awal kelas", "saat kuliah", "di class"
-     - "ketika praktikum", "waktu kelas", "during class"
+     - Contains: "sebelum pertemuan", "before class", "di awal kelas", "saat kuliah"
+     - "ketika praktikum", "waktu kelas", "during class", "pertemuan berikutnya"
+     - "di class", "saat pertemuan", "waktu lab"
      - Must NOT contain relative terms (besok, minggu depan, etc.)
    
    • "relative": Relative temporal references
@@ -349,17 +428,21 @@ Return JSON only:
 {{
   "parallel_codes": [string],  // Global parallels or []
   "parallel_confidence": float,  // 0.0-1.0
-  "parallel_source": "explicit" | "quoted_context" | "sender_history" | "unknown",
+  "parallel_source": "quoted_assignment" | "explicit" | "sender_history" | "unknown",
   "course_hints": [
     {{
       "course_name": string,  // Full name from AVAILABLE COURSES
-      "parallel_codes": [string],  // Course-specific parallels
+      "parallel_codes": [string],  // THIS ASSIGNMENT's parallels (not course-wide!)
       "deadline_type": "explicit" | "next_meeting" | "relative" | "unknown"
     }}
   ]
 }}
 
-Apply these guidelines to extract information. If EXTRACTED PARALLEL CODES provided, use them with high confidence."#,
+FINAL REMINDER: 
+- Parallel codes are PER-ASSIGNMENT, not per-course
+- If QUOTED ASSIGNMENT exists, its parallel codes are MANDATORY
+- Extract ALL parallel codes from quoted assignment, not a subset
+- This is required for schedule lookup to work correctly for each parallel class"#,
         message,
         history_text,
         quoted_section,
@@ -520,8 +603,9 @@ mod tests {
         // Basic cases
         assert_eq!(extract_parallel_codes_from_text("K1"), vec!["k1"]);
         assert_eq!(extract_parallel_codes_from_text("p2"), vec!["p2"]);
+        assert_eq!(extract_parallel_codes_from_text("R3"), vec!["r3"]);
         
-        // With emojis (GRAFKOM case)
+        // With emojis
         assert_eq!(
             extract_parallel_codes_from_text("🚨 GRAFKOM K2 🚨"),
             vec!["k2"]
@@ -530,6 +614,7 @@ mod tests {
         // Course abbreviations
         assert_eq!(extract_parallel_codes_from_text("METCUAN K3"), vec!["k3"]);
         assert_eq!(extract_parallel_codes_from_text("Pemrograman P1"), vec!["p1"]);
+        assert_eq!(extract_parallel_codes_from_text("Statistika R2"), vec!["r2"]);
         
         // Multiple codes
         assert_eq!(
@@ -537,13 +622,12 @@ mod tests {
             vec!["k1", "k2"]
         );
         
+        assert_eq!(
+            extract_parallel_codes_from_text("R1, R2, K3"),
+            vec!["r1", "r2", "k3"]
+        );
+        
         // No code
         assert_eq!(extract_parallel_codes_from_text("No code here").len(), 0);
-        
-        // Multiple different codes
-        assert_eq!(
-            extract_parallel_codes_from_text("K1, K2, P3"),
-            vec!["k1", "k2", "p3"]
-        );
     }
 }
