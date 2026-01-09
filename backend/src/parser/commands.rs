@@ -232,7 +232,7 @@ pub async fn handle_command(
                         };
 
                         let summary = format!(
-                            "*[{}]* - 🧩{}\n_{}_\n\n{} {}", 
+                            "*[{}]* 🧩 *{}*\n_{}_\n\n{} {}", 
                             title, 
                             code_line, 
                             desc_full, 
