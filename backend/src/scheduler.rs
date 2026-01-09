@@ -27,15 +27,17 @@ pub async fn start_scheduler(pool: PgPool) -> Result<(), JobSchedulerError> {
         })
     })?).await?;
 
-    // 17:00 WIB = 10:00 UTC
+    // === MODIFIKASI UNTUK TESTING (TIAP 2 MENIT) ===
     let pool_sore = pool.clone();
     let img_sore_url = image_sore.to_string();
-    sched.add(Job::new_async("0 0 11 * * *", move |_uuid, _l| {
+    // Cron: Detik 0, Tiap menit habis dibagi 2 (Example: 18:02, 18:04...)
+    sched.add(Job::new_async("0 */2 * * * *", move |_uuid, _l| {
         let pool = pool_sore.clone();
         let img = img_sore_url.clone();
         Box::pin(async move {
-            println!("⏰ REMINDER SORE (10:00 UTC / 17:00 WIB):");
-            if let Err(e) = run_reminder_task(pool, "🌇 Selamat sore Ilkomers!", Some(img)).await {
+            println!("⏰ TEST REMINDER SORE (TIAP 2 MENIT):");
+            // Tambah teks (TESTING) biar jelas
+            if let Err(e) = run_reminder_task(pool, "🌇 Selamat sore Ilkomers! (TESTING)", Some(img)).await {
                 eprintln!("❌ Error reminder sore: {}", e);
             }
         })
@@ -176,7 +178,7 @@ async fn check_urgent_deadlines(pool: PgPool) -> Result<(), Box<dyn std::error::
 // --- HELPER FUNCTIONS ---
 
 async fn send_to_channels(
-    message: String, 
+    mut message: String,          // Note: tambah 'mut' agar bisa diedit
     image_url: Option<String>
 ) -> Result<(), Box<dyn std::error::Error>> {
     
@@ -196,43 +198,44 @@ async fn send_to_channels(
     let waha_url = std::env::var("WAHA_URL").unwrap_or_else(|_| "http://waha:3000".to_string());
     let api_key = std::env::var("WAHA_API_KEY").unwrap_or_else(|_| "devkey123".to_string());
 
+    // --- TRIK LINK PREVIEW (GRATIS) ---
+    // Jika ada gambar, tempelkan URL-nya di paling atas pesan agar WA me-render previewnya.
+    // Kita gunakan invisible char atau spasi agar rapi, tapi URL tetap harus ada di body.
+    if let Some(url) = image_url {
+        // Format: [URL] [Spasi/Newline] [Pesan Asli]
+        // WhatsApp akan mengambil URL pertama untuk dijadikan preview header.
+        message = format!("{}\n\n{}", url, message);
+    }
+
     for chat_id in target_channels {
-        if let Some(url) = &image_url {
-            // === LOGIKA KIRIM GAMBAR ===
-            println!("📤 Mengirim reminder bergambar ke {}", chat_id);
-            
-            let payload = SendImageRequest {
-                chatId: chat_id.to_string(),
-                file: FileContent {
-                    url: url.clone(),
-                    mimetype: "image/jpeg".to_string(),
-                    filename: "reminder.jpg".to_string(),
-                },
-                caption: message.clone(),
-                session: "default".to_string(),
-            };
+        // KITA PAKAI SEND TEXT SAJA (Endpoint /api/sendImage kita tinggalkan karena berbayar)
+        println!("📤 Mengirim reminder (via Link Preview) ke {}...", chat_id);
 
-            let _ = client
-                .post(format!("{}/api/sendImage", waha_url))
-                .header("X-Api-Key", &api_key)
-                .json(&payload)
-                .send()
-                .await;
-                
-        } else {
-            // === LOGIKA KIRIM TEKS BIASA ===
-            let payload = SendTextRequest {
-                chat_id: chat_id.to_string(),
-                text: message.clone(),
-                session: "default".to_string(),
-            };
+        let payload = serde_json::json!({
+            "chatId": chat_id,
+            "text": message,
+            "session": "default",
+            "linkPreview": true // Meminta WAHA/WA untuk merender preview
+        });
 
-            let _ = client
-                .post(format!("{}/api/sendText", waha_url))
-                .header("X-Api-Key", &api_key)
-                .json(&payload)
-                .send()
-                .await;
+        let response = client
+            .post(format!("{}/api/sendText", waha_url))
+            .header("X-Api-Key", &api_key)
+            .json(&payload)
+            .send()
+            .await;
+
+        match response {
+            Ok(res) => {
+                if res.status().is_success() {
+                    println!("✅ Sukses kirim ke {}", chat_id);
+                } else {
+                    let status = res.status();
+                    let body = res.text().await.unwrap_or_default();
+                    eprintln!("❌ WAHA Error [{}]: {}", status, body);
+                }
+            }
+            Err(e) => eprintln!("❌ Koneksi Gagal: {}", e),
         }
     }
     Ok(())
