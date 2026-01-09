@@ -375,7 +375,7 @@ async fn webhook(
 
     // ============= CLARIFICATION HANDLER =============
     if let Some(quoted) = payload.payload.get_quoted_message() {
-        let is_clarification_reply = quoted.text.contains("⚠️ *PERLU KLARIFIKASI*") 
+        let is_clarification_reply = quoted.text.contains("*[PERLU KLARIFIKASI]*") 
             || quoted.text.contains("ID:") && quoted.text.contains("```");
         
         if is_clarification_reply {
