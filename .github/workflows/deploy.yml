@@ -8,23 +8,15 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    outputs:
-      status: ${{ job.status }}
-      commit_msg: ${{ github.event.head_commit.message }}
-      commit_author: ${{ github.event.head_commit.author.name }}
-      commit_sha: ${{ github.sha }}
-      commit_sha_short: ${{ steps.get_sha.outputs.short }}
-      old_sha: ${{ github.event.before }}
     
     steps:
       - name: 📥 Checkout code
         uses: actions/checkout@v4
-      
-      - name: 🔍 Get short SHA
-        id: get_sha
-        run: echo "short=$(echo ${{ github.sha }} | cut -c1-7)" >> $GITHUB_OUTPUT
+        with:
+          fetch-depth: 2  # Get last 2 commits for comparison
       
       - name: 🚀 Deploy to VPS
+        id: deploy
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.VPS_HOST }}
@@ -35,67 +27,40 @@ jobs:
             cd /opt/marbot-academic-bot
             bash update.sh
       
-      - name: 📊 Deployment Summary
-        run: |
-          echo "✅ Deployment completed"
-          echo "📝 Commit: ${{ github.event.head_commit.message }}"
-          echo "👤 Author: ${{ github.event.head_commit.author.name }}"
-
-  notify:
-    needs: deploy
-    runs-on: ubuntu-latest
-    if: always()
-    
-    steps:
-      - name: 📱 Send Notification via VPS
-        uses: appleboy/ssh-action@v1.0.3
+      - name: 📱 Send Success Notification to WhatsApp
+        if: success()
+        uses: joelwmale/webhook-action@master
         with:
-          host: ${{ secrets.VPS_HOST }}
-          username: ${{ secrets.VPS_USERNAME }}
-          key: ${{ secrets.VPS_SSH_KEY }}
-          port: ${{ secrets.VPS_PORT }}
-          script: |
-            cd /opt/marbot-academic-bot
-            
-            # Load environment variables
-            set -a
-            source .env
-            set +a
-            
-            # Determine deployment status
-            DEPLOY_STATUS="${{ needs.deploy.result }}"
-            COMMIT_MSG="${{ github.event.head_commit.message }}"
-            COMMIT_AUTHOR="${{ github.event.head_commit.author.name }}"
-            OLD_SHA="${{ github.event.before }}"
-            NEW_SHA="${{ github.sha }}"
-            OLD_SHORT=$(echo "$OLD_SHA" | cut -c1-7)
-            NEW_SHORT=$(echo "$NEW_SHA" | cut -c1-7)
-            
-            # Create message based on status
-            if [ "$DEPLOY_STATUS" == "success" ]; then
-              MESSAGE="*[MARBOT UPDATE SUCCESS]*
-
-            🔄 \"${COMMIT_MSG}\"
-            👤 Author: ${COMMIT_AUTHOR}
-
-            [View commit]
-            https://github.com/${{ github.repository }}/commit/${NEW_SHA}"
-            else
-              MESSAGE="*[MARBOT UPDATE FAILED]*
-
-            🔄 \"${COMMIT_MSG}\"
-            👤 Author: ${COMMIT_AUTHOR}
-
-            [View workflow run]
-            ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-            fi
-            
-            # Send via WAHA using curl
-            curl -X POST "${WAHA_URL}/api/sendText" \
-              -H "X-Api-Key: ${WAHA_API_KEY}" \
-              -H "Content-Type: application/json" \
-              -d "{
-                \"session\": \"default\",
-                \"chatId\": \"${DEBUG_GROUP_ID}\",
-                \"text\": \"${MESSAGE}\"
-              }"
+          url: ${{ secrets.WAHA_URL }}/api/sendText
+          headers: '{"X-Api-Key": "${{ secrets.WAHA_API_KEY }}", "Content-Type": "application/json"}'
+          body: >
+            {
+              "session": "default",
+              "chatId": "${{ secrets.DEBUG_GROUP_ID }}",
+              "text": "[MARBOT UPDATE SUCCESS]\n\n🔄 ${{ github.event.head_commit.message }}\n👤 Author: ${{ github.event.head_commit.author.name }}\n\n[View commit]\n${{ github.event.head_commit.url }}"
+            }
+      
+      - name: 📱 Send Failure Notification to WhatsApp
+        if: failure()
+        uses: joelwmale/webhook-action@master
+        with:
+          url: ${{ secrets.WAHA_URL }}/api/sendText
+          headers: '{"X-Api-Key": "${{ secrets.WAHA_API_KEY }}", "Content-Type": "application/json"}'
+          body: >
+            {
+              "session": "default",
+              "chatId": "${{ secrets.DEBUG_GROUP_ID }}",
+              "text": "[MARBOT UPDATE FAILED]\n\n🔴 ${{ github.event.head_commit.message }}\n👤 Author: ${{ github.event.head_commit.author.name }}\n\n[View workflow run]\n${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            }
+      
+      - name: 📊 Deployment Summary
+        if: always()
+        run: |
+          if [ "${{ job.status }}" == "success" ]; then
+            echo "✅ Deployment successful!"
+            echo "📝 Commit: ${{ github.event.head_commit.message }}"
+            echo "👤 Author: ${{ github.event.head_commit.author.name }}"
+          else
+            echo "❌ Deployment failed!"
+            echo "📝 Failed commit: ${{ github.event.head_commit.message }}"
+          fi
