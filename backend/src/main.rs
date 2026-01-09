@@ -785,7 +785,7 @@ async fn handle_ai_classification(
                     None
                 };
                 
-                let active_assignments = crud::get_recent_assignments_for_update(&pool_clone, course_id)
+                let active_assignments = crud::get_recent_assignments_for_update(&pool_clone)
                     .await
                     .unwrap_or_default();
                 
@@ -918,7 +918,7 @@ async fn handle_single_assignment(
     // ========================================
     // IMPROVED DUPLICATE DETECTION
     // ========================================
-    if let Some(cid) = course_id {
+    if let Some(_cid) = course_id {
         if let Some(cname) = &course_name {
             let course_map: HashMap<uuid::Uuid, String> = sqlx::query_as::<_, (uuid::Uuid, String)>(
                 "SELECT id, name FROM courses"
@@ -928,7 +928,8 @@ async fn handle_single_assignment(
             .map(|r| r.into_iter().collect())
             .unwrap_or_default();
             
-            let existing_assignments = crud::get_recent_assignments_for_update(&pool, Some(cid))
+            // ✅ FIXED: Don't pass course_id filter - get ALL recent assignments
+            let existing_assignments = crud::get_recent_assignments_for_update(&pool)
                 .await
                 .unwrap_or_default();
             

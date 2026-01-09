@@ -332,40 +332,24 @@ pub async fn get_active_assignments_for_user(
 
 /// Get recent assignments for update matching
 pub async fn get_recent_assignments_for_update(
-    pool: &PgPool,
-    course_id: Option<uuid::Uuid>,
+    pool: &PgPool
 ) -> Result<Vec<Assignment>, sqlx::Error> {
-    let mut tx = pool.begin().await?;
-    
-    let assignments = if let Some(cid) = course_id {
+    // No need for transaction for a simple read query
+    let assignments = 
         sqlx::query_as::<_, Assignment>(
             r#"
             SELECT * FROM assignments
-            WHERE course_id = $1 
-            AND deadline >= NOW() - INTERVAL '7 days'
+            WHERE created_at > NOW() - INTERVAL '30 days'
             ORDER BY created_at DESC
-            LIMIT 10
+            LIMIT 20
             "#
         )
-        .bind(cid)
-        .fetch_all(&mut *tx)
-        .await?
-    } else {
-        sqlx::query_as::<_, Assignment>(
-            r#"
-            SELECT * FROM assignments
-            WHERE deadline >= NOW() - INTERVAL '7 days'
-            ORDER BY created_at DESC
-            LIMIT 10
-            "#
-        )
-        .fetch_all(&mut *tx)
-        .await?
-    };
-    
-    tx.commit().await?;
+        .fetch_all(pool)
+        .await?;
+
     Ok(assignments)
 }
+
 
 /// Find course by name (case-insensitive)
 pub async fn get_course_by_name(
