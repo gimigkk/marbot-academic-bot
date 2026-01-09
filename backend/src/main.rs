@@ -534,7 +534,7 @@ async fn webhook(
                         eprintln!("❌ Failed to send reply: {}", e);
                     }
                 }
-                CommandResponse::ForwardMessage {message_ids} => {
+                CommandResponse::ForwardMessage {message_ids, summary} => {
                     let mut fails = 0;
 
                     for message_id in &message_ids {
@@ -550,6 +550,11 @@ async fn webhook(
                         if let Err(e) = send_reply(chat_id, &error_msg).await {
                             eprintln!("❌ Failed to send reply: {}", e);
                         }
+                    }
+                    
+                    // always send summary
+                    if let Err(e) = send_reply(chat_id, &summary).await {
+                        eprintln!("❌ Failed to send summary: {}", e);
                     }
                 }
             }
