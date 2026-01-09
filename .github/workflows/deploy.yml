@@ -10,7 +10,13 @@ jobs:
     runs-on: ubuntu-latest
     
     steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2  # Get last 2 commits for comparison
+      
       - name: 🚀 Deploy to VPS
+        id: deploy
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.VPS_HOST }}
@@ -21,11 +27,40 @@ jobs:
             cd /opt/marbot-academic-bot
             bash update.sh
       
-      - name: 📢 Deployment Status
+      - name: 📱 Send Success Notification to WhatsApp
+        if: success()
+        uses: joelwmale/webhook-action@master
+        with:
+          url: ${{ secrets.WAHA_URL }}/api/sendText
+          headers: '{"X-Api-Key": "${{ secrets.WAHA_API_KEY }}", "Content-Type": "application/json"}'
+          body: >
+            {
+              "session": "default",
+              "chatId": "${{ secrets.DEBUG_GROUP_ID }}",
+              "text": "✅ *MARBOT UPDATE SUCCESS*\n\n📅 ${{ github.event.head_commit.timestamp }}\n🔄 ${{ github.event.before }} → ${{ github.sha }}\n\n📝 Commit message:\n```\n${{ github.event.head_commit.message }}\n```\n\n👤 Author: ${{ github.event.head_commit.author.name }}\n🎉 Backend restarted successfully!\n\n🔗 [View commit](${{ github.event.head_commit.url }})"
+            }
+      
+      - name: 📱 Send Failure Notification to WhatsApp
+        if: failure()
+        uses: joelwmale/webhook-action@master
+        with:
+          url: ${{ secrets.WAHA_URL }}/api/sendText
+          headers: '{"X-Api-Key": "${{ secrets.WAHA_API_KEY }}", "Content-Type": "application/json"}'
+          body: >
+            {
+              "session": "default",
+              "chatId": "${{ secrets.DEBUG_GROUP_ID }}",
+              "text": "❌ *MARBOT UPDATE FAILED*\n\n📅 ${{ github.event.head_commit.timestamp }}\n🔴 Deployment failed\n\n📝 Attempted commit:\n```\n${{ github.event.head_commit.message }}\n```\n\n👤 Author: ${{ github.event.head_commit.author.name }}\n\n🔗 [View workflow run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})"
+            }
+      
+      - name: 📊 Deployment Summary
         if: always()
         run: |
-          if [ ${{ job.status }} == 'success' ]; then
+          if [ "${{ job.status }}" == "success" ]; then
             echo "✅ Deployment successful!"
+            echo "📝 Commit: ${{ github.event.head_commit.message }}"
+            echo "👤 Author: ${{ github.event.head_commit.author.name }}"
           else
             echo "❌ Deployment failed!"
+            echo "📝 Failed commit: ${{ github.event.head_commit.message }}"
           fi
