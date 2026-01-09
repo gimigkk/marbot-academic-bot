@@ -457,7 +457,7 @@ async fn webhook(
                                         .unwrap_or("(belum ditentukan)".to_string());
 
                                     let response = format!(
-                                        "✅ *KLARIFIKASI TERSIMPAN*\n\
+                                        "*[KLARIFIKASI TERSIMPAN]*\n\
                                         \n\
                                         📝 *{}*\n\
                                         📚 {}\n\
@@ -1004,14 +1004,11 @@ async fn handle_single_assignment(
                             if let Some(debug_id) = &debug_group_id {
                                 let (info_msg, template_msg) = clarification::generate_clarification_messages(&full_assign, &missing);
                                 
-                                // Send first message (info)
-                                let _ = send_reply(debug_id, &info_msg).await;
-                                
-                                // Small delay to ensure correct ordering
-                                tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-                                
-                                // Send second message (template)
-                                let _ = send_reply(debug_id, &template_msg).await;
+                                // Combine with newlines
+                                let combined_msg = format!("{}\n\n{}", info_msg, template_msg);
+
+                                // Send once
+                                let _ = send_reply(debug_id, &combined_msg).await;
                             }
                             return;
                         }
