@@ -337,18 +337,3 @@ pub struct NewWaLog {
     pub event_type: Option<String>,
     pub payload: Option<Value>,
 }
-
-#[derive(Serialize)]
-pub struct FileContent {
-    pub url: String,
-    pub mimetype: String,
-    pub filename: String,
-}
-
-#[derive(Serialize)]
-pub struct SendImageRequest {
-    pub chatId: String,  //case-sensitivity 
-    pub file: FileContent,
-    pub caption: String,
-    pub session: String,
-}
