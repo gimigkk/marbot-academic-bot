@@ -380,7 +380,7 @@ fn parse_ai_response(
     Ok(updates)
 }
 
-// FALLBACK REGEX PARSER
+// FALLBACK REGEX PARSER (MISAL AI GAGAL CUIHHH)
 
 pub fn parse_natural_language_fallback(
     text: &str,
@@ -522,7 +522,6 @@ fn extract_description_part(text: &str) -> Option<String> {
     let indicators = ["tugasnya", "tugas", "kerjakan", "submit", "soal", "halaman", "chapter"];
     if !indicators.iter().any(|&i| text.contains(i)) { return None; }
     
-    // Simple heuristic: take the longest part that looks like description
     if text.len() > 10 { return Some(text.to_string()); }
     None
 }
