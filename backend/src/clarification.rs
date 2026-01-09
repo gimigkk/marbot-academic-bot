@@ -1,7 +1,10 @@
 use crate::models::AssignmentWithCourse;
 use uuid::Uuid;
 use std::collections::HashMap;
-use chrono::{NaiveDate, NaiveTime, NaiveDateTime};
+use chrono::{Local, NaiveDateTime, NaiveDate, NaiveTime, Duration, Datelike, Weekday};
+use serde::{Deserialize, Serialize};
+use regex::Regex;
+use once_cell::sync::Lazy; 
 
 /// Check which fields are missing from an assignment
 pub fn identify_missing_fields(assignment: &AssignmentWithCourse) -> Vec<String> {
@@ -12,16 +15,13 @@ pub fn identify_missing_fields(assignment: &AssignmentWithCourse) -> Vec<String>
         missing.push("course_name".to_string());
     }
     
-    // Check title (generic/vague titles are considered "missing")
+    // Check title
     let title_lower = assignment.title.to_lowercase();
     let is_generic_title = assignment.title.is_empty() || 
         title_lower.contains("tugas baru") ||
         title_lower == "assignment" ||
         title_lower == "tugas" ||
-        title_lower == "task" ||
-        title_lower == "lkp" ||
         title_lower == "pr" ||
-        title_lower == "homework" ||
         title_lower.len() < 3;
     
     if is_generic_title {
@@ -33,23 +33,15 @@ pub fn identify_missing_fields(assignment: &AssignmentWithCourse) -> Vec<String>
         missing.push("deadline".to_string());
     }
     
-    // Check parallel codes - now it's a Vec
+    // Check parallel codes
     if assignment.parallel_codes.is_empty() {
         missing.push("parallel_codes".to_string());
     }
     
     // Check description
     if let Some(ref desc) = assignment.description {
-        let desc_lower = desc.to_lowercase();
-        let is_generic_desc = desc.trim().is_empty() || 
-            desc_lower == "no description" ||
-            desc_lower == "brief description" ||
-            desc_lower.contains("assignment") ||
-            desc_lower.contains("tugas") ||
-            desc.len() < 10;
-        
-        if is_generic_desc {
-            missing.push("description".to_string());
+        if desc.trim().is_empty() || desc.len() < 5 {
+             missing.push("description".to_string());
         }
     } else {
         missing.push("description".to_string());
@@ -62,6 +54,7 @@ pub fn generate_clarification_messages(
     assignment: &AssignmentWithCourse,
     missing_fields: &[String]
 ) -> (String, String) {
+    // 1. Generate List 
     let field_list = missing_fields.iter().map(|f| match f.as_str() {
         "course_name" => "📚 Nama Mata Kuliah",
         "title" => "📝 Judul Tugas",
@@ -71,21 +64,36 @@ pub fn generate_clarification_messages(
         _ => "❓ Unknown"
     }).collect::<Vec<_>>().join("\n");
     
+    // 2. Format Deskripsi
     let desc_preview = assignment.description
         .as_ref()
         .map(|d| format!("📄 {}", d))
         .unwrap_or_else(|| "📄 (belum ada deskripsi)".to_string());
     
-    // Display parallel codes
-    let parallel_display = assignment.format_parallel_display();
+    // 3. Format Deadline (Tampilkan "N/A" jika kosong)
+    let deadline_display = if let Some(d) = assignment.deadline {
+        // Tambah 7 jam untuk WIB
+        let wib = d + Duration::hours(7);
+        wib.format("%Y-%m-%d %H:%M").to_string()
+    } else {
+        "N/A".to_string()
+    };
+
+    // 4. Format Parallel (Tampilkan "N/A" jika kosong)
+    let parallel_display = if assignment.parallel_codes.is_empty() {
+        "N/A".to_string()
+    } else {
+        assignment.format_parallel_display()
+    };
     
-    // First message: Info about the assignment and what's missing
+    // 5. Susun Pesan Utama
     let info_message = format!(
         "*[PERLU KLARIFIKASI]*\n\
         `ID: {}`\n\
         \n\
         📌 *{}* - {}\n\
         {}\n\
+        ⏰ Deadline: {}\n\
         🧩 Parallel: {}\n\
         \n\
         *[INFO KURANG:]*\n\
@@ -94,502 +102,438 @@ pub fn generate_clarification_messages(
         assignment.course_name,
         assignment.title,
         desc_preview,
+        deadline_display,
         parallel_display,
         field_list,
     );
     
-    // Build tips based on missing fields
-    let mut tips = Vec::new();
+   let template_message = "\
+        \n_(Reply pesan ini langsung dengan info tambahannya, misalnya: 'dikumpulin besok jam 8 pagi')_\n\
+        \n\
+        💡 _Jika AI salah paham, gunakan format manual:_\n\
+        `Deadline: ...`\n\
+        `Desc: ...`".to_string();
 
-    for field in missing_fields {
-        match field.as_str() {
-            "deadline" => {
-                tips.push("• Deadline: `15 01` atau `15 Jan` (bisa tanpa pemisah: `1501`)");
-                tips.push("• Waktu: tambah `23:59` atau `23.59` di belakang");
-                tips.push("• Update waktu saja: kirim `08:00` atau `14.30`");
-            }
-            "parallel_codes" => {
-                tips.push("• Parallel: `K1`, `K2`, `K1 P1`, atau `all` untuk semua kelas");
-            }
-            "title" => {
-                tips.push("• Title: beri nama yang jelas dan spesifik");
-            }
-            "course_name" => {
-                tips.push("• Course: nama mata kuliah lengkap");
-            }
-            "description" => {
-                tips.push("• Description: jelaskan tugas dengan detail");
-            }
-            _ => {}
-        }
-    }
-
-    // Join tips with newlines
-    let tips_section = if !tips.is_empty() {
-        format!("[*TIPS CEPAT:*]\n{}", tips.join("\n"))
-    } else {
-        String::new()
-    };
-
-    let template_message = format!(
-        "{}\n\n_(Reply pesan ini dengan info yang kurang)_",
-        tips_section  // Conditionally added
-    );
-    
     (info_message, template_message)
-}
-
-/// Legacy function for backward compatibility
-pub fn generate_clarification_message(
-    assignment: &AssignmentWithCourse,
-    missing_fields: &[String]
-) -> String {
-    let (info, template) = generate_clarification_messages(assignment, missing_fields);
-    format!("{}\n\n{}", info, template)
-}
-
-/// Parse clarification response from user reply
-/// Returns Ok(updates) if parsed successfully
-/// Returns Err("cancelled") if user wants to cancel
-/// Returns Err("no_data") if couldn't parse anything useful
-/// 
-/// If current_deadline is provided and user sends time-only, it will update just the time
-pub fn parse_clarification_response(
-    text: &str, 
-    current_year: i32,
-    current_deadline: Option<NaiveDateTime>
-) -> Result<HashMap<String, String>, String> {
-    let text_lower = text.trim().to_lowercase();
-    
-    // Check for cancellation keywords
-    if text_lower == "cancel" || 
-       text_lower == "batal" || 
-       text_lower == "batalkan" ||
-       text_lower == "tidak" ||
-       text_lower == "no" ||
-       text_lower == "skip" {
-        return Err("cancelled".to_string());
-    }
-    
-    let mut updates = HashMap::new();
-    
-    // Remove backticks and extra whitespace
-    let text = text.replace('`', "").trim().to_string();
-    
-    // Check for time-only format FIRST (before structured parsing)
-    if let Some(time) = detect_time_only(&text) {
-        if let Some(existing_deadline) = current_deadline {
-            // Keep the date, update only the time
-            let new_deadline = existing_deadline.date().and_time(time);
-            updates.insert("deadline".to_string(), new_deadline.format("%Y-%m-%d %H:%M").to_string());
-            return Ok(updates);
-        } else {
-            // No existing deadline to update
-            return Err("no_date".to_string());
-        }
-    }
-    
-    // First pass: Look for structured "Key: Value" format
-    for line in text.lines() {
-        let line = line.trim();
-        if line.is_empty() || line.starts_with("(") || line.starts_with("Format") || line.starts_with("Tips") {
-            continue;
-        }
-        
-        if let Some((key, value)) = line.split_once(':') {
-            let key = key.trim().to_lowercase();
-            let value = value.trim();
-            
-            // Skip empty, placeholder, or example values
-            if value.is_empty() || 
-               value.starts_with('[') || 
-               value == "..." || 
-               value == "-" ||
-               value.starts_with("DD ") ||
-               value.starts_with("YYYY") ||
-               value.starts_with("15 01") && line.to_lowercase().contains("deadline:") {
-                continue;
-            }
-            
-            match key.as_str() {
-                "course" | "mata kuliah" | "matkul" | "mk" => {
-                    updates.insert("course_name".to_string(), value.to_string());
-                }
-                "title" | "judul" | "nama tugas" | "nama" => {
-                    updates.insert("title".to_string(), value.to_string());
-                }
-                "deadline" | "due" | "batas waktu" | "dl" => {
-                    // Use the enhanced deadline parser
-                    match parse_deadline_flexible(value, current_year) {
-                        Ok(parsed) => {
-                            updates.insert("deadline".to_string(), parsed);
-                        }
-                        Err(e) => {
-                            eprintln!("Warning: Failed to parse deadline '{}': {}", value, e);
-                        }
-                    }
-                }
-                "parallel" | "paralel" | "kode" | "code" | "kelas" => {
-                    // Parse comma-separated parallel codes
-                    let codes = parse_parallel_codes(value);
-                    if !codes.is_empty() {
-                        updates.insert("parallel_codes".to_string(), codes.join(","));
-                    }
-                }
-                "description" | "deskripsi" | "keterangan" | "desc" | "ket" => {
-                    updates.insert("description".to_string(), value.to_string());
-                }
-                _ => {}
-            }
-        }
-    }
-    
-    // Second pass: Try to detect unstructured content
-    if updates.is_empty() {
-        // Check for parallel codes
-        let parallel_codes = detect_parallel_codes(&text);
-        if !parallel_codes.is_empty() {
-            updates.insert("parallel_codes".to_string(), parallel_codes.join(","));
-        }
-        
-        // Check for deadlines
-        if let Ok(deadline) = parse_deadline_flexible(&text, current_year) {
-            updates.insert("deadline".to_string(), deadline);
-        }
-        
-        // If text is substantial and we haven't categorized it, treat as description
-        if updates.is_empty() && text.len() > 5 && !text.to_lowercase().starts_with("id:") {
-            updates.insert("description".to_string(), text);
-        }
-    }
-    
-    if updates.is_empty() {
-        return Err("no_data".to_string());
-    }
-    
-    Ok(updates)
-}
-
-/// Parse comma-separated parallel codes
-fn parse_parallel_codes(input: &str) -> Vec<String> {
-    input.split(',')
-        .map(|s| s.trim())
-        .filter(|s| !s.is_empty())
-        .map(|s| normalize_parallel_code(s))
-        .collect()
-}
-
-/// Detect multiple parallel codes from unstructured text
-fn detect_parallel_codes(text: &str) -> Vec<String> {
-    let lower = text.to_lowercase();
-    let mut codes = Vec::new();
-    
-    // Check for "all" variations
-    if lower.contains("semua") || 
-       lower.contains("all") || 
-       lower.contains("untuk semua kelas") ||
-       lower == "all classes" {
-        return vec!["all".to_string()];
-    }
-    
-    // Look for explicit codes
-    let words: Vec<&str> = text.split_whitespace().collect();
-    for word in &words {
-        let upper = word.trim_matches(|c: char| !c.is_alphanumeric()).to_uppercase();
-        if is_valid_parallel_code(&upper) {
-            let normalized = upper.to_lowercase();
-            if !codes.contains(&normalized) {
-                codes.push(normalized);
-            }
-        }
-    }
-    
-    // Look for patterns like "kelas 1", "parallel 2"
-    for (i, word) in words.iter().enumerate() {
-        let lower_word = word.to_lowercase();
-        if lower_word == "kelas" || lower_word == "parallel" || lower_word == "paralel" {
-            if i + 1 < words.len() {
-                if let Ok(num) = words[i + 1].parse::<u8>() {
-                    if (1..=4).contains(&num) {
-                        let code = format!("k{}", num);
-                        if !codes.contains(&code) {
-                            codes.push(code);
-                        }
-                    }
-                }
-            }
-        }
-    }
-    
-    codes
-}
-
-/// Detect if text is time-only format (HH:MM or HH.MM)
-fn detect_time_only(text: &str) -> Option<NaiveTime> {
-    let text = text.trim();
-    
-    // Try HH:MM format
-    if let Some((h, m)) = text.split_once(':') {
-        if let (Ok(hour), Ok(minute)) = (h.parse::<u32>(), m.parse::<u32>()) {
-            if hour < 24 && minute < 60 {
-                return NaiveTime::from_hms_opt(hour, minute, 0);
-            }
-        }
-    }
-    
-    // Try HH.MM format
-    if let Some((h, m)) = text.split_once('.') {
-        if let (Ok(hour), Ok(minute)) = (h.parse::<u32>(), m.parse::<u32>()) {
-            if hour < 24 && minute < 60 {
-                return NaiveTime::from_hms_opt(hour, minute, 0);
-            }
-        }
-    }
-    
-    None
-}
-
-/// Flexible deadline parsing supporting multiple formats
-fn parse_deadline_flexible(text: &str, current_year: i32) -> Result<String, String> {
-    // Month name mappings
-    let month_map: HashMap<&str, u32> = [
-        // Indonesian
-        ("januari", 1), ("februari", 2), ("maret", 3), ("april", 4),
-        ("mei", 5), ("juni", 6), ("juli", 7), ("agustus", 8),
-        ("september", 9), ("oktober", 10), ("november", 11), ("desember", 12),
-        // Abbreviations
-        ("jan", 1), ("feb", 2), ("mar", 3), ("apr", 4), ("jun", 6),
-        ("jul", 7), ("agu", 8), ("aug", 8), ("sep", 9), ("okt", 10),
-        ("oct", 10), ("nov", 11), ("des", 12), ("dec", 12),
-        // English
-        ("january", 1), ("february", 2), ("march", 3), ("may", 5),
-        ("june", 6), ("july", 7), ("august", 8), ("october", 10), ("december", 12),
-    ].iter().cloned().collect();
-    
-    let text = text.trim();
-    
-    // Extract time first
-    let (date_part, time) = extract_time(text);
-    
-    // Parse date
-    let date = parse_date(&date_part, &month_map, current_year)?;
-    
-    // Format result
-    let formatted = if let Some(t) = time {
-        format!("{} {}", date.format("%Y-%m-%d"), t.format("%H:%M"))
-    } else {
-        date.format("%Y-%m-%d").to_string()
-    };
-    
-    Ok(formatted)
-}
-
-fn extract_time(text: &str) -> (String, Option<NaiveTime>) {
-    // Look for HH:MM or HH.MM patterns
-    for word in text.split_whitespace() {
-        // Try with : separator
-        if let Some((h, m)) = word.split_once(':') {
-            if let (Ok(hour), Ok(minute)) = (h.parse::<u32>(), m.parse::<u32>()) {
-                if hour < 24 && minute < 60 {
-                    if let Some(time) = NaiveTime::from_hms_opt(hour, minute, 0) {
-                        let cleaned = text.replace(&format!("{}:{:02}", hour, minute), "")
-                                         .replace(&format!("{}:{}", hour, minute), "")
-                                         .trim()
-                                         .to_string();
-                        return (cleaned, Some(time));
-                    }
-                }
-            }
-        }
-        
-        // Try with . separator
-        if let Some((h, m)) = word.split_once('.') {
-            if let (Ok(hour), Ok(minute)) = (h.parse::<u32>(), m.parse::<u32>()) {
-                if hour < 24 && minute < 60 {
-                    if let Some(time) = NaiveTime::from_hms_opt(hour, minute, 0) {
-                        let cleaned = text.replace(&format!("{}.{:02}", hour, minute), "")
-                                         .replace(&format!("{}.{}", hour, minute), "")
-                                         .trim()
-                                         .to_string();
-                        return (cleaned, Some(time));
-                    }
-                }
-            }
-        }
-    }
-    
-    (text.to_string(), None)
-}
-
-fn parse_date(text: &str, month_map: &HashMap<&str, u32>, current_year: i32) -> Result<NaiveDate, String> {
-    let text = text.trim().to_lowercase();
-    
-    // Try month names first
-    let words: Vec<&str> = text.split_whitespace().collect();
-    for (i, word) in words.iter().enumerate() {
-        let clean_word = word.trim_matches(|c: char| !c.is_alphanumeric());
-        
-        if let Some(&month) = month_map.get(clean_word) {
-            // Check previous word for day
-            if i > 0 {
-                if let Ok(day) = words[i - 1].parse::<u32>() {
-                    if day >= 1 && day <= 31 {
-                        return NaiveDate::from_ymd_opt(current_year, month, day)
-                            .ok_or_else(|| "Invalid date".to_string());
-                    }
-                }
-            }
-            
-            // Check next word for day
-            if i + 1 < words.len() {
-                if let Ok(day) = words[i + 1].parse::<u32>() {
-                    if day >= 1 && day <= 31 {
-                        return NaiveDate::from_ymd_opt(current_year, month, day)
-                            .ok_or_else(|| "Invalid date".to_string());
-                    }
-                }
-            }
-        }
-    }
-    
-    // Try numeric formats
-    let normalized = text.replace('-', " ")
-                         .replace('/', " ")
-                         .replace('.', " ")
-                         .replace(',', " ");
-    
-    let numbers: Vec<u32> = normalized.split_whitespace()
-                                      .filter_map(|s| s.parse::<u32>().ok())
-                                      .collect();
-    
-    // Two separate numbers: DD MM
-    if numbers.len() >= 2 {
-        let day = numbers[0];
-        let month = numbers[1];
-        
-        if day >= 1 && day <= 31 && month >= 1 && month <= 12 {
-            return NaiveDate::from_ymd_opt(current_year, month, day)
-                .ok_or_else(|| "Invalid date".to_string());
-        }
-    }
-    
-    // Single number without separator: DDMM
-    if numbers.len() == 1 {
-        let num = numbers[0];
-        
-        if num >= 101 && num <= 3112 {
-            let day = num / 100;
-            let month = num % 100;
-            
-            if day >= 1 && day <= 31 && month >= 1 && month <= 12 {
-                return NaiveDate::from_ymd_opt(current_year, month, day)
-                    .ok_or_else(|| "Invalid date".to_string());
-            }
-        }
-    }
-    
-    Err("Could not parse date".to_string())
-}
-
-fn normalize_parallel_code(code: &str) -> String {
-    let code = code.trim().to_lowercase();
-    
-    if code == "all" || code == "semua" || code == "semua parallel" {
-        return "all".to_string();
-    }
-    
-    if code.len() == 2 {
-        return code;
-    }
-    
-    code
-}
-
-fn is_valid_parallel_code(code: &str) -> bool {
-    if code.to_lowercase() == "all" {
-        return true;
-    }
-    
-    if code.len() != 2 {
-        return false;
-    }
-    
-    let chars: Vec<char> = code.chars().collect();
-    let prefix = chars[0];
-    let number = chars[1];
-    
-    (prefix == 'K' || prefix == 'P' || prefix == 'R') && ('1'..='4').contains(&number)
 }
 
 pub fn extract_assignment_id_from_message(text: &str) -> Option<Uuid> {
     let cleaned_text = text.replace('`', "");
-    
     for line in cleaned_text.lines() {
-        let line_lower = line.to_lowercase();
-        if line_lower.contains("id:") {
+        if line.to_lowercase().contains("id:") {
             if let Some(id_part) = line.split(':').nth(1) {
-                let id_str = id_part.trim();
-                if let Ok(uuid) = Uuid::parse_str(id_str) {
+                if let Ok(uuid) = Uuid::parse_str(id_part.trim()) {
                     return Some(uuid);
                 }
             }
         }
     }
+    None
+}
+
+pub fn generate_cancellation_message(assignment_id: Uuid) -> String {
+    format!("❌ *KLARIFIKASI DIBATALKAN*\nTugas ID `{}` dibuang.", assignment_id)
+}
+
+pub fn generate_parse_failed_message() -> String {
+    "⚠️ *MAAF, TIDAK PAHAM*\nAku bingung dengan format pesanmu. Coba gunakan bahasa yang lebih sederhana atau format `Key: Value`.".to_string()
+}
+
+pub fn generate_no_date_message() -> String {
+    "⚠️ *TANGGAL TIDAK DITEMUKAN*\nKamu menyebutkan jam, tapi aku tidak tahu untuk tanggal berapa.".to_string()
+}
+
+
+// AI & NATURAL LANGUAGE PARSING
+
+/// Main Entry Point: Try AI first, fallback to regex
+pub async fn parse_clarification_response(
+    text: &str, 
+    current_deadline: Option<NaiveDateTime>,
+    missing_fields: &[String]
+) -> Result<HashMap<String, String>, String> {
+    // 1. Try AI Parsing
+    println!("🤖 Attempting AI Clarification parsing...");
+    match parse_clarification_with_ai(text, missing_fields, current_deadline).await {
+        Ok(result) => {
+             println!("✅ AI Parsing Success");
+             Ok(result)
+        },
+        Err(e) => {
+            eprintln!("⚠️ AI Parsing failed/skipped: {}. Falling back to Regex.", e);
+            // 2. Fallback to Natural Language Regex
+            parse_natural_language_fallback(text, current_deadline)
+        }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct AIClarificationResult {
+    pub deadline: Option<String>,
+    pub deadline_time: Option<String>,
+    pub course_name: Option<String>,
+    pub title: Option<String>,
+    pub description: Option<String>,
+    pub parallel_codes: Option<Vec<String>>,
+    pub is_cancellation: bool,
+}
+
+pub async fn parse_clarification_with_ai(
+    user_message: &str,
+    missing_fields: &[String],
+    current_deadline: Option<NaiveDateTime>,
+) -> Result<HashMap<String, String>, String> {
+    let text_lower = user_message.trim().to_lowercase();
+    if is_cancellation(&text_lower) {
+        return Err("cancelled".to_string());
+    }
+
+    let now = Local::now();
+    let current_date = now.format("%Y-%m-%d").to_string();
+    let current_day = now.format("%A").to_string();
+    let current_year = now.year();
+
+    let prompt = build_clarification_prompt(
+        user_message,
+        missing_fields,
+        &current_date,
+        &current_day,
+        current_year,
+        current_deadline,
+    );
+
+    let ai_response = call_gemini_for_clarification(&prompt).await?;
+    parse_ai_response(&ai_response, current_deadline)
+}
+
+fn is_cancellation(text: &str) -> bool {
+    let cancel_keywords = [
+        "cancel", "batal", "batalkan", "tidak", "no", "skip",
+        "gajadi", "ga jadi", "gak jadi", "nggak jadi", "ndak jadi", "tidak jadi",
+        "nope", "lupakan", "abaikan"
+    ];
+    cancel_keywords.iter().any(|&kw| text == kw || text.starts_with(&format!("{} ", kw)))
+}
+
+fn build_clarification_prompt(
+    user_message: &str,
+    missing_fields: &[String],
+    current_date: &str,
+    current_day: &str,
+    current_year: i32,
+    current_deadline: Option<NaiveDateTime>,
+) -> String {
+    let missing_fields_str = missing_fields.join(", ");
     
-    for word in cleaned_text.split_whitespace() {
-        if let Ok(uuid) = Uuid::parse_str(word) {
-            return Some(uuid);
+    let existing_deadline_info = if let Some(dl) = current_deadline {
+        format!("Existing deadline: {} (only update if user provides new info)", dl.format("%Y-%m-%d %H:%M"))
+    } else {
+        "No existing deadline yet".to_string()
+    };
+
+    format!(
+        r#"You are a bilingual (Indonesian/English) assistant that parses NATURAL LANGUAGE clarification responses for academic assignments. 
+
+CURRENT CONTEXT:
+- Today: {current_date} ({current_day})
+- Year: {current_year}
+- {existing_deadline_info}
+- Fields needing clarification: [{missing_fields_str}]
+
+USER MESSAGE: 
+"{user_message}"
+
+YOUR TASK:
+Parse the user's FREE-FORM message. Users may write naturally WITHOUT labels/prefixes. 
+Extract information based on the missing fields and context.
+
+MAPPINGS:
+- Dates: "besok"=+1d, "lusa"=+2d, "minggu depan"=+7d.
+- Times: "pagi"=08:00, "siang"=12:00, "sore"=15:00, "malam"=20:00.
+- Codes: "K1", "K2", "All".
+
+RESPONSE FORMAT (JSON only):
+{{
+  "deadline": "YYYY-MM-DD" or null,
+  "deadline_time": "HH:MM" or null,
+  "course_name": "string" or null,
+  "title": "string" or null,
+  "description": "string" or null,
+  "parallel_codes": ["K1", "K2"] or null,
+  "is_cancellation": false
+}}
+
+Respond with ONLY the JSON."#,
+        current_date = current_date,
+        current_day = current_day,
+        current_year = current_year,
+        existing_deadline_info = existing_deadline_info,
+        missing_fields_str = missing_fields_str,
+        user_message = user_message,
+    )
+}
+
+async fn call_gemini_for_clarification(prompt: &str) -> Result<String, String> {
+    let api_key = std::env::var("GEMINI_API_KEY")
+        .map_err(|_| "GEMINI_API_KEY not set".to_string())?;
+
+    // FIXED: Typo in model 
+    let models = [
+        "gemini-2.0-flash-exp",
+        "gemini-2.0-flash",
+        "gemini-1.5-flash",
+    ];
+
+    let client = reqwest::Client::new();
+
+    for model in &models {
+        let url = format!(
+            "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent?key={}",
+            model, api_key
+        );
+
+        let request_body = serde_json::json!({
+            "contents": [{
+                "parts": [{ "text": prompt }]
+            }],
+            "generationConfig": {
+                "temperature": 0.1,
+                "maxOutputTokens": 1024,
+            }
+        });
+
+        match client.post(&url).json(&request_body).send().await {
+            Ok(response) => {
+                if response.status().is_success() {
+                    if let Ok(json) = response.json::<serde_json::Value>().await {
+                        if let Some(text) = json["candidates"][0]["content"]["parts"][0]["text"].as_str() {
+                            return Ok(text.to_string());
+                        }
+                    }
+                }
+            }
+            Err(_) => continue,
+        }
+    }
+
+    Err("All Gemini models failed".to_string())
+}
+
+fn parse_ai_response(
+    ai_response: &str,
+    current_deadline: Option<NaiveDateTime>,
+) -> Result<HashMap<String, String>, String> {
+    let cleaned = ai_response
+        .trim()
+        .trim_start_matches("```json")
+        .trim_start_matches("```")
+        .trim_end_matches("```")
+        .trim();
+
+    let parsed: AIClarificationResult = serde_json::from_str(cleaned)
+        .map_err(|e| format!("Failed to parse AI response: {} - Raw: {}", e, cleaned))?;
+
+    if parsed.is_cancellation {
+        return Err("cancelled".to_string());
+    }
+
+    let mut updates = HashMap::new();
+
+    // Handle deadline
+    if let Some(date_str) = &parsed.deadline {
+        if !date_str.is_empty() {
+            let time_str = parsed.deadline_time.as_deref().unwrap_or("23:59");
+            let deadline_str = format!("{} {}", date_str, time_str);
+            updates.insert("deadline".to_string(), deadline_str);
+        }
+    } else if let Some(time_str) = &parsed.deadline_time {
+        if let Some(existing) = current_deadline {
+            if let Ok(new_time) = NaiveTime::parse_from_str(time_str, "%H:%M") {
+                let new_deadline = existing.date().and_time(new_time);
+                updates.insert("deadline".to_string(), new_deadline.format("%Y-%m-%d %H:%M").to_string());
+            }
+        } else {
+            return Err("no_date".to_string());
+        }
+    }
+
+    if let Some(course) = &parsed.course_name {
+        if !course.is_empty() { updates.insert("course_name".to_string(), course.clone()); }
+    }
+    if let Some(title) = &parsed.title {
+        if !title.is_empty() { updates.insert("title".to_string(), title.clone()); }
+    }
+    if let Some(desc) = &parsed.description {
+        if !desc.is_empty() { updates.insert("description".to_string(), desc.clone()); }
+    }
+    if let Some(codes) = &parsed.parallel_codes {
+        if !codes.is_empty() {
+            let normalized: Vec<String> = codes.iter().map(|c| c.to_uppercase()).collect();
+            updates.insert("parallel_codes".to_string(), normalized.join(","));
+        }
+    }
+
+    if updates.is_empty() {
+        return Err("no_data".to_string());
+    }
+
+    Ok(updates)
+}
+
+// FALLBACK REGEX PARSER
+
+pub fn parse_natural_language_fallback(
+    text: &str,
+    current_deadline: Option<NaiveDateTime>,
+) -> Result<HashMap<String, String>, String> {
+    let text_lower = text.trim().to_lowercase();
+    
+    if is_cancellation(&text_lower) {
+        return Err("cancelled".to_string());
+    }
+    
+    let now = Local::now().naive_local();
+    let today = now.date();
+    
+    let mut updates = HashMap::new();
+
+    // 1. Try regex date
+    let parsed_date = parse_relative_date(&text_lower, today);
+    let parsed_time = parse_natural_time(&text_lower);
+
+    if let Some(date) = parsed_date {
+        let time = parsed_time.unwrap_or_else(|| NaiveTime::from_hms_opt(23, 59, 0).unwrap());
+        let deadline = date.and_time(time);
+        updates.insert("deadline".to_string(), deadline.format("%Y-%m-%d %H:%M").to_string());
+    } else if let Some(time) = parsed_time {
+        if let Some(existing) = current_deadline {
+            let new_deadline = existing.date().and_time(time);
+            updates.insert("deadline".to_string(), new_deadline.format("%Y-%m-%d %H:%M").to_string());
+        }
+    }
+
+    // 2. Try description
+    if let Some(desc) = extract_description_part(&text_lower) {
+        if !desc.is_empty() {
+            updates.insert("description".to_string(), desc);
+        }
+    }
+
+    // 3. Try parallel codes
+    let parallel_codes = detect_parallel_codes(&text_lower);
+    if !parallel_codes.is_empty() {
+        updates.insert("parallel_codes".to_string(), parallel_codes.join(","));
+    }
+
+    if updates.is_empty() {
+        return Err("no_data".to_string());
+    }
+
+    Ok(updates)
+}
+
+fn parse_relative_date(text: &str, today: NaiveDate) -> Option<NaiveDate> {
+    if text.contains("besok") || text.contains("tomorrow") {
+        return Some(today + Duration::days(1));
+    }
+    if text.contains("lusa") || text.contains("day after tomorrow") {
+        return Some(today + Duration::days(2));
+    }
+    if text.contains("minggu depan") || text.contains("next week") {
+        return Some(today + Duration::days(7));
+    }
+    if let Some(days) = extract_days_from_text(text) {
+        return Some(today + Duration::days(days));
+    }
+    if let Some(target_day) = parse_day_name(text) {
+        let force_next = text.contains("depan") || text.contains("next");
+        return Some(next_weekday(today, target_day, force_next));
+    }
+    None
+}
+
+fn extract_days_from_text(text: &str) -> Option<i64> {
+    static RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"(\d+)\s*hari\s*lagi").unwrap());
+    if let Some(caps) = RE.captures(text) {
+        if let Some(num) = caps.get(1) {
+             return num.as_str().parse::<i64>().ok();
+        }
+    }
+    None
+}
+
+fn parse_day_name(text: &str) -> Option<Weekday> {
+    let day_mappings = [
+        ("senin", Weekday::Mon), ("monday", Weekday::Mon),
+        ("selasa", Weekday::Tue), ("tuesday", Weekday::Tue),
+        ("rabu", Weekday::Wed), ("wednesday", Weekday::Wed),
+        ("kamis", Weekday::Thu), ("thursday", Weekday::Thu),
+        ("jumat", Weekday::Fri), ("jum'at", Weekday::Fri), ("friday", Weekday::Fri),
+        ("sabtu", Weekday::Sat), ("saturday", Weekday::Sat),
+        ("minggu", Weekday::Sun), ("sunday", Weekday::Sun),
+    ];
+    for (name, weekday) in day_mappings {
+        if text.contains(name) { return Some(weekday); }
+    }
+    None
+}
+
+fn next_weekday(from: NaiveDate, target: Weekday, force_next_week: bool) -> NaiveDate {
+    let current_num = from.weekday().num_days_from_monday();
+    let target_num = target.num_days_from_monday();
+    let mut days_ahead = if target_num > current_num { target_num - current_num } else { 7 - current_num + target_num };
+    
+    if days_ahead == 0 { days_ahead = 7; }
+    if days_ahead < 7 && force_next_week { days_ahead += 7; }
+
+    from + Duration::days(days_ahead as i64)
+}
+
+fn parse_natural_time(text: &str) -> Option<NaiveTime> {
+    // 1. Keywords
+    let keywords = [
+        ("tengah malam", 23, 59), ("pagi", 8, 0), ("siang", 12, 0), 
+        ("sore", 15, 0), ("malam", 20, 0), ("subuh", 5, 0)
+    ];
+    for (k, h, m) in keywords {
+        if text.contains(k) { return NaiveTime::from_hms_opt(h, m, 0); }
+    }
+
+    // 2. Format "Jam X" or "X:XX"
+    static RE_TIME: Lazy<Regex> = Lazy::new(|| Regex::new(r"(?:jam\s*)?(\d{1,2})[:.](\d{2})").unwrap());
+    if let Some(caps) = RE_TIME.captures(text) {
+        if let (Ok(h), Ok(m)) = (caps[1].parse::<u32>(), caps[2].parse::<u32>()) {
+            return NaiveTime::from_hms_opt(h, m, 0);
+        }
+    }
+    
+    // 3. Format "Jam X" (only hour)
+    static RE_HOUR: Lazy<Regex> = Lazy::new(|| Regex::new(r"jam\s*(\d{1,2})").unwrap());
+    if let Some(caps) = RE_HOUR.captures(text) {
+        if let Ok(h) = caps[1].parse::<u32>() {
+            return NaiveTime::from_hms_opt(h, 0, 0);
         }
     }
     
     None
 }
 
-/// Generate cancellation message
-pub fn generate_cancellation_message(assignment_id: Uuid) -> String {
-    format!(
-        "❌ *KLARIFIKASI DIBATALKAN*\n\
-        \n\
-        Tugas dengan ID `{}` tidak akan disimpan.\n\
-        \n\
-        💡 Tugas tetap terdeteksi jika muncul lagi nanti.",
-        assignment_id
-    )
+fn extract_description_part(text: &str) -> Option<String> {
+    let indicators = ["tugasnya", "tugas", "kerjakan", "submit", "soal", "halaman", "chapter"];
+    if !indicators.iter().any(|&i| text.contains(i)) { return None; }
+    
+    // Simple heuristic: take the longest part that looks like description
+    if text.len() > 10 { return Some(text.to_string()); }
+    None
 }
 
-/// Generate message when clarification parsing fails
-pub fn generate_parse_failed_message() -> String {
-    "⚠️ *FORMAT TIDAK DIKENALI*\n\
-    \n\
-    Maaf, aku tidak bisa memahami format yang kamu kirim.\n\
-    \n\
-    📌 *Tips:*\n\
-    • Reply template yang sudah dikirim\n\
-    • Edit bagian yang diperlukan saja\n\
-    • Update waktu saja: kirim `08:00` atau `14.30`\n\
-    • Atau ketik `batal` untuk membatalkan\n\
-    \n\
-    Contoh format yang benar:\n\
-    ```\n\
-    ID: [uuid]\n\
-    Deadline: 15 01 23:59\n\
-    Parallel: K1, K2\n\
-    ```".to_string()
-}
-
-/// Generate message when time-only update is attempted without existing deadline
-pub fn generate_no_date_message() -> String {
-    "⚠️ *TIDAK ADA TANGGAL*\n\
-    \n\
-    Kamu mengirim waktu saja, tapi tugas ini belum punya tanggal deadline.\n\
-    \n\
-    📌 Kirim format lengkap:\n\
-    ```\n\
-    Deadline: 14 Jan 08:00\n\
-    ```\n\
-    \n\
-    Atau:\n\
-    ```\n\
-    Deadline: 14 01 08:00\n\
-    ```".to_string()
+fn detect_parallel_codes(text: &str) -> Vec<String> {
+    let mut codes = Vec::new();
+    if text.contains("semua") || text.contains("all") { return vec!["ALL".to_string()]; }
+    
+    static RE_CODE: Lazy<Regex> = Lazy::new(|| Regex::new(r"\b([KPR][1-4])\b").unwrap());
+    for caps in RE_CODE.captures_iter(text) {
+        codes.push(caps[1].to_uppercase());
+    }
+    codes
 }
