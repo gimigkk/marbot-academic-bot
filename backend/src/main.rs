@@ -364,9 +364,12 @@ async fn webhook(
     println!("| Body        : \x1b[32m{}\x1b[0m", body_truncated);
     println!("| Type        : \x1b[32m{}\x1b[0m\n", type_display);
     
-    // Extract quoted message for AI context
-    let quoted_message_text = payload.payload.get_quoted_message()
-        .map(|quoted| quoted.text.clone());
+    // Extract quoted message text and id
+    let (quoted_message_text, quoted_message_id) = if let Some(quoted) = payload.payload.get_quoted_message() {
+        (Some(quoted.text.clone()), Some(quoted.id.clone()))  // Clone both to own them
+    } else {
+        (None, None)
+    };
 
     if let Some(ref quoted) = quoted_message_text {
         println!("| Quoted: \"{}\"\n", 
@@ -601,7 +604,8 @@ async fn webhook(
                 image_base64.as_deref(),
                 sender_phone,   
                 &state.pool,
-                quoted_message_text.as_deref(),  
+                quoted_message_text.as_deref(),
+                quoted_message_id.as_deref(),
             ).await {
                 Ok(classification) => {
                     //  STOP MONITORING: Log AI Duration
