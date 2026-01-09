@@ -3,7 +3,7 @@ use uuid::Uuid;
 use chrono::{DateTime, Utc, FixedOffset, TimeZone, NaiveDateTime};
 use std::collections::HashMap;
 
-use crate::models::{Assignment, NewAssignment, Course, AssignmentDisplay, AssignmentWithCourse};
+use crate::models::{Assignment, NewAssignment, Course, AssignmentWithCourse};
 
 // ========================================
 // CREATE OPERATIONS
@@ -165,23 +165,18 @@ pub async fn get_last_completed_assignment(
 }
 
 /// Get all assignments
-pub async fn get_assignments(pool: &PgPool) -> Result<Vec<AssignmentDisplay>, sqlx::Error> {
-    let assignments = sqlx::query_as::<_, AssignmentDisplay>(
+pub async fn get_assignments(pool: &PgPool) -> Result<Vec<Assignment>> {
+    let assignments = sqlx::query_as::<_, Assignment>(
         r#"
-        SELECT 
-            a.id, 
-            c.name as course_name, 
-            a.parallel_codes,
-            a.title, 
-            a.description, 
-            a.deadline
-        FROM assignments a
-        JOIN courses c ON a.course_id = c.id
-        ORDER BY a.deadline ASC
+        SELECT a.* FROM assignments a
+        ORDER BY a.created_at DESC
+        LIMIT 20
         "#
     )
     .fetch_all(pool)
     .await?;
+
+    println!("✅ Found {} recent assignments", assignments.len());
 
     Ok(assignments)
 }
@@ -337,40 +332,24 @@ pub async fn get_active_assignments_for_user(
 
 /// Get recent assignments for update matching
 pub async fn get_recent_assignments_for_update(
-    pool: &PgPool,
-    course_id: Option<uuid::Uuid>,
+    pool: &PgPool
 ) -> Result<Vec<Assignment>, sqlx::Error> {
-    let mut tx = pool.begin().await?;
-    
-    let assignments = if let Some(cid) = course_id {
+    // No need for transaction for a simple read query
+    let assignments = 
         sqlx::query_as::<_, Assignment>(
             r#"
             SELECT * FROM assignments
-            WHERE course_id = $1 
-            AND deadline >= NOW() - INTERVAL '7 days'
+            WHERE created_at > NOW() - INTERVAL '30 days'
             ORDER BY created_at DESC
-            LIMIT 10
+            LIMIT 20
             "#
         )
-        .bind(cid)
-        .fetch_all(&mut *tx)
-        .await?
-    } else {
-        sqlx::query_as::<_, Assignment>(
-            r#"
-            SELECT * FROM assignments
-            WHERE deadline >= NOW() - INTERVAL '7 days'
-            ORDER BY created_at DESC
-            LIMIT 10
-            "#
-        )
-        .fetch_all(&mut *tx)
-        .await?
-    };
-    
-    tx.commit().await?;
+        .fetch_all(pool)
+        .await?;
+
     Ok(assignments)
 }
+
 
 /// Find course by name (case-insensitive)
 pub async fn get_course_by_name(
