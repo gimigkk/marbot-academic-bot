@@ -816,7 +816,7 @@ async fn handle_ai_classification(
                             if let Some(debug_id) = debug_clone {
                                 let _ = send_reply(
                                     &debug_id,
-                                    &format!("🔄 *UPDATED*: {}", title)
+                                    &format!("*UPDATED*: {}\n_it was a re-announcement._", title)
                                 ).await;
                             }
                             return;
@@ -850,7 +850,7 @@ async fn handle_ai_classification(
                             if let Some(debug_id) = debug_clone {
                                 let _ = send_reply(
                                     &debug_id,
-                                    &format!("🔄 *UPDATED*: {}", updated.title)
+                                    &format!("*UPDATED*: {}\n_{}_", updated.title, changes)
                                 ).await;
                             }
                         }
@@ -961,7 +961,7 @@ async fn handle_single_assignment(
                                 };
                                 let _ = send_reply(
                                     debug_id, 
-                                    &format!("{}🔄 *UPDATED*: {}", prefix, title_clone)
+                                    &format!("{} *UPDATED*: {}\n_found the duplicate._", prefix, title_clone)
                                 ).await;
                             }
                         }
