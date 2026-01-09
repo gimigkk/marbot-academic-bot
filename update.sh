@@ -19,6 +19,11 @@ if [ ! -f .env ]; then
     exit 1
 fi
 
+# Discard any local changes (they'll be overwritten by the update anyway)
+log "🧹 Discarding local changes..."
+git reset --hard HEAD
+git clean -fd
+
 # Pull latest code (handle force pushes)
 log "📥 Pulling latest code from GitHub..."
 git fetch origin
