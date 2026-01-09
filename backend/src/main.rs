@@ -379,23 +379,38 @@ async fn webhook(
     // ============= CLARIFICATION HANDLER =============
     if let Some(quoted) = payload.payload.get_quoted_message() {
         let is_clarification_reply = quoted.text.contains("*[PERLU KLARIFIKASI]*") 
-            || quoted.text.contains("ID:") && quoted.text.contains("```");
+            || (quoted.text.contains("ID:") && quoted.text.contains("```"));
         
         if is_clarification_reply {
             println!("📝 Clarification response detected from {}", sender_phone);
             
+            // 1. Extract ID Assignment dari pesan yang di-reply
             if let Some(assignment_id) = clarification::extract_assignment_id_from_message(&quoted.text) {
-                // Get current year for date parsing
-                let current_year = chrono::Local::now().year();
                 
-                // Get the current assignment to check existing deadline
-                let current_assignment = crud::get_assignment_with_course_by_id(&state.pool, assignment_id).await.ok().flatten();
+                // 2. Ambil data assignment saat ini dari database
+                let current_assignment = crud::get_assignment_with_course_by_id(&state.pool, assignment_id)
+                    .await
+                    .ok()
+                    .flatten();
+
                 let current_deadline = current_assignment.as_ref()
                     .and_then(|a| a.deadline)
                     .map(|dt| dt.naive_utc());
 
-                // Parse the clarification response
-                match clarification::parse_clarification_response(&payload.payload.body, current_year, current_deadline) {
+                // 3. Identifikasi field apa yang hilang (PENTING untuk konteks AI)
+                let missing_fields = if let Some(ref a) = current_assignment {
+                    clarification::identify_missing_fields(a)
+                } else {
+                    Vec::new()
+                };
+
+                // 4. Parse Jawaban User menggunakan AI (Async)
+                // Note: Kita menggunakan modul 'clarification', bukan 'clarification_ai'
+                match clarification::parse_clarification_response(
+                    &payload.payload.body, 
+                    current_deadline, 
+                    &missing_fields
+                ).await {
                     Ok(updates) => {
                         // Extract fields from updates HashMap
                         let new_deadline = updates.get("deadline")
@@ -403,7 +418,7 @@ async fn webhook(
                         let new_title = updates.get("title").cloned();
                         let new_description = updates.get("description").cloned();
                         
-                        // ✅ Parse parallel_codes from comma-separated string
+                        // Parse parallel_codes
                         let new_parallel_codes = updates.get("parallel_codes")
                             .map(|codes_str| {
                                 codes_str.split(',')
@@ -429,7 +444,7 @@ async fn webhook(
                             None
                         };
 
-                        // Update the assignment
+                        // Update Database
                         match crud::update_assignment_fields(
                             &state.pool,
                             assignment_id,
@@ -440,7 +455,7 @@ async fn webhook(
                             None,
                         ).await {
                             Ok(_) => {
-                                // Update course_id if provided
+                                // Update course_id jika ada perubahan
                                 if let Some(cid) = course_id {
                                     let _ = sqlx::query("UPDATE assignments SET course_id = $1 WHERE id = $2")
                                         .bind(cid)
@@ -449,11 +464,10 @@ async fn webhook(
                                         .await;
                                 }
                                 
-                                // Fetch complete updated assignment for confirmation
+                                // Konfirmasi Berhasil
                                 if let Ok(Some(full_assignment)) = crud::get_assignment_with_course_by_id(&state.pool, assignment_id).await {
                                     let deadline_display = full_assignment.deadline
                                         .map(|d| {
-                                            // Convert UTC to Indonesia timezone (GMT+7)
                                             let indonesia_time = d + ChronoDuration::hours(7);
                                             indonesia_time.format("%Y-%m-%d %H:%M WIB").to_string()
                                         })
@@ -461,7 +475,7 @@ async fn webhook(
 
                                     let response = format!(
                                         "*[KLARIF TERSIMPAN]*\n\
-                                        _Terima kasih atas klarifikasinya!_\n\
+                                        _Terima kasih! Data berhasil diperbarui._\n\
                                         \n\
                                         📝 *{}*\n\
                                         📚 {}\n\
@@ -470,23 +484,24 @@ async fn webhook(
                                         🧩 Parallel: {}",
                                         full_assignment.title,
                                         full_assignment.course_name,
-                                        full_assignment.description.as_deref().unwrap_or("(tidak ada deskripsi)"),
+                                        full_assignment.description.as_deref().unwrap_or("-"),
                                         deadline_display,
                                         full_assignment.format_parallel_display()
                                     );
                                     
                                     let _ = send_reply(chat_id, &response).await;
                                 } else {
-                                    let _ = send_reply(chat_id, "✅ *KLARIFIKASI TERSIMPAN*\n\n_Terima kasih atas klarifikasinya!_").await;
+                                    let _ = send_reply(chat_id, "✅ *KLARIFIKASI TERSIMPAN*").await;
                                 }
                             }
                             Err(e) => {
-                                let error_msg = format!("❌ Gagal menyimpan: {}", e);
+                                let error_msg = format!("❌ Gagal menyimpan database: {}", e);
                                 let _ = send_reply(chat_id, &error_msg).await;
                             }
                         }
                     }
                     Err(err_type) => {
+                        // Handle Error dari AI Parser
                         match err_type.as_str() {
                             "cancelled" => {
                                 let cancel_msg = clarification::generate_cancellation_message(assignment_id);
@@ -501,7 +516,7 @@ async fn webhook(
                                 let _ = send_reply(chat_id, &no_date_msg).await;
                             }
                             _ => {
-                                let _ = send_reply(chat_id, "❌ Terjadi kesalahan saat memproses klarifikasi.").await;
+                                let _ = send_reply(chat_id, "❌ Maaf, aku tidak mengerti format pesanmu.").await;
                             }
                         }
                     }
@@ -509,7 +524,7 @@ async fn webhook(
 
                 return StatusCode::OK;
             } else {
-                println!("⚠️  Could not extract assignment ID from quoted message");
+                println!("⚠️ Could not extract assignment ID from quoted message");
                 return StatusCode::OK;
             }
         }
