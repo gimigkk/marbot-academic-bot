@@ -1,7 +1,5 @@
 #!/bin/bash
 
-set -e  # Exit on error
-
 LOG_FILE="/var/log/marbot-update.log"
 
 log() {
@@ -15,47 +13,57 @@ send_whatsapp_message() {
     local waha_url="$3"
     local api_key="$4"
     
-    curl -s -X POST "${waha_url}/api/sendText" \
+    # Escape message for JSON
+    local escaped_msg=$(echo "$message" | sed 's/\\/\\\\/g' | sed 's/"/\\"/g' | sed 's/`/\\`/g')
+    
+    local response=$(curl -s -X POST "${waha_url}/api/sendText" \
         -H "X-Api-Key: ${api_key}" \
         -H "Content-Type: application/json" \
         -d "{
             \"session\": \"default\",
             \"chatId\": \"${chat_id}\",
-            \"text\": \"${message}\"
-        }" > /dev/null 2>&1
+            \"text\": \"${escaped_msg}\"
+        }")
+    
+    log "📱 WhatsApp API Response: $response"
 }
 
-# Trap errors and send failure message
-trap 'handle_error $?' EXIT
-
+# Handle errors
 handle_error() {
     local exit_code=$1
+    local line_number=$2
     
-    if [ $exit_code -ne 0 ]; then
-        local error_msg="❌ *MARBOT UPDATE FAILED*%0A%0A"
-        error_msg+="📅 $(date '+%Y-%m-%d %H:%M:%S')%0A"
-        error_msg+="🔴 Exit code: ${exit_code}%0A%0A"
-        
-        if [ -n "$COMMIT_MSG" ]; then
-            error_msg+="📝 Last commit:%0A\`\`\`${COMMIT_MSG}\`\`\`%0A%0A"
-        fi
-        
-        error_msg+="🔍 Check logs: \`tail -f /var/log/marbot-update.log\`"
-        
-        # Load env vars if not already loaded
-        if [ -f /opt/marbot-academic-bot/.env ]; then
-            set -a
-            source /opt/marbot-academic-bot/.env
-            set +a
-        fi
-        
-        if [ -n "$DEBUG_GROUP_ID" ] && [ -n "$WAHA_URL" ] && [ -n "$WAHA_API_KEY" ]; then
-            send_whatsapp_message "$error_msg" "$DEBUG_GROUP_ID" "$WAHA_URL" "$WAHA_API_KEY"
-        fi
-        
-        log "❌ Update failed with exit code $exit_code"
+    log "❌ Update failed at line $line_number with exit code $exit_code"
+    
+    local error_msg="❌ *MARBOT UPDATE FAILED*\n\n"
+    error_msg+="📅 $(date '+%Y-%m-%d %H:%M:%S')\n"
+    error_msg+="🔴 Exit code: ${exit_code}\n"
+    error_msg+="📍 Failed at line: ${line_number}\n\n"
+    
+    if [ -n "$COMMIT_MSG" ]; then
+        error_msg+="📝 Attempted commit:\n\`\`\`${COMMIT_MSG}\`\`\`\n\n"
+    fi
+    
+    error_msg+="🔍 Check logs:\n\`tail -f /var/log/marbot-update.log\`"
+    
+    # Load env vars if not already loaded
+    if [ -f /opt/marbot-academic-bot/.env ]; then
+        set -a
+        source /opt/marbot-academic-bot/.env 2>/dev/null
+        set +a
+    fi
+    
+    if [ -n "$DEBUG_GROUP_ID" ] && [ -n "$WAHA_URL" ] && [ -n "$WAHA_API_KEY" ]; then
+        log "📱 Sending failure notification to WhatsApp..."
+        send_whatsapp_message "$error_msg" "$DEBUG_GROUP_ID" "$WAHA_URL" "$WAHA_API_KEY"
+    else
+        log "⚠️  Cannot send WhatsApp notification: Missing env vars"
     fi
 }
+
+# Set up error trap
+set -E
+trap 'handle_error $? $LINENO' ERR
 
 log "🔄 Starting MARBOT update..."
 
@@ -69,9 +77,15 @@ if [ ! -f .env ]; then
 fi
 
 # Load environment variables
+log "📋 Loading environment variables..."
 set -a
 source .env
 set +a
+
+# Verify required env vars
+if [ -z "$DEBUG_GROUP_ID" ] || [ -z "$WAHA_URL" ] || [ -z "$WAHA_API_KEY" ]; then
+    log "⚠️  Warning: WhatsApp notification env vars not set"
+fi
 
 # Get current commit before update
 OLD_COMMIT=$(git rev-parse --short HEAD)
@@ -92,18 +106,16 @@ BASE=$(git merge-base @ @{u})
 
 if [ "$LOCAL" = "$REMOTE" ]; then
     log "✅ Already up to date"
-    COMMIT_MSG="No changes"
     
     # Send "already up to date" message
-    success_msg="ℹ️ *MARBOT UPDATE*%0A%0A"
-    success_msg+="📅 $(date '+%Y-%m-%d %H:%M:%S')%0A"
-    success_msg+="✅ Already up to date%0A%0A"
-    success_msg+="📌 Current commit: \`${OLD_COMMIT}\`"
+    up_to_date_msg="ℹ️ *MARBOT UPDATE*\n\n"
+    up_to_date_msg+="📅 $(date '+%Y-%m-%d %H:%M:%S')\n"
+    up_to_date_msg+="✅ Already up to date\n\n"
+    up_to_date_msg+="📌 Current commit: \`${OLD_COMMIT}\`"
     
-    send_whatsapp_message "$success_msg" "$DEBUG_GROUP_ID" "$WAHA_URL" "$WAHA_API_KEY"
+    log "📱 Sending 'up to date' notification..."
+    send_whatsapp_message "$up_to_date_msg" "$DEBUG_GROUP_ID" "$WAHA_URL" "$WAHA_API_KEY"
     
-    # Disable trap and exit normally
-    trap - EXIT
     exit 0
 elif [ "$LOCAL" = "$BASE" ]; then
     log "📥 Fast-forward update"
@@ -118,7 +130,6 @@ fi
 NEW_COMMIT=$(git rev-parse --short HEAD)
 COMMIT_MSG=$(git log -1 --pretty=format:"%s" HEAD)
 COMMIT_AUTHOR=$(git log -1 --pretty=format:"%an" HEAD)
-COMMIT_HASH=$(git log -1 --pretty=format:"%H" HEAD)
 
 log "📝 New commit: ${COMMIT_MSG}"
 log "👤 Author: ${COMMIT_AUTHOR}"
@@ -170,16 +181,19 @@ log "✅ Update completed successfully!"
 log "🎉 Backend restarted, waha session preserved!"
 
 # Send success message to WhatsApp
-success_msg="✅ *MARBOT UPDATE SUCCESS*%0A%0A"
-success_msg+="📅 $(date '+%Y-%m-%d %H:%M:%S')%0A"
-success_msg+="🔄 ${OLD_COMMIT} → ${NEW_COMMIT}%0A%0A"
-success_msg+="📝 Commit message:%0A\`\`\`${COMMIT_MSG}\`\`\`%0A%0A"
-success_msg+="👤 Author: ${COMMIT_AUTHOR}%0A"
+success_msg="✅ *MARBOT UPDATE SUCCESS*\n\n"
+success_msg+="📅 $(date '+%Y-%m-%d %H:%M:%S')\n"
+success_msg+="🔄 ${OLD_COMMIT} → ${NEW_COMMIT}\n\n"
+success_msg+="📝 Commit message:\n\`\`\`${COMMIT_MSG}\`\`\`\n\n"
+success_msg+="👤 Author: ${COMMIT_AUTHOR}\n"
 success_msg+="🎉 Backend restarted successfully!"
 
+log "📱 Sending success notification to WhatsApp..."
 send_whatsapp_message "$success_msg" "$DEBUG_GROUP_ID" "$WAHA_URL" "$WAHA_API_KEY"
 
-log "📱 Success notification sent to WhatsApp"
+log "📱 Success notification sent!"
 
-# Disable trap since we're exiting normally
-trap - EXIT
+# Disable error trap before clean exit
+trap - ERR
+
+exit 0
