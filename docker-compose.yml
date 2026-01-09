@@ -36,6 +36,10 @@ services:
       WHATSAPP_HOOK_URL: http://backend:3000/webhook
       WHATSAPP_HOOK_EVENTS: message.any
       WHATSAPP_DEFAULT_ENGINE: NOWEB
+      WAHA_DASHBOARD_USERNAME: admin
+      WAHA_DASHBOARD_PASSWORD: admin
+      WHATSAPP_SWAGGER_USERNAME: admin
+      WHATSAPP_SWAGGER_PASSWORD: admin
     volumes:
       - ./waha/.waha:/app/.waha
     ports:
