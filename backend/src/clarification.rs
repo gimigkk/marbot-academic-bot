@@ -109,7 +109,7 @@ pub fn generate_clarification_messages(
                 tips.push("• Update waktu saja: kirim `08:00` atau `14.30`");
             }
             "parallel_codes" => {
-                tips.push("• Parallel: `K1`, `K2`, `K1, K2` (pisah pakai koma), atau `all` untuk semua kelas");
+                tips.push("• Parallel: `K1`, `K2`, `K1 P1`, atau `all` untuk semua kelas");
             }
             "title" => {
                 tips.push("• Title: beri nama yang jelas dan spesifik");
@@ -132,8 +132,8 @@ pub fn generate_clarification_messages(
     };
 
     let template_message = format!(
-        "_(Reply pesan ini dengan info yang kurang)_{}",
-        tips_section  // Conditionally added!
+        "{}\n_(Reply pesan ini dengan info yang kurang)_",
+        tips_section  // Conditionally added
     );
     
     (info_message, template_message)
