@@ -535,17 +535,22 @@ async fn webhook(
                         eprintln!("❌ Failed to send reply: {}", e);
                     }
                 }
-                CommandResponse::ForwardMessage { message_ids, warning } => {
+                CommandResponse::ForwardMessage {message_ids} => {
+                    let mut fails = 0;
+
                     for message_id in &message_ids {
                         if let Err(e) = forward_message(chat_id, message_id).await {
                             eprintln!("❌ Failed to forward message {}: {}", message_id, e);
+                            fails += 1;
                             // Continue to next message
                         }
                     }
 
-                    // Always try to send warning
-                    if let Err(e) = send_reply(chat_id, &warning).await {
-                        eprintln!("❌ Failed to send warning: {}", e);
+                    if fails > 0{
+                        let error_msg = format!("❌ _Gagal forward [{}] pesan!_", fails);
+                        if let Err(e) = send_reply(chat_id, &error_msg).await {
+                            eprintln!("❌ Failed to send reply: {}", e);
+                        }
                     }
                 }
             }

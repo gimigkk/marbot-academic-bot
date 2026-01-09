@@ -16,7 +16,7 @@ use std::time::Instant;
 /// Handle bot commands and return response text or forward action
 pub enum CommandResponse {
     Text(String),
-    ForwardMessage { message_ids: Vec<String>, warning: String },
+    ForwardMessage { message_ids: Vec<String>},
 }
 
 /// Get current time in GMT+7 (Indonesian timezone)
@@ -213,47 +213,33 @@ pub async fn handle_command(
 
                         let message_ids = assignment.message_ids.clone();
 
-                        let status = status_dot(&assignment.deadline);
-                        let done_status = if assignment.is_completed { 
-                            "✅ SUDAH SELESAI" 
-                        } else { 
-                            "⬜ BELUM SELESAI" 
-                        };
+                        // let status = status_dot(&assignment.deadline);
+                        // let done_status = if assignment.is_completed { 
+                        //     "✅ SUDAH SELESAI" 
+                        // } else { 
+                        //     "⬜ BELUM SELESAI" 
+                        // };
                         
-                        let due_text = humanize_deadline(&assignment.deadline);
+                        // let due_text = humanize_deadline(&assignment.deadline);
 
-                        let course = sanitize_wa_md(&assignment.course_name);
-                        let title = sanitize_wa_md(&assignment.title);
+                        // let course = sanitize_wa_md(&assignment.course_name);
+                        // let title = sanitize_wa_md(&assignment.title);
 
-                        let desc_full = assignment
-                            .description
-                            .as_ref()
-                            .map(|d| sanitize_wa_md(d))
-                            .map(|d| d.trim().to_string())
-                            .filter(|d| !d.is_empty())
-                            .unwrap_or_else(|| "—".to_string());
+                        // let desc_full = assignment
+                        //     .description
+                        //     .as_ref()
+                        //     .map(|d| sanitize_wa_md(d))
+                        //     .map(|d| d.trim().to_string())
+                        //     .filter(|d| !d.is_empty())
+                        //     .unwrap_or_else(|| "—".to_string());
 
-                        let code_line = if !assignment.parallel_codes.is_empty() {
-                            format!("\n🧩 Parallel: {}", assignment.format_parallel_display())
-                        } else {
-                            String::new()
-                        };
+                        // let code_line = if !assignment.parallel_codes.is_empty() {
+                        //     format!("\n🧩 Parallel: {}", assignment.format_parallel_display())
+                        // } else {
+                        //     String::new()
+                        // };
 
-                        CommandResponse::ForwardMessage {
-                            message_ids,
-                            warning: format!(
-                                "🧾 *Detail Tugas #{}*\nStatus: {}\n\n{} *{}*\n📌 {}\n⏰ Deadline: {}\n📝 {}{}\n\n\
-                                _Keterangan: 🔴 deadline 0–2 hari lagi • 🟢 deadline > 2 hari_",
-                                index,
-                                done_status,
-                                status,
-                                title,
-                                course,
-                                due_text,
-                                desc_full,
-                                code_line
-                            ),
-                        }
+                        CommandResponse::ForwardMessage {message_ids}
                     }
                 }
                 Err(e) => {
