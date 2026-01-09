@@ -37,7 +37,8 @@ jobs:
             {
               "session": "default",
               "chatId": "${{ secrets.DEBUG_GROUP_ID }}",
-              "text": "[MARBOT UPDATE SUCCESS]\n\n🔄 ${{ github.event.head_commit.message }}\n👤 Author: ${{ github.event.head_commit.author.name }}\n\n[View commit]\n${{ github.event.head_commit.url }}"
+              "text": "*[MARBOT UPDATE SUCCESS]*\n_${{ github.event.head_commit.message }}_\n\n[Merged by ${{ github.event.head_commit.author.name }}]\n${{ github.event.head_commit.url }}",
+              "linkPreview": false
             }
       
       - name: 📱 Send Failure Notification to WhatsApp
@@ -50,17 +51,18 @@ jobs:
             {
               "session": "default",
               "chatId": "${{ secrets.DEBUG_GROUP_ID }}",
-              "text": "[MARBOT UPDATE FAILED]\n\n🔴 ${{ github.event.head_commit.message }}\n👤 Author: ${{ github.event.head_commit.author.name }}\n\n[View workflow run]\n${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+              "text": "*[MARBOT UPDATE FAILED]*\n_${{ github.event.head_commit.message }}_\n\n[Attempted by ${{ github.event.head_commit.author.name }}]\n${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}",
+              "linkPreview": false
             }
       
       - name: 📊 Deployment Summary
         if: always()
         run: |
           if [ "${{ job.status }}" == "success" ]; then
-            echo "✅ Deployment successful!"
-            echo "📝 Commit: ${{ github.event.head_commit.message }}"
-            echo "👤 Author: ${{ github.event.head_commit.author.name }}"
+            echo -e "\033[32m✅ Deployment successful!\033[0m"
+            echo -e "\033[36m📝 Commit:\033[0m ${{ github.event.head_commit.message }}"
+            echo -e "\033[35m👤 Author:\033[0m ${{ github.event.head_commit.author.name }}"
           else
-            echo "❌ Deployment failed!"
-            echo "📝 Failed commit: ${{ github.event.head_commit.message }}"
+            echo -e "\033[31m❌ Deployment failed!\033[0m"
+            echo -e "\033[33m📝 Failed commit:\033[0m ${{ github.event.head_commit.message }}"
           fi
