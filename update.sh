@@ -19,9 +19,25 @@ if [ ! -f .env ]; then
     exit 1
 fi
 
-# Pull latest code
+# Pull latest code (handle force pushes)
 log "📥 Pulling latest code from GitHub..."
-git pull origin main
+git fetch origin
+
+# Check if it's a force push
+LOCAL=$(git rev-parse @)
+REMOTE=$(git rev-parse @{u})
+BASE=$(git merge-base @ @{u})
+
+if [ "$LOCAL" = "$REMOTE" ]; then
+    log "✅ Already up to date"
+elif [ "$LOCAL" = "$BASE" ]; then
+    log "📥 Fast-forward update"
+    git pull origin main
+else
+    log "⚠️  Force push detected, resetting to origin/main"
+    git reset --hard origin/main
+    git clean -fd
+fi
 
 # Load environment variables for the build
 set -a

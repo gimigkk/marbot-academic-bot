@@ -30,6 +30,7 @@ pub async fn extract_with_ai(
     sender_id: &str,
     pool: &PgPool,
     quoted_message: Option<&str>,  
+    quoted_message_id: Option<&str>,
 ) -> Result<AIClassification, String> {
     let current_datetime = get_current_datetime();
     let current_date = get_current_date();
@@ -74,7 +75,8 @@ pub async fn extract_with_ai(
         sender_id, 
         pool, 
         &*SCHEDULE_ORACLE,
-        quoted_message  
+        quoted_message,
+        quoted_message_id
     ).await {
         Ok(ctx) => {
             // Build a detailed, compact context summary with per-parallel schedules

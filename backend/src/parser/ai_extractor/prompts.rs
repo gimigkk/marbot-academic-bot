@@ -6,15 +6,15 @@ use super::context_builder::{MessageContext};
 
 /// Build assignment context list for the prompt
 fn build_context_assignments_list(
-    active_assignments: &[Assignment],
+    assignments: &[Assignment],
     course_map: &HashMap<Uuid, String>
 ) -> String {
-    if active_assignments.is_empty() {
-        return "No active assignments in database.".to_string();
+    if assignments.is_empty() {
+        return "No assignment in database.".to_string();
     }
     
-    let assignments_to_show = active_assignments.iter().take(100);
-    let count = active_assignments.len().min(100);
+    let assignments_to_show = assignments.iter().take(20);
+    let count = assignments.len().min(20);
     
     let list = assignments_to_show
         .map(|a| {
@@ -41,8 +41,8 @@ fn build_context_assignments_list(
         .collect::<Vec<_>>()
         .join("\n");
     
-    if active_assignments.len() > 100 {
-        format!("{}\n(Showing {} most recent out of {} total active assignments)", list, count, active_assignments.len())
+    if assignments.len() > 20 {
+        format!("{}\n(Showing {} most recent out of {} total assignments)", list, count, assignments.len())
     } else {
         list
     }
@@ -61,13 +61,13 @@ fn truncate_for_log(text: &str, max_len: usize) -> String {
 pub fn build_classification_prompt(
     text: &str, 
     available_courses: &str, 
-    active_assignments: &[Assignment],
+    assignments: &[Assignment],
     course_map: &HashMap<Uuid, String>,
     current_datetime: &str, 
     current_date: &str,
     context: Option<&MessageContext>,
 ) -> String {
-    let assignments_context = build_context_assignments_list(active_assignments, course_map);
+    let assignments_context = build_context_assignments_list(assignments, course_map);
 
     let gmt7 = FixedOffset::east_opt(7 * 3600).unwrap();
     let now = Utc::now().with_timezone(&gmt7);
@@ -199,7 +199,7 @@ Message to classify: "{}"
 Available courses:
 {}
 
-Active assignments (recent):
+Recent Assignments:
 {}{}
 
 ═══════════════════════════════════════════════════════════════════
@@ -353,6 +353,7 @@ COMMON ABBREVIATIONS IN INFORMAL MESSAGES:
 - "dl" typically means "deadline", not "dulu" (first/earlier)
 - Context: "tugas X dl besok" → assignment X, deadline tomorrow
 - Parse abbreviations based on context and position in sentence
+- "class" typically means class.ipb.ac.id while "kelas" means an offline classroom/lecture/pertemuan
 
 1. WHEN-DURING patterns ("ketika", "saat", "during"):
    IF message says "ketika praktikum"/"saat kelas"/"during class"/"waktu pertemuan":
@@ -396,6 +397,7 @@ DESCRIPTION FIELD (MANDATORY):
 - Generate meaningful description from message content
 - Include submission details if mentioned
 - If minimal info: "[Course] assignment - [brief context]"
+- If has enough info: "[helpful context outside of the title]"
 
 ═══════════════════════════════════════════════════════════════════
 OUTPUT FORMATS
@@ -535,6 +537,7 @@ Return ONLY valid JSON. No markdown, no explanations."#,
         current_time, changes, keywords, parallel_info, assignments_list
     )
 }
+
 
 /// Build a STRICT duplicate detection prompt
 pub fn build_duplicate_detection_prompt(

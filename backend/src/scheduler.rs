@@ -3,7 +3,7 @@ use tokio_cron_scheduler::{Job, JobScheduler, JobSchedulerError};
 use sqlx::PgPool;
 use crate::database::crud;
 use crate::models::{SendTextRequest, SendImageRequest, FileContent}; 
-use chrono::{DateTime, Datelike, Local, NaiveDate, Utc};
+use chrono::{DateTime, Datelike, NaiveDate, Utc};
 
 pub async fn start_scheduler(pool: PgPool) -> Result<(), JobSchedulerError> {
     let sched = JobScheduler::new().await?;
