@@ -457,15 +457,14 @@ async fn webhook(
                                         .unwrap_or("(belum ditentukan)".to_string());
 
                                     let response = format!(
-                                        "*[KLARIFIKASI TERSIMPAN]*\n\
+                                        "*[KLARIF TERSIMPAN]*\n\
+                                        _Terima kasih atas klarifikasinya!_\n\
                                         \n\
                                         📝 *{}*\n\
                                         📚 {}\n\
                                         📄 {}\n\
                                         ⏰ {}\n\
-                                        🧩 Parallel: {}\n\
-                                        \n\
-                                        _Terima kasih atas klarifikasinya!_",
+                                        🧩 Parallel: {}",
                                         full_assignment.title,
                                         full_assignment.course_name,
                                         full_assignment.description.as_deref().unwrap_or("(tidak ada deskripsi)"),
