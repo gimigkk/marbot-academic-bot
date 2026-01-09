@@ -2,48 +2,37 @@
 use tokio_cron_scheduler::{Job, JobScheduler, JobSchedulerError};
 use sqlx::PgPool;
 use crate::database::crud;
-use crate::models::{SendTextRequest, SendImageRequest, FileContent}; 
-use chrono::{DateTime, Datelike, NaiveDate, Utc};
+use crate::models::SendTextRequest;
+use chrono::{DateTime, Datelike, Local, NaiveDate, Utc};
 
 pub async fn start_scheduler(pool: PgPool) -> Result<(), JobSchedulerError> {
     let sched = JobScheduler::new().await?;
 
-    // 1. REMINDER HARIAN (UTC TIME)    
-    // URL Gambar untuk Pagi & Sore (Versi Raw Github)
-    let image_pagi = "https://raw.githubusercontent.com/gimigkk/marbot-academic-bot/6b2b72dca7ca954fe5e8eef81649d9fff24515c9/asset/pagi.jpg"; 
-    let image_sore = "https://raw.githubusercontent.com/gimigkk/marbot-academic-bot/6b2b72dca7ca954fe5e8eef81649d9fff24515c9/asset/malam.jpg";
-
+    // 1. REMINDER HARIAN (UTC TIME)
     // 07:00 WIB = 00:00 UTC
     let pool_pagi = pool.clone();
-    let img_pagi_url = image_pagi.to_string();
     sched.add(Job::new_async("0 0 0 * * *", move |_uuid, _l| {
         let pool = pool_pagi.clone();
-        let img = img_pagi_url.clone();
         Box::pin(async move {
             println!("⏰ REMINDER PAGI (00:00 UTC / 07:00 WIB):");
-            if let Err(e) = run_reminder_task(pool, "☀️ Selamat pagi Ilkomers!", Some(img)).await {
+            if let Err(e) = run_reminder_task(pool, "☀️ Selamat pagi Ilkomers!").await {
                 eprintln!("❌ Error reminder pagi: {}", e);
             }
         })
     })?).await?;
 
-    // === MODIFIKASI UNTUK TESTING (TIAP 2 MENIT) ===
+    // 17:00 WIB = 10:00 UTC
     let pool_sore = pool.clone();
-    let img_sore_url = image_sore.to_string();
-    // Cron: Detik 0, Tiap menit habis dibagi 2 (Example: 18:02, 18:04...)
-    sched.add(Job::new_async("0 */2 * * * *", move |_uuid, _l| {
+    sched.add(Job::new_async("0 0 10 * * *", move |_uuid, _l| {
         let pool = pool_sore.clone();
-        let img = img_sore_url.clone();
         Box::pin(async move {
-            println!("⏰ TEST REMINDER SORE (TIAP 2 MENIT):");
-            // Tambah teks (TESTING) biar jelas
-            if let Err(e) = run_reminder_task(pool, "🌇 Selamat sore Ilkomers! (TESTING)", Some(img)).await {
+            println!("⏰ REMINDER SORE (10:00 UTC / 17:00 WIB):");
+            if let Err(e) = run_reminder_task(pool, "🌇 Selamat sore Ilkomers!").await {
                 eprintln!("❌ Error reminder sore: {}", e);
             }
         })
     })?).await?;
 
-   
     // 2. REMINDER DEADLINE MEPET (H-1 JAM)
     // Cek setiap 10 menit (Menit ke-1, 11, 21, dst)
     let pool_urgent = pool.clone();
@@ -62,12 +51,7 @@ pub async fn start_scheduler(pool: PgPool) -> Result<(), JobSchedulerError> {
 
 // --- LOGIC REMINDER HARIAN ---
 
-async fn run_reminder_task(
-    pool: PgPool, 
-    greeting: &str, 
-    image_url: Option<String> 
-) -> Result<(), Box<dyn std::error::Error>> {
-    
+async fn run_reminder_task(pool: PgPool, greeting: &str) -> Result<(), Box<dyn std::error::Error>> {
     let assignments = crud::get_active_assignments_sorted(&pool).await?;
 
     if assignments.is_empty() {
@@ -105,14 +89,11 @@ async fn run_reminder_task(
     }
 
     message.push_str("_Semangat!_ 💪");
-    
-    // Panggil fungsi kirim dengan opsi gambar
-    send_to_channels(message, image_url).await
+    send_to_channels(message).await
 }
 
-// --- LOGIC REMINDER H-1 JAM ---
+// REMINDER H-1 JAM  ---
 async fn check_urgent_deadlines(pool: PgPool) -> Result<(), Box<dyn std::error::Error>> {
-    // 1. Range: Sekarang s.d. 1 jam ke depan (UTC)
     let now = Utc::now();
     let one_hour_later = now + chrono::Duration::hours(1);
 
@@ -147,19 +128,19 @@ async fn check_urgent_deadlines(pool: PgPool) -> Result<(), Box<dyn std::error::
         let time_str = deadline_wib.format("%H:%M").to_string();
         
         let message = format!(
-            "⚠️ *JANGAN LUPA KUMPULKAN H-1 JAM* ⚠️\n\n\
+            "⚠️*JANGAN LUPA KUMPULKAN H-1 JAM*⚠️\n\n\
             📌 *{}*\n\
             📚 {}\n\
             ⏰ Deadline: Pukul *{}* WIB\n\
             \n\
-            _Segera kumpulkan sebelum tugas ditutup!_",
+            _Segera kumpulkan!!!!_",
             sanitize_wa_md(&task.title),
             sanitize_wa_md(&task.course_name),
             time_str
         );
 
-        // Kirim Pesan tanpa gambar (None)
-        send_to_channels(message, None).await?;
+        // Kirim Pesan
+        send_to_channels(message).await?;
 
         // Tandai sudah dikirim
         sqlx::query!(
@@ -176,12 +157,7 @@ async fn check_urgent_deadlines(pool: PgPool) -> Result<(), Box<dyn std::error::
 }
 
 // --- HELPER FUNCTIONS ---
-
-async fn send_to_channels(
-    mut message: String,          // Note: tambah 'mut' agar bisa diedit
-    image_url: Option<String>
-) -> Result<(), Box<dyn std::error::Error>> {
-    
+async fn send_to_channels(message: String) -> Result<(), Box<dyn std::error::Error>> {
     let channels_env = std::env::var("ACADEMIC_CHANNELS").unwrap_or_default();
     let target_channels: Vec<&str> = channels_env
         .split(',')
@@ -198,45 +174,19 @@ async fn send_to_channels(
     let waha_url = std::env::var("WAHA_URL").unwrap_or_else(|_| "http://waha:3000".to_string());
     let api_key = std::env::var("WAHA_API_KEY").unwrap_or_else(|_| "devkey123".to_string());
 
-    // --- TRIK LINK PREVIEW (GRATIS) ---
-    // Jika ada gambar, tempelkan URL-nya di paling atas pesan agar WA me-render previewnya.
-    // Kita gunakan invisible char atau spasi agar rapi, tapi URL tetap harus ada di body.
-    if let Some(url) = image_url {
-        // Format: [URL] [Spasi/Newline] [Pesan Asli]
-        // WhatsApp akan mengambil URL pertama untuk dijadikan preview header.
-        message = format!("{}\n\n{}", url, message);
-    }
-
     for chat_id in target_channels {
-        // KITA PAKAI SEND TEXT SAJA (Endpoint /api/sendImage kita tinggalkan karena berbayar)
-        println!("📤 Mengirim reminder (via Link Preview) ke {}...", chat_id);
+        let payload = SendTextRequest {
+            chat_id: chat_id.to_string(),
+            text: message.clone(),
+            session: "default".to_string(),
+        };
 
-        let payload = serde_json::json!({
-            "chatId": chat_id,
-            "text": message,
-            "session": "default",
-            "linkPreview": true // Meminta WAHA/WA untuk merender preview
-        });
-
-        let response = client
+        let _ = client
             .post(format!("{}/api/sendText", waha_url))
             .header("X-Api-Key", &api_key)
             .json(&payload)
             .send()
             .await;
-
-        match response {
-            Ok(res) => {
-                if res.status().is_success() {
-                    println!("✅ Sukses kirim ke {}", chat_id);
-                } else {
-                    let status = res.status();
-                    let body = res.text().await.unwrap_or_default();
-                    eprintln!("❌ WAHA Error [{}]: {}", status, body);
-                }
-            }
-            Err(e) => eprintln!("❌ Koneksi Gagal: {}", e),
-        }
     }
     Ok(())
 }
@@ -256,6 +206,7 @@ fn status_dot(deadline: &Option<DateTime<Utc>>) -> &'static str {
 }
 
 fn days_left(deadline_utc: &DateTime<Utc>) -> i64 {
+    // Force convert both to WIB (+7)
     let wib_offset = chrono::FixedOffset::east_opt(7 * 3600).unwrap();
     let now_wib = Utc::now().with_timezone(&wib_offset).date_naive();
     let due_wib = deadline_utc.with_timezone(&wib_offset).date_naive();
@@ -268,6 +219,7 @@ fn humanize_deadline(deadline: &Option<DateTime<Utc>>) -> String {
     match deadline {
         Some(deadline_utc) => {
             let delta = days_left(deadline_utc);
+            // Format tanggal juga pakai WIB
             let wib_offset = chrono::FixedOffset::east_opt(7 * 3600).unwrap();
             let due_wib = deadline_utc.with_timezone(&wib_offset).date_naive();
             let date_str = format_date_id(due_wib);
