@@ -396,6 +396,7 @@ DESCRIPTION FIELD (MANDATORY):
 - Generate meaningful description from message content
 - Include submission details if mentioned
 - If minimal info: "[Course] assignment - [brief context]"
+- If has enough info: "[helpful context outside of the title]"
 
 ═══════════════════════════════════════════════════════════════════
 OUTPUT FORMATS
