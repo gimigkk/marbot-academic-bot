@@ -15,6 +15,16 @@ jobs:
         with:
           fetch-depth: 2  # Get last 2 commits for comparison
       
+      - name: 📊 Get commit stats
+        id: commit_stats
+        run: |
+          ADDITIONS=$(git show --shortstat | grep -oP '\d+(?= insertion)' || echo "0")
+          DELETIONS=$(git show --shortstat | grep -oP '\d+(?= deletion)' || echo "0")
+          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+          echo "additions=$ADDITIONS" >> $GITHUB_OUTPUT
+          echo "deletions=$DELETIONS" >> $GITHUB_OUTPUT
+          echo "short_sha=$SHORT_SHA" >> $GITHUB_OUTPUT
+      
       - name: 🚀 Deploy to VPS
         id: deploy
         uses: appleboy/ssh-action@v1.0.3
@@ -37,7 +47,7 @@ jobs:
             {
               "session": "default",
               "chatId": "${{ secrets.DEBUG_GROUP_ID }}",
-              "text": "*[MARBOT UPDATE SUCCESS]*\n_${{ github.event.head_commit.message }}_\n\n[Merged by ${{ github.event.head_commit.author.name }}]\n${{ github.event.head_commit.url }}",
+              "text": "*[MARBOT UPDATE SUCCESS]*\n_${{ github.event.head_commit.message }}_\n\n[#${{ steps.commit_stats.outputs.short_sha }} by ${{ github.event.head_commit.author.name }}] +${{ steps.commit_stats.outputs.additions }} -${{ steps.commit_stats.outputs.deletions }}\nhttps://github.com/${{ github.repository }}/commit/${{ steps.commit_stats.outputs.short_sha }}",
               "linkPreview": false
             }
       
@@ -51,7 +61,7 @@ jobs:
             {
               "session": "default",
               "chatId": "${{ secrets.DEBUG_GROUP_ID }}",
-              "text": "*[MARBOT UPDATE FAILED]*\n_${{ github.event.head_commit.message }}_\n\n[Attempted by ${{ github.event.head_commit.author.name }}]\n${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}",
+              "text": "*[MARBOT UPDATE FAILED]*\n_${{ github.event.head_commit.message }}_\n\n[#${{ steps.commit_stats.outputs.short_sha }} by ${{ github.event.head_commit.author.name }}] +${{ steps.commit_stats.outputs.additions }} -${{ steps.commit_stats.outputs.deletions }}\n${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}",
               "linkPreview": false
             }
       
