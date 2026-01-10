@@ -18,11 +18,13 @@ env:
   TEST_LIMIT: ${{ github.event.inputs.test_limit || '' }}
   TEST_CONCURRENCY: "1"
   TEST_DELAY_SECS: "6"  # 6 second delay = max 10 requests/min (safe for all free tiers)
+  TEST_MAX_RETRIES: "5"  # Retry up to 5 times on rate limit
+  TEST_RETRY_DELAY_SECS: "30"  # Wait 30 seconds before retrying on rate limit
 
 jobs:
   integration-test:
     runs-on: ubuntu-latest
-    timeout-minutes: 60  # Generous timeout for rate-limited testing
+    timeout-minutes: 90  # Generous timeout for retries (max: 33 tests × 5 retries × 30s)
     
     services:
       postgres:
@@ -87,8 +89,14 @@ jobs:
       - name: Run tests
         run: |
           cd backend
-          echo "⏱️  Tests run with 6 second delays to respect API rate limits"
-          echo "⏱️  Expected runtime: ~4-6 minutes for 33 tests"
+          echo "⚙️  Test Configuration:"
+          echo "   - 6 second delay between tests"
+          echo "   - Up to 5 retries per test on rate limit"
+          echo "   - 30 second wait before each retry"
+          echo ""
+          echo "⏱️  Expected runtime:"
+          echo "   - Best case: ~4-6 minutes (no rate limits)"
+          echo "   - Worst case: ~15-20 minutes (with retries)"
           cargo test --test integration_tests -- --test-threads=1 --nocapture
         continue-on-error: true
         id: test_run

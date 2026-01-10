@@ -132,12 +132,25 @@ async fn run_all_test_cases() {
         .and_then(|s| s.parse::<u64>().ok())
         .unwrap_or(3);
     
-    println!("⚙️  Concurrency: {} (set TEST_CONCURRENCY to override)", concurrency);
-    println!("⏱️  Delay between tests: {}s (set TEST_DELAY_SECS to override)", delay_secs);
+    let max_retries = std::env::var("TEST_MAX_RETRIES")
+        .ok()
+        .and_then(|s| s.parse::<u32>().ok())
+        .unwrap_or(5);
+    
+    let retry_delay = std::env::var("TEST_RETRY_DELAY_SECS")
+        .ok()
+        .and_then(|s| s.parse::<u64>().ok())
+        .unwrap_or(30);
+    
+    println!("⚙️  Configuration:");
+    println!("   - Concurrency: {} (TEST_CONCURRENCY)", concurrency);
+    println!("   - Delay between tests: {}s (TEST_DELAY_SECS)", delay_secs);
+    println!("   - Max retries on rate limit: {} (TEST_MAX_RETRIES)", max_retries);
+    println!("   - Retry delay: {}s (TEST_RETRY_DELAY_SECS)", retry_delay);
     
     let estimated_time = (limit as u64 * delay_secs) / 60;
     if estimated_time > 0 {
-        println!("⏱️  Estimated runtime: ~{}-{} minutes\n", estimated_time, estimated_time + 2);
+        println!("⏱️  Estimated runtime: ~{}-{} minutes (without retries)\n", estimated_time, estimated_time + 2);
     } else {
         println!();
     }
@@ -167,14 +180,20 @@ async fn run_all_test_cases() {
             test_result.duration_ms = duration;
             
             if test_result.passed {
-                println!("└─ ✅ PASS ({} ms)\n", duration);
+                println!("└─ ✅ PASS ({} ms)", duration);
             } else {
                 println!("└─ ❌ FAIL: Expected '{}', got '{}' ({} ms)", 
                     test_result.expected, test_result.actual, duration);
                 if let Some(ref err) = test_result.error {
-                    println!("   Error: {}\n", err);
+                    let short_err = if err.len() > 80 {
+                        format!("{}...", &err[..80])
+                    } else {
+                        err.clone()
+                    };
+                    println!("   Error: {}", short_err);
                 }
             }
+            println!();
             
             // Delay to respect rate limits
             // In CI: Always add delay to avoid exhausting free tier limits
@@ -379,18 +398,57 @@ async fn run_single_test(pool: &PgPool, test_case: &TestCase) -> TestResult {
     .map(|rows| rows.into_iter().collect())
     .unwrap_or_default();
     
-    // Run AI extraction
-    let result = extract_with_ai(
-        &test_case.message,
-        &courses_list,
-        &assignments,
-        &course_map,
-        None,
-        "test_user_github_actions",
-        pool,
-        test_case.quoted_message.as_deref(),
-        None,
-    ).await;
+    // Retry logic for rate limiting
+    let max_retries = std::env::var("TEST_MAX_RETRIES")
+        .ok()
+        .and_then(|s| s.parse::<u32>().ok())
+        .unwrap_or(5);
+    
+    let retry_delay_secs = std::env::var("TEST_RETRY_DELAY_SECS")
+        .ok()
+        .and_then(|s| s.parse::<u64>().ok())
+        .unwrap_or(30);
+    
+    let mut attempt = 0;
+    let result = loop {
+        attempt += 1;
+        
+        // Run AI extraction
+        let result = extract_with_ai(
+            &test_case.message,
+            &courses_list,
+            &assignments,
+            &course_map,
+            None,
+            "test_user_github_actions",
+            pool,
+            test_case.quoted_message.as_deref(),
+            None,
+        ).await;
+        
+        match result {
+            Ok(classification) => break Ok(classification),
+            Err(e) => {
+                // Check if it's a rate limit error
+                let is_rate_limit = e.contains("rate limit") 
+                    || e.contains("All models failed")
+                    || e.contains("429");
+                
+                if is_rate_limit && attempt < max_retries {
+                    eprintln!("   ⏳ Rate limited, waiting {}s before retry {}/{}", 
+                        retry_delay_secs, attempt, max_retries);
+                    tokio::time::sleep(tokio::time::Duration::from_secs(retry_delay_secs)).await;
+                    continue;
+                } else if is_rate_limit {
+                    eprintln!("   ❌ Rate limit exceeded after {} retries", max_retries);
+                    break Err(format!("Rate limit: Max retries ({}) exceeded", max_retries));
+                } else {
+                    // Non-rate-limit error, don't retry
+                    break Err(e);
+                }
+            }
+        }
+    };
     
     // Process result
     match result {
