@@ -221,18 +221,35 @@ fn humanize_deadline(deadline: &Option<DateTime<Utc>>) -> String {
             let delta = days_left(deadline_utc);
             // Format tanggal juga pakai WIB
             let wib_offset = chrono::FixedOffset::east_opt(7 * 3600).unwrap();
-            let due_wib = deadline_utc.with_timezone(&wib_offset).date_naive();
+            let deadline_wib = deadline_utc.with_timezone(&wib_offset);
+            let due_wib = deadline_wib.date_naive();
             let date_str = format_date_id(due_wib);
+            let time_str = deadline_wib.format("%H:%M").to_string();
 
             match delta {
-                0 => format!("Hari ini ({})", date_str),
+                0 => {
+                    // Calculate hours remaining for today's deadline
+                    let now_utc = Utc::now();
+                    let now_wib = now_utc.with_timezone(&wib_offset);
+                    let duration = deadline_wib.signed_duration_since(now_wib);
+                    let hours_left = duration.num_hours();
+                    
+                    if hours_left > 0 {
+                        format!("{} jam lagi ({})", hours_left, time_str)
+                    } else if hours_left == 0 {
+                        let mins_left = duration.num_minutes();
+                        format!("{} menit lagi ({})", mins_left, time_str)
+                    } else {
+                        format!("Lewat {} jam ({})", hours_left.abs(), time_str)
+                    }
+                },
                 1 => format!("Besok ({})", date_str),
                 d if d >= 2 => format!("H-{} ({})", d, date_str), 
                 -1 => format!("Kemarin ({})", date_str),
                 d => format!("lewat {} hari ({})", d.abs(), date_str),
             }
         }
-        None => "⚠️ Belum ada deadline".to_string()
+        None => "_Belum ada deadline_".to_string()
     }
 }
 
