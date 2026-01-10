@@ -288,8 +288,8 @@ async fn call_gemini_for_clarification(prompt: &str) -> Result<String, String> {
 
     for model in &models {
         let url = format!(
-            "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent?key={}",
-            model, api_key
+            "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent",
+            model
         );
 
         let request_body = serde_json::json!({
@@ -302,7 +302,13 @@ async fn call_gemini_for_clarification(prompt: &str) -> Result<String, String> {
             }
         });
 
-        match client.post(&url).json(&request_body).send().await {
+        match client
+            .post(&url)
+            .header("X-Goog-Api-Key", &api_key)
+            .json(&request_body)
+            .send()
+            .await
+        {
             Ok(response) => {
                 if response.status().is_success() {
                     if let Ok(json) = response.json::<serde_json::Value>().await {
