@@ -271,13 +271,20 @@ async fn try_gemini_models(prompt: &str) -> Result<AIClassification, String> {
             }
         });
         
+        // SECURITY FIX: API key moved from URL to header
         let url = format!(
-            "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent?key={}",
-            model, api_key
+            "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent",
+            model
         );
         
         let client = reqwest::Client::new();
-        let response = match client.post(&url).json(&request_body).send().await {
+        let response = match client
+            .post(&url)
+            .header("X-Goog-Api-Key", &api_key)
+            .json(&request_body)
+            .send()
+            .await
+        {
             Ok(r) => r,
             Err(e) => {
                 eprintln!("│ \x1b[31m❌ REQUEST FAILED\x1b[0m : {} (Gemini {}/{})", model, index + 1, GEMINI_MODELS.len());
@@ -590,9 +597,10 @@ pub async fn match_update_to_assignment(
     }
     
     for (index, model) in GEMINI_MODELS.iter().enumerate() {
+        // SECURITY FIX: API key moved from URL to header
         let url = format!(
-            "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent?key={}",
-            model, api_key
+            "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent",
+            model
         );
         
         let request_body = json!({
@@ -605,7 +613,13 @@ pub async fn match_update_to_assignment(
         });
         
         let client = reqwest::Client::new();
-        let response = match client.post(&url).json(&request_body).send().await {
+        let response = match client
+            .post(&url)
+            .header("X-Goog-Api-Key", &api_key)
+            .json(&request_body)
+            .send()
+            .await
+        {
             Ok(r) => r,
             Err(e) => {
                 eprintln!("│ ❌ Failed     : {} (Attempt {}/{})", model, index + 1, GEMINI_MODELS.len());
@@ -727,9 +741,10 @@ pub async fn check_duplicate_assignment(
     );
     
     for (index, model) in GEMINI_MODELS.iter().enumerate() {
+        // SECURITY FIX: API key moved from URL to header
         let url = format!(
-            "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent?key={}",
-            model, api_key
+            "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent",
+            model
         );
         
         let request_body = serde_json::json!({
@@ -742,7 +757,13 @@ pub async fn check_duplicate_assignment(
         });
         
         let client = reqwest::Client::new();
-        let response = match client.post(&url).json(&request_body).send().await {
+        let response = match client
+            .post(&url)
+            .header("X-Goog-Api-Key", &api_key)
+            .json(&request_body)
+            .send()
+            .await
+        {
             Ok(r) => r,
             Err(_) => continue,
         };
