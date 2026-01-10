@@ -1,0 +1,81 @@
+# .github/workflows/bot-test.yml
+name: Bot Integration Tests
+
+on:
+  workflow_dispatch:
+    inputs:
+      test_count:
+        description: 'Number of tests to run (leave empty for all)'
+        required: false
+        default: ''
+
+env:
+  GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+  GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+  WAHA_API_KEY: ${{ secrets.WAHA_API_KEY }}
+  WAHA_URL: "http://localhost:3000"  # Mock, won't actually use
+  DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres
+  RUST_LOG: info
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30  # Prevent runaway costs
+    
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+      
+      - name: Cache dependencies
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+      
+      - name: Install sqlx-cli
+        run: |
+          cargo install sqlx-cli --no-default-features --features postgres || true
+      
+      - name: Run migrations
+        run: |
+          sqlx migrate run
+      
+      - name: Build test binary
+        run: |
+          cargo build --tests --release
+      
+      - name: Run integration tests
+        run: |
+          cargo test --release --test integration_tests -- --test-threads=1 --nocapture
+        env:
+          TEST_LIMIT: ${{ github.event.inputs.test_count }}
+      
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: test-results
+          path: test-results.json
+          if-no-files-found: warn
