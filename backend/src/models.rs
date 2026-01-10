@@ -249,6 +249,7 @@ pub struct AssignmentWithCourse {
     pub course_name: String,
     pub parallel_codes: Vec<String>,
     pub title: String,
+    pub first_alias: String,
     pub description: Option<String>,
     pub deadline: Option<DateTime<Utc>>,
     pub message_ids: Vec<String>,   

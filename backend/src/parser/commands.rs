@@ -455,9 +455,10 @@ fn format_assignments_list(
 
     for (i, a) in filtered_assignments.iter().enumerate() {
         let status_emoji = status_dot(&a.deadline);
+        let course_alias = format!("{}", &a.first_alias);
         let title_fmt = format!("{}", preview_text(&sanitize_wa_md(&a.title), 25));
         let due_text = humanize_deadline(&a.deadline);
-        let course = sanitize_wa_md(&a.course_name);
+        //let course = sanitize_wa_md(&a.course_name);
 
         let desc_line = a
             .description
@@ -475,7 +476,7 @@ fn format_assignments_list(
         };
         
         response.push_str(&format!("{} *[{}] [{}]*\n", status_emoji, i + 1, title_fmt));
-        response.push_str(&format!("📌 {}\n", course));
+        response.push_str(&format!("📌 {}\n", course_alias));
         response.push_str(&format!("⏰ {}\n", due_text));
         
         if !desc_line.is_empty() {
@@ -544,7 +545,7 @@ fn humanize_deadline(deadline: &Option<DateTime<Utc>>) -> String {
                 d => format!("lewat {} hari ({} {})", d.abs(), date_str, time_str),
             }
         }
-        None => "⚠️ Belum ada deadline".to_string()
+        None => "_Belum ada deadline_".to_string()
     }
 }
 
