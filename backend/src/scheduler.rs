@@ -3,7 +3,7 @@ use tokio_cron_scheduler::{Job, JobScheduler, JobSchedulerError};
 use sqlx::PgPool;
 use crate::database::crud;
 use crate::models::SendTextRequest;
-use chrono::{DateTime, Datelike, Local, NaiveDate, Utc};
+use chrono::{DateTime, Datelike, NaiveDate, Utc};
 
 pub async fn start_scheduler(pool: PgPool) -> Result<(), JobSchedulerError> {
     let sched = JobScheduler::new().await?;
@@ -101,7 +101,7 @@ async fn check_urgent_deadlines(pool: PgPool) -> Result<(), Box<dyn std::error::
     let urgent_tasks = sqlx::query!(
         r#"
         SELECT 
-            a.id, a.title, c.name as course_name, a.deadline
+            a.id, a.title, COALESCE(c.aliases[1], c.name) as "course_name!", a.deadline
         FROM assignments a
         JOIN courses c ON a.course_id = c.id
         WHERE a.deadline > $1 
@@ -135,7 +135,7 @@ async fn check_urgent_deadlines(pool: PgPool) -> Result<(), Box<dyn std::error::
             \n\
             _Segera kumpulkan!!!!_",
             sanitize_wa_md(&task.title),
-            sanitize_wa_md(&task.course_name),
+            &task.course_name,
             time_str
         );
 
