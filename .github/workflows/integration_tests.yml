@@ -17,11 +17,12 @@ env:
   RUST_LOG: info
   TEST_LIMIT: ${{ github.event.inputs.test_limit || '' }}
   TEST_CONCURRENCY: "1"
+  TEST_DELAY_SECS: "6"  # 6 second delay = max 10 requests/min (safe for all free tiers)
 
 jobs:
   integration-test:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 60  # Generous timeout for rate-limited testing
     
     services:
       postgres:
@@ -86,6 +87,8 @@ jobs:
       - name: Run tests
         run: |
           cd backend
+          echo "⏱️  Tests run with 6 second delays to respect API rate limits"
+          echo "⏱️  Expected runtime: ~4-6 minutes for 33 tests"
           cargo test --test integration_tests -- --test-threads=1 --nocapture
         continue-on-error: true
         id: test_run
@@ -117,8 +120,8 @@ jobs:
               (.by_category | to_entries[] | "  \(.key): \(.value.passed)/\(.value.total) (\(.value.success_rate)%)"),
               "",
               (if .failures | length > 0 then
-                "❌ Failed Tests:",
-                (.failures[] | "  • \(.name) [\(.category)]", "    Expected: \(.expected), Got: \(.actual)")
+                "❌ Failed Tests (with errors):",
+                (.failures[] | "  • \(.name) [\(.category)]", "    Expected: \(.expected), Got: \(.actual)", (if .error then "    Error: \(.error)" else "" end))
               else
                 "✅ All tests passed!"
               end)

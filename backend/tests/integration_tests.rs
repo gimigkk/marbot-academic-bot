@@ -127,7 +127,20 @@ async fn run_all_test_cases() {
         .and_then(|s| s.parse::<usize>().ok())
         .unwrap_or(1);
     
-    println!("⚙️  Concurrency: {} (set TEST_CONCURRENCY to override)\n", concurrency);
+    let delay_secs = std::env::var("TEST_DELAY_SECS")
+        .ok()
+        .and_then(|s| s.parse::<u64>().ok())
+        .unwrap_or(3);
+    
+    println!("⚙️  Concurrency: {} (set TEST_CONCURRENCY to override)", concurrency);
+    println!("⏱️  Delay between tests: {}s (set TEST_DELAY_SECS to override)", delay_secs);
+    
+    let estimated_time = (limit as u64 * delay_secs) / 60;
+    if estimated_time > 0 {
+        println!("⏱️  Estimated runtime: ~{}-{} minutes\n", estimated_time, estimated_time + 2);
+    } else {
+        println!();
+    }
     
     let semaphore = Arc::new(Semaphore::new(concurrency));
     let pool = Arc::new(pool);
@@ -163,10 +176,14 @@ async fn run_all_test_cases() {
                 }
             }
             
-            // Delay to respect rate limits (only if running multiple tests)
-            if concurrency > 1 {
-                tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
-            }
+            // Delay to respect rate limits
+            // In CI: Always add delay to avoid exhausting free tier limits
+            let delay_secs = std::env::var("TEST_DELAY_SECS")
+                .ok()
+                .and_then(|s| s.parse::<u64>().ok())
+                .unwrap_or(3);
+            
+            tokio::time::sleep(tokio::time::Duration::from_secs(delay_secs)).await;
             
             test_result
         });
