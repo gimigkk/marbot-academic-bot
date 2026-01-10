@@ -2,7 +2,7 @@ mod core;
 mod prompts;
 mod parsing;
 
-mod schedule_oracle;
+pub mod schedule_oracle;
 mod context_builder;
 
 // ===== MODEL CONFIGURATION =====
