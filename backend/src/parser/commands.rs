@@ -530,15 +530,29 @@ fn humanize_deadline(deadline: &Option<DateTime<Utc>>) -> String {
         Some(deadline_utc) => {
             let gmt7 = FixedOffset::east_opt(7 * 3600).unwrap();
             let deadline_gmt7 = deadline_utc.with_timezone(&gmt7);
-            let now = get_gmt7_now().date_naive();
+            let now_gmt7 = get_gmt7_now();
+            let now = now_gmt7.date_naive();
             let due = deadline_gmt7.date_naive();
             
             let delta = (due - now).num_days();
             let date_str = format_date_id(due);
-            let time_str = deadline_gmt7.format("%H:%M").to_string();  // CHANGED: Removed %d-%m
+            let time_str = deadline_gmt7.format("%H:%M").to_string();
 
             match delta {
-                0 => format!("Hari ini ({} {})", date_str, time_str),
+                0 => {
+                    // Calculate hours remaining
+                    let duration = deadline_gmt7.signed_duration_since(now_gmt7);
+                    let hours_left = duration.num_hours();
+                    
+                    if hours_left > 0 {
+                        format!("{} jam lagi ({})", hours_left, time_str)
+                    } else if hours_left == 0 {
+                        let mins_left = duration.num_minutes();
+                        format!("{} menit lagi ({})", mins_left, time_str)
+                    } else {
+                        format!("Lewat {} jam ({})", hours_left.abs(), time_str)
+                    }
+                },
                 1 => format!("Besok ({} {})", date_str, time_str),
                 d if d >= 2 => format!("H-{} ({} {})", d, date_str, time_str), 
                 -1 => format!("Kemarin ({} {})", date_str, time_str),
