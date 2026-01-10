@@ -191,7 +191,7 @@ pub struct AssignmentData {
     pub title: String,
     pub deadline: Option<String>,
     pub description: Option<String>,
-    pub parallel_codes: Vec<String>,  // ✅ Changed from Option<String>
+    pub parallel_codes: Vec<String>,  
 }
 
 // ===== DATABASE MODELS =====
@@ -217,9 +217,10 @@ pub struct Assignment {
     pub title: String,
     pub description: String,
     pub deadline: Option<DateTime<Utc>>,
-    pub parallel_codes: Vec<String>,  // ✅ Changed from Option<String>
+    pub parallel_codes: Vec<String>,
     pub sender_id: Option<String>,
     pub message_ids: Vec<String>,
+    pub relating_message_content: String,
 }
 
 #[derive(Debug, Clone, FromRow, Serialize, Deserialize)]
@@ -229,7 +230,7 @@ pub struct AssignmentDisplay {
     pub title: String,
     pub description: String,
     pub deadline: Option<DateTime<Utc>>,
-    pub parallel_codes: Vec<String>,  // ✅ Changed from Option<String>
+    pub parallel_codes: Vec<String>,  
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -238,9 +239,10 @@ pub struct NewAssignment {
     pub title: String,
     pub description: String,
     pub deadline: Option<DateTime<Utc>>,
-    pub parallel_codes: Vec<String>,  // ✅ Changed from Option<String>
+    pub parallel_codes: Vec<String>,
     pub sender_id: Option<String>,
     pub message_id: String,
+    pub relating_messages: Vec<String>,
 }
 
 #[derive(Debug, FromRow, Serialize, Deserialize)]
@@ -255,6 +257,7 @@ pub struct AssignmentWithCourse {
     pub message_ids: Vec<String>,   
     pub sender_id: Option<String>, 
     pub is_completed: bool,
+    pub relating_messages: Vec<String>,
 }
 
 impl AssignmentWithCourse {
@@ -269,7 +272,7 @@ impl AssignmentWithCourse {
         } else {
             format!("[{}]", self.parallel_codes
                 .iter()
-                .map(|c| c.to_uppercase())  // ADD .to_uppercase() here
+                .map(|c| c.to_uppercase())  
                 .collect::<Vec<_>>()
                 .join(", "))
         }

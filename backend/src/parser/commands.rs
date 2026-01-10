@@ -1,4 +1,4 @@
-// backend/src/commands.rs - Fixed for Optional Deadline
+// backend/src/commands.rs - Complete rewrite with message resending
 
 use crate::database::crud::{
     get_active_assignments_for_user, 
@@ -13,10 +13,10 @@ use chrono::{DateTime, Duration, FixedOffset, Datelike, NaiveDate, Utc};
 use sqlx::PgPool;
 use std::time::Instant;
 
-/// Handle bot commands and return response text or forward action
+/// Command response - can be text or multiple messages to resend
 pub enum CommandResponse {
     Text(String),
-    ForwardMessage { message_ids: Vec<String>, summary: String},
+    ResendMessages { messages: Vec<String>, summary: String },
 }
 
 /// Get current time in GMT+7 (Indonesian timezone)
@@ -203,7 +203,8 @@ pub async fn handle_command(
                     } else {
                         let assignment = &incomplete[idx];
 
-                        if assignment.message_ids.is_empty() {
+                        // Check if we have stored messages
+                        if assignment.relating_messages.is_empty() {
                             return CommandResponse::Text(
                                 "❌ Pesan asli untuk tugas ini belum tersimpan.\n\
                                 Coba cek daftar dengan *#todo*."
@@ -211,11 +212,8 @@ pub async fn handle_command(
                             );
                         }
 
-                        let message_ids = assignment.message_ids.clone();
-
                         let status = status_dot(&assignment.deadline);
                         let due_text = humanize_deadline(&assignment.deadline);
-                        // let course = sanitize_wa_md(&assignment.course_name);
                         let title = sanitize_wa_md(&assignment.title);
                         let desc_full = assignment
                             .description
@@ -228,7 +226,7 @@ pub async fn handle_command(
                         let code_line = if !assignment.parallel_codes.is_empty() {
                             format!("{}", assignment.format_parallel_display())
                         } else {
-                            format!("null")
+                            "null".to_string()
                         };
 
                         let summary = format!(
@@ -240,7 +238,11 @@ pub async fn handle_command(
                             due_text
                         );
 
-                        CommandResponse::ForwardMessage {message_ids, summary}
+                        // Return messages to be resent
+                        CommandResponse::ResendMessages {
+                            messages: assignment.relating_messages.clone(),
+                            summary,
+                        }
                     }
                 }
                 Err(e) => {
@@ -458,7 +460,6 @@ fn format_assignments_list(
         let course_alias = format!("{}", &a.first_alias);
         let title_fmt = format!("{}", preview_text(&sanitize_wa_md(&a.title), 25));
         let due_text = humanize_deadline(&a.deadline);
-        //let course = sanitize_wa_md(&a.course_name);
 
         let desc_line = a
             .description
@@ -513,7 +514,7 @@ fn status_dot(deadline: &Option<DateTime<Utc>>) -> &'static str {
                 "🟢"
             }
         }
-        None => "⚪" // No deadline set
+        None => "⚪"
     }
 }
 
@@ -540,7 +541,6 @@ fn humanize_deadline(deadline: &Option<DateTime<Utc>>) -> String {
 
             match delta {
                 0 => {
-                    // Calculate hours remaining
                     let duration = deadline_gmt7.signed_duration_since(now_gmt7);
                     let hours_left = duration.num_hours();
                     

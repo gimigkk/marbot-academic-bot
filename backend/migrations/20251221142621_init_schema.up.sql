@@ -43,6 +43,11 @@ create table public.assignments (
   reminder_1h_sent boolean not null default false
 );
 
+-- Add relating_messages column to store message content
+ALTER TABLE assignments 
+ADD COLUMN relating_messages TEXT[] DEFAULT '{}';
+
+
 -- TABEL 3: WA LOGS (Debugging Purpose Only)
 create table public.wa_logs (
   id uuid default uuid_generate_v4() primary key,

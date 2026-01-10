@@ -14,7 +14,7 @@ use tokio::net::TcpListener;
 use sqlx::PgPool;
 use std::time::{Instant, Duration}; 
 use std::collections::HashMap;
-use chrono::{Datelike};
+//use chrono::{Datelike};
 use chrono::Duration as ChronoDuration;
 
 pub mod models;
@@ -448,7 +448,8 @@ async fn webhook(
                                 new_title,
                                 new_description,
                                 new_parallel_codes,
-                                None,
+                                Some(payload.payload.id.clone()),
+                                Some(payload.payload.body.clone()), 
                             ).await {
                                 Ok(_) => {
                                     // Update course_id jika ada perubahan
@@ -551,25 +552,25 @@ async fn webhook(
                         eprintln!("❌ Failed to send reply: {}", e);
                     }
                 }
-                CommandResponse::ForwardMessage {message_ids, summary} => {
-                    let mut fails = 0;
-
-                    for message_id in &message_ids {
-                        if let Err(e) = forward_message(chat_id, message_id).await {
-                            eprintln!("❌ Failed to forward message {}: {}", message_id, e);
-                            fails += 1;
-                            // Continue to next message
+                CommandResponse::ResendMessages { messages, summary } => {
+                    // send each stored message
+                    for (i, msg_content) in messages.iter().enumerate() {
+                        let formatted_msg = format!("📨 *Pesan {}*\n━━━━━━━━━━━━\n{}", i + 1, msg_content);
+                        
+                        if let Err(e) = send_reply(chat_id, &formatted_msg).await {
+                            eprintln!("❌ Failed to send message {}: {}", i + 1, e);
+                        }
+                        
+                        // Delay between messages
+                        if i < messages.len() - 1 {
+                            tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
                         }
                     }
 
-                    if fails > 0{
-                        let error_msg = format!("❌ _Gagal forward [{}] pesan!_", fails);
-                        if let Err(e) = send_reply(chat_id, &error_msg).await {
-                            eprintln!("❌ Failed to send reply: {}", e);
-                        }
-                    }
-                    
-                    // always send summary
+                    // Small delay before sending messages
+                    tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+
+                    // First send summary
                     if let Err(e) = send_reply(chat_id, &summary).await {
                         eprintln!("❌ Failed to send summary: {}", e);
                     }
@@ -627,7 +628,14 @@ async fn webhook(
                     println!("🧠 AI Latency: {:.2?}", ai_duration);
 
                     println!("✅ AI Classification: {:?}\n", classification);
-                    handle_ai_classification(state.pool.clone(), classification, &payload.payload.id, sender_phone, debug_group_id).await;
+                    handle_ai_classification(
+                        state.pool.clone(), 
+                        classification, 
+                        &payload.payload.id, 
+                        sender_phone, 
+                        &payload.payload.body,
+                        debug_group_id
+                    ).await;
                 }
                 Err(e) => {
                     eprintln!("❌ AI extraction failed: {}", e);
@@ -676,10 +684,12 @@ async fn handle_ai_classification(
     classification: AIClassification, 
     message_id: &str,
     sender_id: &str,
+    message_body: &str,
     debug_group_id: Option<String>,
 ) {
     let message_id = message_id.to_string();
     let sender_id = sender_id.to_string();
+    let message_body = message_body.to_string();
     
     match classification {
         // NEW: Handle multiple assignments
@@ -737,7 +747,7 @@ async fn handle_ai_classification(
                 }
             }
             
-            // FIX: Use the SAME message_id for all assignments
+            // For MultipleAssignments:
             for (index, assignment) in unique_assignments.into_iter().enumerate() {
                 handle_single_assignment(
                     pool.clone(),
@@ -746,8 +756,9 @@ async fn handle_ai_classification(
                     assignment.deadline,
                     assignment.description,
                     assignment.parallel_codes,
-                    &message_id,  // Use original message_id without modification
+                    &message_id,
                     &sender_id,
+                    &message_body,  // FIX: Pass message_body here
                     debug_group_id.clone(),
                     index + 1,
                 ).await;
@@ -757,6 +768,7 @@ async fn handle_ai_classification(
         // Single assignment - USE AI FOR DUPLICATE DETECTION
         AIClassification::AssignmentInfo { course_name, title, deadline, description, parallel_codes, .. } => {
             let debug_group = debug_group_id.clone();
+            let msg_body = message_body.to_string();
             
             tokio::spawn(async move {
                 handle_single_assignment(
@@ -768,6 +780,7 @@ async fn handle_ai_classification(
                     parallel_codes,
                     &message_id,
                     &sender_id,
+                    &msg_body,
                     debug_group,
                     0,
                 ).await
@@ -833,6 +846,7 @@ async fn handle_ai_classification(
                                 new_description.clone(),
                                 if parallel_codes.is_empty() { None } else { Some(parallel_codes.clone()) },
                                 Some(msg_id.clone()),
+                                None,
                             ).await;
                             
                             if let Some(debug_id) = debug_clone {
@@ -866,6 +880,7 @@ async fn handle_ai_classification(
                             new_description.clone(),
                             if parallel_codes.is_empty() { None } else { Some(parallel_codes.clone()) },
                             Some(msg_id),
+                            None,
                         ).await {
                             println!("🔄 UPDATED: {} ({})", updated.title, changes);
                             
@@ -909,6 +924,7 @@ async fn handle_single_assignment(
     parallel_codes: Vec<String>,
     message_id: &str,
     sender_id: &str,
+    message_body: &str,
     debug_group_id: Option<String>,
     assignment_number: usize,
 ) {
@@ -969,7 +985,8 @@ async fn handle_single_assignment(
                             None,
                             Some(desc_clone.clone()), 
                             if final_parallel_codes.is_empty() { None } else { Some(final_parallel_codes.clone()) },
-                            Some(message_id.to_string())
+                            Some(message_id.to_string()),
+                            Some(message_body.to_string()),
                         ).await;
                         
                         if update_result.is_ok() {
@@ -1005,7 +1022,8 @@ async fn handle_single_assignment(
         deadline: deadline_parsed, 
         parallel_codes: final_parallel_codes.clone(),
         sender_id: Some(sender_id.to_string()), 
-        message_id: message_id.to_string()
+        message_id: message_id.to_string(),
+        relating_messages: vec![message_body.to_string()],  // still error
     };
     
     match crud::create_assignment(&pool, new_assignment).await {

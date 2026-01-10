@@ -45,7 +45,7 @@ pub async fn create_assignment(
         }
     };
     
-    // ✅ FIXED: NewAssignment already has Vec<String>, just normalize to lowercase
+    // FIXED: NewAssignment already has Vec<String>, just normalize to lowercase
     let clean_parallel_codes: Vec<String> = new_assignment.parallel_codes
         .iter()
         .map(|p| p.to_lowercase())
@@ -56,9 +56,9 @@ pub async fn create_assignment(
         r#"
         INSERT INTO assignments (
             course_id, parallel_codes, title, description, 
-            deadline, sender_id, message_ids
+            deadline, sender_id, message_ids, relating_messages
         )
-        VALUES ($1, $2, $3, $4, $5, $6, ARRAY[$7])
+        VALUES ($1, $2, $3, $4, $5, $6, ARRAY[$7], ARRAY[$8])
         "#,
         new_assignment.course_id,
         &clean_parallel_codes,
@@ -66,7 +66,8 @@ pub async fn create_assignment(
         new_assignment.description,
         new_assignment.deadline,
         new_assignment.sender_id,
-        new_assignment.message_id
+        new_assignment.message_id,
+        &new_assignment.relating_messages as &[String],
     )
     .execute(&mut *tx)
     .await?;
@@ -150,6 +151,7 @@ pub async fn get_last_completed_assignment(
             a.message_ids,
             a.sender_id,
             true as is_completed
+            a.relating_messages
         FROM assignments a
         JOIN courses c ON a.course_id = c.id
         JOIN user_completions uc ON uc.assignment_id = a.id
@@ -253,6 +255,7 @@ pub async fn get_active_assignments_sorted(pool: &PgPool) -> Result<Vec<Assignme
             a.message_ids,
             a.sender_id,
             false as is_completed
+            a.relating_messages
         FROM assignments a
         JOIN courses c ON a.course_id = c.id
         WHERE a.deadline IS NULL OR a.deadline >= $1
@@ -297,6 +300,7 @@ pub async fn get_active_assignments_for_user(
                 WHERE uc.assignment_id = a.id 
                 AND uc.user_id = $2
             ) as is_completed
+            a.relating_messages
         FROM assignments a
         JOIN courses c ON a.course_id = c.id
         WHERE a.deadline IS NULL OR a.deadline >= $1
@@ -439,6 +443,7 @@ pub async fn get_assignment_with_course_by_id(
             a.message_ids,
             a.sender_id,
             false as is_completed
+            a.relating_messages
         FROM assignments a
         JOIN courses c ON a.course_id = c.id
         WHERE a.id = $1
@@ -542,6 +547,7 @@ pub async fn update_assignment_fields(
     new_description: Option<String>,
     new_parallel_codes: Option<Vec<String>>,
     incoming_message_id: Option<String>,
+    incoming_message_content: Option<String>,
 ) -> Result<Assignment> {
     println!("🔄 Updating assignment {}", id);
     println!("   Deadline: {:?}", new_deadline);
@@ -584,7 +590,11 @@ pub async fn update_assignment_fields(
             message_ids = CASE 
                             WHEN $6::text IS NOT NULL THEN array_append(message_ids, $6)
                             ELSE message_ids 
-                          END
+                          END,
+            relating_messages = CASE
+                                  WHEN $7::text IS NOT NULL THEN array_append(relating_messages, $7)
+                                  ELSE relating_messages
+                                END
         WHERE id = $1
         RETURNING *
         "#
@@ -595,6 +605,7 @@ pub async fn update_assignment_fields(
     .bind(&final_description)
     .bind(&final_parallel_codes)
     .bind(incoming_message_id)
+    .bind(incoming_message_content) 
     .fetch_one(&mut *tx)
     .await?;
     
