@@ -343,7 +343,7 @@ TITLE EXTRACTION RULES:
 3. NEVER use just "Tugas" or "Assignment" alone
    - If minimal info: Add context like "Tugas Besar", "Tugas Akhir", "Mini Project"
 
-4. Keep titles CONCISE (2-5 words max)
+4. Keep titles CONCISE (2 words minimum, 40 characters maximum)
    - "Tugas Individu Pertemuan 8" ✓
    - "Tugas individu untuk pertemuan ke-8 yang harus dikerjakan sendiri" ✗
 
@@ -443,8 +443,8 @@ ASSIGNMENT_UPDATE (modify existing):
   "reference_keywords": ["CourseName", "identifier"],
   "changes": "what changed",
   "new_deadline": "2025-12-30 14:00",
-  "new_title": null,
-  "new_description": null,
+  "new_title": More informative title OR null,
+  "new_description": More description title OR null,
   "parallel_codes": ["all"]
 }}
 

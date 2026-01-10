@@ -141,9 +141,9 @@ pub async fn extract_with_ai(
             println!("│\n│ ✅ Context  : Detected={} ({}), Schedules=[{}]",
                 parallel_summary, ctx.parallel_source, courses_summary);
             
-            if let Some(ref quoted_summary) = ctx.quoted_message_summary {
-                println!("│              Quoted: {}", quoted_summary);
-            }
+            // if let Some(ref quoted_summary) = ctx.quoted_message_summary {
+            //     println!("│              Quoted: {}", quoted_summary);
+            // }
             
             Some(ctx)
         }
