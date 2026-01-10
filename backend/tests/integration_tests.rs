@@ -9,7 +9,7 @@ use marbot::models::AIClassification;
 use marbot::parser::ai_extractor::extract_with_ai;
 use marbot::database::crud;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 struct TestCase {
     name: String,
     message: String,
@@ -72,8 +72,34 @@ async fn run_all_test_cases() {
         dotenv::dotenv().ok();
     }
     
+    // Validate environment before starting tests
+    println!("\n╔══════════════════════════════════════════════╗");
+    println!("║  🔍 ENVIRONMENT CHECK");
+    println!("╠══════════════════════════════════════════════╣");
+    
+    let gemini_key = std::env::var("GEMINI_API_KEY").ok();
+    let groq_key = std::env::var("GROQ_API_KEY").ok();
     let database_url = std::env::var("DATABASE_URL")
         .expect("DATABASE_URL must be set");
+    
+    println!("║  GEMINI_API_KEY  : {}", if gemini_key.is_some() { 
+        format!("✅ Set ({}...)", &gemini_key.as_ref().unwrap().chars().take(8).collect::<String>())
+    } else { 
+        "❌ Missing".to_string() 
+    });
+    
+    println!("║  GROQ_API_KEY    : {}", if groq_key.is_some() { 
+        format!("✅ Set ({}...)", &groq_key.as_ref().unwrap().chars().take(8).collect::<String>())
+    } else { 
+        "❌ Missing".to_string() 
+    });
+    
+    println!("║  DATABASE_URL    : ✅ Set");
+    println!("╚══════════════════════════════════════════════╝\n");
+    
+    if gemini_key.is_none() && groq_key.is_none() {
+        panic!("❌ At least one API key (GEMINI_API_KEY or GROQ_API_KEY) must be set");
+    }
     
     let pool = PgPool::connect(&database_url)
         .await
@@ -91,12 +117,19 @@ async fn run_all_test_cases() {
         .and_then(|s| s.parse::<usize>().ok())
         .unwrap_or(test_cases.len());
     
-    println!("\n╔══════════════════════════════════════════════╗");
+    println!("╔══════════════════════════════════════════════╗");
     println!("║  🧪 Running {} test cases", limit);
     println!("╚══════════════════════════════════════════════╝\n");
     
-    // Run tests in parallel with semaphore to limit concurrency
-    let semaphore = Arc::new(Semaphore::new(3)); // Max 3 concurrent tests
+    // Run tests sequentially in CI (parallel=1), locally can be higher
+    let concurrency = std::env::var("TEST_CONCURRENCY")
+        .ok()
+        .and_then(|s| s.parse::<usize>().ok())
+        .unwrap_or(1);
+    
+    println!("⚙️  Concurrency: {} (set TEST_CONCURRENCY to override)\n", concurrency);
+    
+    let semaphore = Arc::new(Semaphore::new(concurrency));
     let pool = Arc::new(pool);
     
     let mut handles = vec![];
@@ -130,8 +163,10 @@ async fn run_all_test_cases() {
                 }
             }
             
-            // Add delay to respect rate limits
-            tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+            // Delay to respect rate limits (only if running multiple tests)
+            if concurrency > 1 {
+                tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+            }
             
             test_result
         });
@@ -172,23 +207,15 @@ async fn run_all_test_cases() {
     }
 }
 
-impl Clone for TestCase {
-    fn clone(&self) -> Self {
-        TestCase {
-            name: self.name.clone(),
-            message: self.message.clone(),
-            expected_type: self.expected_type.clone(),
-            quoted_message: self.quoted_message.clone(),
-            category: self.category.clone(),
-        }
-    }
-}
-
 fn generate_summary(results: &[TestResult]) -> TestSummary {
     let total = results.len();
     let passed = results.iter().filter(|r| r.passed).count();
     let failed = total - passed;
-    let success_rate = (passed as f64 / total as f64) * 100.0;
+    let success_rate = if total > 0 {
+        (passed as f64 / total as f64) * 100.0
+    } else {
+        0.0
+    };
     
     // Group by category
     let mut by_category: HashMap<String, CategoryStats> = HashMap::new();
@@ -211,7 +238,11 @@ fn generate_summary(results: &[TestResult]) -> TestSummary {
     
     // Calculate success rates
     for stats in by_category.values_mut() {
-        stats.success_rate = (stats.passed as f64 / stats.total as f64) * 100.0;
+        stats.success_rate = if stats.total > 0 {
+            (stats.passed as f64 / stats.total as f64) * 100.0
+        } else {
+            0.0
+        };
     }
     
     // Collect failure details
@@ -239,7 +270,7 @@ fn generate_summary(results: &[TestResult]) -> TestSummary {
 }
 
 fn print_summary(summary: &TestSummary) {
-    println!("╔══════════════════════════════════════════════╗");
+    println!("\n╔══════════════════════════════════════════════╗");
     println!("║  📊 TEST SUMMARY");
     println!("╠══════════════════════════════════════════════╣");
     println!("║  ✅ Passed: {:<33} ║", summary.passed);
@@ -287,6 +318,24 @@ fn print_summary(summary: &TestSummary) {
 }
 
 async fn run_single_test(pool: &PgPool, test_case: &TestCase) -> TestResult {
+    // Validate API keys
+    let gemini_available = std::env::var("GEMINI_API_KEY").is_ok();
+    let groq_available = std::env::var("GROQ_API_KEY").is_ok();
+    
+    if !gemini_available && !groq_available {
+        return TestResult {
+            name: test_case.name.clone(),
+            passed: false,
+            expected: test_case.expected_type.clone(),
+            actual: "error".to_string(),
+            duration_ms: 0,
+            category: test_case.category.clone(),
+            error: Some("No API keys available (GEMINI_API_KEY and GROQ_API_KEY both missing)".to_string()),
+            message_preview: Some(test_case.message.chars().take(100).collect()),
+        };
+    }
+    
+    // Get database data
     let courses_list = match crud::get_all_courses_formatted(pool).await {
         Ok(list) => list,
         Err(e) => {
@@ -297,7 +346,7 @@ async fn run_single_test(pool: &PgPool, test_case: &TestCase) -> TestResult {
                 actual: "error".to_string(),
                 duration_ms: 0,
                 category: test_case.category.clone(),
-                error: Some(format!("Failed to get courses: {}", e)),
+                error: Some(format!("Database error - Failed to get courses: {}", e)),
                 message_preview: Some(test_case.message.chars().take(100).collect()),
             };
         }
@@ -305,7 +354,7 @@ async fn run_single_test(pool: &PgPool, test_case: &TestCase) -> TestResult {
     
     let assignments = crud::get_assignments(pool).await.unwrap_or_default();
     
-    let course_map: HashMap<uuid::Uuid, String> = sqlx::query_as(
+    let course_map: HashMap<uuid::Uuid, String> = sqlx::query_as::<_, (uuid::Uuid, String)>(
         "SELECT id, name FROM courses"
     )
     .fetch_all(pool)
@@ -313,6 +362,7 @@ async fn run_single_test(pool: &PgPool, test_case: &TestCase) -> TestResult {
     .map(|rows| rows.into_iter().collect())
     .unwrap_or_default();
     
+    // Run AI extraction
     let result = extract_with_ai(
         &test_case.message,
         &courses_list,
@@ -325,6 +375,7 @@ async fn run_single_test(pool: &PgPool, test_case: &TestCase) -> TestResult {
         None,
     ).await;
     
+    // Process result
     match result {
         Ok(classification) => {
             let actual_type = match classification {
@@ -334,9 +385,26 @@ async fn run_single_test(pool: &PgPool, test_case: &TestCase) -> TestResult {
                 AIClassification::Unrecognized => "unrecognized",
             };
             
+            let passed = actual_type == test_case.expected_type;
+            
+            // Log additional info for failures
+            if !passed {
+                eprintln!("   ℹ️  Expected: {}, Got: {}", test_case.expected_type, actual_type);
+                match classification {
+                    AIClassification::AssignmentInfo { ref title, ref course_name, .. } => {
+                        eprintln!("   ℹ️  Detected: {} - {}", 
+                            course_name.as_deref().unwrap_or("Unknown"), title);
+                    }
+                    AIClassification::MultipleAssignments { ref assignments, .. } => {
+                        eprintln!("   ℹ️  Detected {} assignments", assignments.len());
+                    }
+                    _ => {}
+                }
+            }
+            
             TestResult {
                 name: test_case.name.clone(),
-                passed: actual_type == test_case.expected_type,
+                passed,
                 expected: test_case.expected_type.clone(),
                 actual: actual_type.to_string(),
                 duration_ms: 0,
@@ -345,15 +413,34 @@ async fn run_single_test(pool: &PgPool, test_case: &TestCase) -> TestResult {
                 message_preview: Some(test_case.message.chars().take(100).collect()),
             }
         }
-        Err(e) => TestResult {
-            name: test_case.name.clone(),
-            passed: false,
-            expected: test_case.expected_type.clone(),
-            actual: "error".to_string(),
-            duration_ms: 0,
-            category: test_case.category.clone(),
-            error: Some(e),
-            message_preview: Some(test_case.message.chars().take(100).collect()),
+        Err(e) => {
+            // Categorize errors for better debugging
+            let error_type = if e.contains("rate limit") {
+                "Rate Limit Error"
+            } else if e.contains("API key") || e.contains("not set") {
+                "API Key Error"
+            } else if e.contains("All models failed") {
+                "All AI Models Failed"
+            } else if e.contains("Failed to deserialize") || e.contains("JSON") {
+                "Response Parse Error"
+            } else if e.contains("request") || e.contains("REQUEST FAILED") {
+                "Network/Request Error"
+            } else {
+                "Unknown Error"
+            };
+            
+            eprintln!("   ❌ {}: {}", error_type, e);
+            
+            TestResult {
+                name: test_case.name.clone(),
+                passed: false,
+                expected: test_case.expected_type.clone(),
+                actual: "error".to_string(),
+                duration_ms: 0,
+                category: test_case.category.clone(),
+                error: Some(format!("{}: {}", error_type, e)),
+                message_preview: Some(test_case.message.chars().take(100).collect()),
+            }
         }
     }
 }

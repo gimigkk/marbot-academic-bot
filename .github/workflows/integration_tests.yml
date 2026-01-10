@@ -16,6 +16,7 @@ env:
   DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres
   RUST_LOG: info
   TEST_LIMIT: ${{ github.event.inputs.test_limit || '' }}
+  TEST_CONCURRENCY: "1"
 
 jobs:
   integration-test:
@@ -74,13 +75,18 @@ jobs:
           cd backend
           echo "=== Checking for test files ==="
           ls -la tests/ || echo "No tests directory"
-          echo "=== Checking for test cases ==="
-          cat tests/test_cases.json || echo "No test_cases.json found"
+          echo ""
+          echo "=== Test cases count ==="
+          if [ -f tests/test_cases.json ]; then
+            cat tests/test_cases.json | jq 'length' || echo "Unable to parse test_cases.json"
+          else
+            echo "No test_cases.json found"
+          fi
       
       - name: Run tests
         run: |
           cd backend
-          cargo test --test integration_tests -- --test-threads=1 --nocapture 2>&1 | tee test-output.log
+          cargo test --test integration_tests -- --test-threads=1 --nocapture
         continue-on-error: true
         id: test_run
       
@@ -92,7 +98,6 @@ jobs:
           path: |
             backend/test-results.json
             backend/test-summary.json
-            backend/test-output.log
           if-no-files-found: warn
       
       - name: Display summary
@@ -118,69 +123,14 @@ jobs:
                 "✅ All tests passed!"
               end)
             '
+          else
+            echo "⚠️  No test summary found"
           fi
       
-      - name: Comment PR with results
-        if: github.event_name == 'pull_request' && always()
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const fs = require('fs');
-            try {
-              const summary = JSON.parse(fs.readFileSync('backend/test-summary.json', 'utf8'));
-              
-              let comment = `## 🧪 Integration Test Results\n\n`;
-              comment += `| Metric | Value |\n`;
-              comment += `|--------|-------|\n`;
-              comment += `| Total Tests | ${summary.total} |\n`;
-              comment += `| ✅ Passed | ${summary.passed} |\n`;
-              comment += `| ❌ Failed | ${summary.failed} |\n`;
-              comment += `| 📈 Success Rate | ${summary.success_rate.toFixed(1)}% |\n\n`;
-              
-              if (Object.keys(summary.by_category).length > 0) {
-                comment += `### 📂 Results by Category\n\n`;
-                comment += `| Category | Passed | Total | Rate |\n`;
-                comment += `|----------|--------|-------|------|\n`;
-                
-                Object.entries(summary.by_category)
-                  .sort(([a], [b]) => a.localeCompare(b))
-                  .forEach(([category, stats]) => {
-                    const icon = stats.success_rate === 100 ? '✅' : stats.success_rate >= 80 ? '⚠️' : '❌';
-                    comment += `| ${icon} ${category} | ${stats.passed} | ${stats.total} | ${stats.success_rate.toFixed(0)}% |\n`;
-                  });
-                comment += `\n`;
-              }
-              
-              if (summary.failures.length > 0) {
-                comment += `### ❌ Failed Tests\n\n`;
-                comment += `<details>\n<summary>Show ${summary.failures.length} failure(s)</summary>\n\n`;
-                
-                summary.failures.forEach((failure, i) => {
-                  comment += `\n**${i + 1}. ${failure.name}** \`[${failure.category}]\`\n`;
-                  comment += `- Expected: \`${failure.expected}\`\n`;
-                  comment += `- Got: \`${failure.actual}\`\n`;
-                  if (failure.error) {
-                    comment += `- Error: ${failure.error}\n`;
-                  }
-                  if (failure.message_preview) {
-                    const preview = failure.message_preview.length > 80 
-                      ? failure.message_preview.substring(0, 80) + '...'
-                      : failure.message_preview;
-                    comment += `- Message: \`${preview}\`\n`;
-                  }
-                });
-                
-                comment += `\n</details>\n`;
-              } else {
-                comment += `### ✅ All Tests Passed! 🎉\n`;
-              }
-              
-              github.rest.issues.createComment({
-                issue_number: context.issue.number,
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                body: comment
-              });
-            } catch (e) {
-              console.log('Could not read test results:', e);
-            }
+      - name: Check test result
+        if: always()
+        run: |
+          if [ "${{ steps.test_run.outcome }}" != "success" ]; then
+            echo "❌ Tests failed - check logs above"
+            exit 1
+          fi
