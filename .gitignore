@@ -40,3 +40,4 @@ Thumbs.db
 *.bak
 *.tmpbackend/.env.test
 **/.env.test
+backend/.env.test
