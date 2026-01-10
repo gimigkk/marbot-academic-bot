@@ -1,0 +1,63 @@
+[
+  {
+    "name": "Simple assignment announcement",
+    "message": "Tugas Pemrograman LKP 15 deadline besok jam 23:59",
+    "expected_type": "assignment_info",
+    "description": "Basic assignment with explicit deadline"
+  },
+  {
+    "name": "Assignment with parallel code in title",
+    "message": "🚨 GRAFKOM K2 🚨\nTugas LKP 14 dikumpulkan ketika praktikum",
+    "expected_type": "assignment_info",
+    "description": "Parallel code extraction from course abbreviation"
+  },
+  {
+    "name": "Multiple assignments in one message",
+    "message": "Ada 2 tugas:\n1. Pemrog LKP 15 deadline besok\n2. Grafkom Quiz 3 deadline lusa",
+    "expected_type": "multiple_assignments",
+    "description": "Batch assignment detection"
+  },
+  {
+    "name": "Assignment update",
+    "message": "LKP 14 Pemrograman diundur jadi minggu depan",
+    "expected_type": "assignment_update",
+    "description": "Update existing assignment"
+  },
+  {
+    "name": "Quoted message update",
+    "message": "Deadline berubah jadi Jumat jam 14:00",
+    "quoted_message": "Tugas Pemrograman LKP 14 deadline hari ini",
+    "expected_type": "assignment_update",
+    "description": "Update via reply to original message"
+  },
+  {
+    "name": "Not an assignment - greeting",
+    "message": "Halo guys, ada yang bisa bantu?",
+    "expected_type": "unrecognized",
+    "description": "Should reject casual conversation"
+  },
+  {
+    "name": "Not an assignment - class schedule",
+    "message": "Praktikum besok jam 8 pagi ya jangan lupa",
+    "expected_type": "unrecognized",
+    "description": "Should reject class attendance announcements"
+  },
+  {
+    "name": "Assignment with relative deadline",
+    "message": "Tugas Struktur Data dikumpulkan besok sebelum kelas",
+    "expected_type": "assignment_info",
+    "description": "Relative time reference"
+  },
+  {
+    "name": "Assignment for multiple parallels",
+    "message": "Tugas Grafkom untuk K1, K2, dan K3 deadline Jumat",
+    "expected_type": "assignment_info",
+    "description": "Multiple parallel codes"
+  },
+  {
+    "name": "Assignment with 'all' parallel",
+    "message": "Tugas RPL untuk semua kelas deadline minggu depan",
+    "expected_type": "assignment_info",
+    "description": "Universal parallel code"
+  }
+]
