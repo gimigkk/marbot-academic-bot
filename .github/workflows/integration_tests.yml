@@ -61,7 +61,12 @@ jobs:
             ${{ runner.os }}-cargo-
       
       - name: Install sqlx-cli
-        run: cargo install sqlx-cli --no-default-features --features postgres
+        run: |
+          if ! command -v sqlx &> /dev/null; then
+            cargo install sqlx-cli --no-default-features --features postgres
+          else
+            echo "sqlx-cli already installed"
+          fi
       
       - name: Run migrations
         run: |
