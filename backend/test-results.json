@@ -1,0 +1,72 @@
+[
+  {
+    "name": "Simple assignment announcement",
+    "passed": true,
+    "expected": "assignment_info",
+    "actual": "assignment_info",
+    "duration_ms": 12264
+  },
+  {
+    "name": "Assignment with parallel code in title",
+    "passed": true,
+    "expected": "assignment_info",
+    "actual": "assignment_info",
+    "duration_ms": 6028
+  },
+  {
+    "name": "Multiple assignments in one message",
+    "passed": true,
+    "expected": "multiple_assignments",
+    "actual": "multiple_assignments",
+    "duration_ms": 7041
+  },
+  {
+    "name": "Assignment update",
+    "passed": true,
+    "expected": "assignment_update",
+    "actual": "assignment_update",
+    "duration_ms": 7080
+  },
+  {
+    "name": "Quoted message update",
+    "passed": true,
+    "expected": "assignment_update",
+    "actual": "assignment_update",
+    "duration_ms": 9058
+  },
+  {
+    "name": "Not an assignment - greeting",
+    "passed": true,
+    "expected": "unrecognized",
+    "actual": "unrecognized",
+    "duration_ms": 3118
+  },
+  {
+    "name": "Not an assignment - class schedule",
+    "passed": true,
+    "expected": "unrecognized",
+    "actual": "unrecognized",
+    "duration_ms": 3937
+  },
+  {
+    "name": "Assignment with relative deadline",
+    "passed": true,
+    "expected": "assignment_info",
+    "actual": "assignment_info",
+    "duration_ms": 11618
+  },
+  {
+    "name": "Assignment for multiple parallels",
+    "passed": true,
+    "expected": "assignment_info",
+    "actual": "assignment_info",
+    "duration_ms": 6087
+  },
+  {
+    "name": "Assignment with 'all' parallel",
+    "passed": true,
+    "expected": "assignment_info",
+    "actual": "assignment_info",
+    "duration_ms": 5985
+  }
+]
