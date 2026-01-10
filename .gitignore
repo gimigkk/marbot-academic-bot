@@ -38,4 +38,5 @@ Thumbs.db
 
 # Backup files
 *.bak
-*.tmp
+*.tmpbackend/.env.test
+**/.env.test

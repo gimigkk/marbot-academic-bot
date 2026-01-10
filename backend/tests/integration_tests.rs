@@ -3,10 +3,10 @@ use sqlx::PgPool;
 use std::collections::HashMap;
 use std::fs;
 
-// Import from your main crate
-use your_crate_name::models::AIClassification;
-use your_crate_name::parser::ai_extractor::extract_with_ai;
-use your_crate_name::database::crud;
+// Import from marbot crate
+use marbot::models::AIClassification;
+use marbot::parser::ai_extractor::extract_with_ai;
+use marbot::database::crud;
 
 #[derive(Debug, Deserialize)]
 struct TestCase {
@@ -32,6 +32,14 @@ struct TestResult {
 
 #[tokio::test]
 async fn run_all_test_cases() {
+    // Load test environment variables
+    // Try .env.test first, fall back to .env
+    if std::path::Path::new(".env.test").exists() {
+        dotenv::from_filename(".env.test").ok();
+    } else {
+        dotenv::dotenv().ok();
+    }
+    
     // Connect to database
     let database_url = std::env::var("DATABASE_URL")
         .expect("DATABASE_URL must be set");

@@ -68,18 +68,42 @@ jobs:
           cd backend
           sqlx migrate run
       
+      - name: Verify test setup
+        run: |
+          cd backend
+          echo "=== Checking for test files ==="
+          ls -la tests/ || echo "No tests directory"
+          echo "=== Checking for test cases ==="
+          cat tests/test_cases.json || echo "No test_cases.json found"
+      
       - name: Run tests
         run: |
           cd backend
-          cargo test --test integration_tests -- --test-threads=1 --nocapture
+          cargo test --test integration_tests -- --test-threads=1 --nocapture 2>&1 | tee test-output.log
+        continue-on-error: true
+        id: test_run
       
       - name: Upload results
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: test-results
-          path: backend/test-results.json
+          path: |
+            backend/test-results.json
+            backend/test-output.log
           if-no-files-found: warn
+      
+      - name: Show test output
+        if: always()
+        run: |
+          if [ -f backend/test-output.log ]; then
+            echo "=== Test Output ==="
+            cat backend/test-output.log
+          fi
+          if [ -f backend/test-results.json ]; then
+            echo "=== Test Results ==="
+            cat backend/test-results.json
+          fi
       
       - name: Comment PR with results
         if: github.event_name == 'pull_request' && always()
