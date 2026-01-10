@@ -1,4 +1,5 @@
 use crate::models::AssignmentWithCourse;
+use crate::parser::ai_extractor::schedule_oracle::ScheduleOracle;
 use uuid::Uuid;
 use std::collections::HashMap;
 use chrono::{Local, NaiveDateTime, NaiveDate, NaiveTime, Duration, Datelike, Weekday};
@@ -149,12 +150,17 @@ pub fn generate_no_date_message() -> String {
 /// Main Entry Point: Try AI first, fallback to regex
 pub async fn parse_clarification_response(
     text: &str, 
-    current_deadline: Option<NaiveDateTime>,
+    assignment: &AssignmentWithCourse, // CHANGED: Accept full assignment object
     missing_fields: &[String]
 ) -> Result<HashMap<String, String>, String> {
+    
+    let current_deadline = assignment.deadline.map(|d| d.naive_utc());
+
+    let next_meeting_hint = resolve_next_meeting(assignment);
+
     // 1. Try AI Parsing
     println!("🤖 Attempting AI Clarification parsing...");
-    match parse_clarification_with_ai(text, missing_fields, current_deadline).await {
+    match parse_clarification_with_ai(text, missing_fields, current_deadline, next_meeting_hint).await {
         Ok(result) => {
              println!("✅ AI Parsing Success");
              Ok(result)
@@ -162,9 +168,33 @@ pub async fn parse_clarification_response(
         Err(e) => {
             eprintln!("⚠️ AI Parsing failed/skipped: {}. Falling back to Regex.", e);
             // 2. Fallback to Natural Language Regex
-            parse_natural_language_fallback(text, current_deadline)
+            parse_natural_language_fallback(text, current_deadline, next_meeting_hint)
         }
     }
+}
+
+/// Helper to find next meeting from schedule.json
+fn resolve_next_meeting(assignment: &AssignmentWithCourse) -> Option<NaiveDateTime> {
+    // Try to load oracle (fail silently if missing)
+    let oracle = ScheduleOracle::load_from_file("schedule.json").ok()?;
+    let today = Local::now().naive_local().date();
+    let mut earliest: Option<NaiveDateTime> = None;
+
+    // Check next meeting for ALL parallel codes in assignment
+    // Pick the earliest one as the candidate
+    for p in &assignment.parallel_codes {
+        if let Some((date, time_str)) = oracle.get_next_meeting_with_time(&assignment.course_name, p, today) {
+             if let Ok(time) = NaiveTime::parse_from_str(&time_str, "%H:%M") {
+                 let dt = date.and_time(time);
+                 
+                 // Pick earliest if multiple parallels exist
+                 if earliest.is_none() || dt < earliest.unwrap() {
+                     earliest = Some(dt);
+                 }
+             }
+        }
+    }
+    earliest
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -182,6 +212,7 @@ pub async fn parse_clarification_with_ai(
     user_message: &str,
     missing_fields: &[String],
     current_deadline: Option<NaiveDateTime>,
+    schedule_hint: Option<NaiveDateTime>, // NEW: Hint from schedule
 ) -> Result<HashMap<String, String>, String> {
     let text_lower = user_message.trim().to_lowercase();
     if is_cancellation(&text_lower) {
@@ -200,6 +231,7 @@ pub async fn parse_clarification_with_ai(
         &current_day,
         current_year,
         current_deadline,
+        schedule_hint,
     );
 
     let ai_response = call_gemini_for_clarification(&prompt).await?;
@@ -222,6 +254,7 @@ fn build_clarification_prompt(
     current_day: &str,
     current_year: i32,
     current_deadline: Option<NaiveDateTime>,
+    schedule_hint: Option<NaiveDateTime>,
 ) -> String {
     let missing_fields_str = missing_fields.join(", ");
     
@@ -229,6 +262,14 @@ fn build_clarification_prompt(
         format!("Existing deadline: {} (only update if user provides new info)", dl.format("%Y-%m-%d %H:%M"))
     } else {
         "No existing deadline yet".to_string()
+    };
+    
+    // Add schedule hint to prompt
+    let schedule_info = if let Some(sched) = schedule_hint {
+        format!("NEXT CLASS MEETING: {} (Use this if user says 'pertemuan berikutnya', 'sesuai jadwal', 'pas kelas', 'during class')", 
+            sched.format("%Y-%m-%d %H:%M"))
+    } else {
+        "Schedule info: Not available".to_string()
     };
 
     format!(
@@ -238,6 +279,7 @@ CURRENT CONTEXT:
 - Today: {current_date} ({current_day})
 - Year: {current_year}
 - {existing_deadline_info}
+- {schedule_info}
 - Fields needing clarification: [{missing_fields_str}]
 
 USER MESSAGE: 
@@ -250,6 +292,7 @@ Extract information based on the missing fields and context.
 MAPPINGS:
 - Dates: "besok"=+1d, "lusa"=+2d, "minggu depan"=+7d.
 - Times: "pagi"=08:00, "siang"=12:00, "sore"=15:00, "malam"=20:00.
+- Keywords: "pertemuan berikutnya", "sesuai jadwal" => Use NEXT CLASS MEETING date/time.
 - Codes: "K1", "K2", "All".
 
 RESPONSE FORMAT (JSON only):
@@ -268,6 +311,7 @@ Respond with ONLY the JSON."#,
         current_day = current_day,
         current_year = current_year,
         existing_deadline_info = existing_deadline_info,
+        schedule_info = schedule_info,
         missing_fields_str = missing_fields_str,
         user_message = user_message,
     )
@@ -277,7 +321,6 @@ async fn call_gemini_for_clarification(prompt: &str) -> Result<String, String> {
     let api_key = std::env::var("GEMINI_API_KEY")
         .map_err(|_| "GEMINI_API_KEY not set".to_string())?;
 
-    // FIXED: Typo in model 
     let models = [
         "gemini-2.0-flash-exp",
         "gemini-2.0-flash",
@@ -391,6 +434,7 @@ fn parse_ai_response(
 pub fn parse_natural_language_fallback(
     text: &str,
     current_deadline: Option<NaiveDateTime>,
+    schedule_hint: Option<NaiveDateTime>, // NEW
 ) -> Result<HashMap<String, String>, String> {
     let text_lower = text.trim().to_lowercase();
     
@@ -403,29 +447,38 @@ pub fn parse_natural_language_fallback(
     
     let mut updates = HashMap::new();
 
-    // 1. Try regex date
-    let parsed_date = parse_relative_date(&text_lower, today);
-    let parsed_time = parse_natural_time(&text_lower);
-
-    if let Some(date) = parsed_date {
-        let time = parsed_time.unwrap_or_else(|| NaiveTime::from_hms_opt(23, 59, 0).unwrap());
-        let deadline = date.and_time(time);
-        updates.insert("deadline".to_string(), deadline.format("%Y-%m-%d %H:%M").to_string());
-    } else if let Some(time) = parsed_time {
-        if let Some(existing) = current_deadline {
-            let new_deadline = existing.date().and_time(time);
-            updates.insert("deadline".to_string(), new_deadline.format("%Y-%m-%d %H:%M").to_string());
+    // 1. Check for schedule keywords "pertemuan berikutnya", etc.
+    if let Some(sched) = schedule_hint {
+        if check_schedule_keywords(&text_lower) {
+            updates.insert("deadline".to_string(), sched.format("%Y-%m-%d %H:%M").to_string());
         }
     }
 
-    // 2. Try description
+    // 2. Try regex date (if not already found via schedule)
+    if !updates.contains_key("deadline") {
+        let parsed_date = parse_relative_date(&text_lower, today);
+        let parsed_time = parse_natural_time(&text_lower);
+
+        if let Some(date) = parsed_date {
+            let time = parsed_time.unwrap_or_else(|| NaiveTime::from_hms_opt(23, 59, 0).unwrap());
+            let deadline = date.and_time(time);
+            updates.insert("deadline".to_string(), deadline.format("%Y-%m-%d %H:%M").to_string());
+        } else if let Some(time) = parsed_time {
+            if let Some(existing) = current_deadline {
+                let new_deadline = existing.date().and_time(time);
+                updates.insert("deadline".to_string(), new_deadline.format("%Y-%m-%d %H:%M").to_string());
+            }
+        }
+    }
+
+    // 3. Try description
     if let Some(desc) = extract_description_part(&text_lower) {
         if !desc.is_empty() {
             updates.insert("description".to_string(), desc);
         }
     }
 
-    // 3. Try parallel codes
+    // 4. Try parallel codes
     let parallel_codes = detect_parallel_codes(&text_lower);
     if !parallel_codes.is_empty() {
         updates.insert("parallel_codes".to_string(), parallel_codes.join(","));
@@ -436,6 +489,15 @@ pub fn parse_natural_language_fallback(
     }
 
     Ok(updates)
+}
+
+fn check_schedule_keywords(text: &str) -> bool {
+    let keywords = [
+        "pertemuan berikutnya", "sesuai jadwal", "ikut jadwal",
+        "saat kelas", "ketika kelas", "pas kelas",
+        "next meeting", "during class", "in class"
+    ];
+    keywords.iter().any(|k| text.contains(k))
 }
 
 fn parse_relative_date(text: &str, today: NaiveDate) -> Option<NaiveDate> {

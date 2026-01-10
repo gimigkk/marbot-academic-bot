@@ -81,7 +81,7 @@ async fn check_waha_health() -> String {
     let waha_urls = vec![
         std::env::var("WAHA_URL").unwrap_or_else(|_| "http://waha:3000".to_string()),
         "http://localhost:3001".to_string(),
-        "http://127.0.0.1:3001".to_string(),
+        "[http://127.0.0.1:3001](http://127.0.0.1:3001)".to_string(),
     ];
     
     let api_key = std::env::var("WAHA_API_KEY")
@@ -227,7 +227,7 @@ async fn main() {
 
     println!("\x1b[1;30m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\x1b[0m");
     println!(" 🚀 \x1b[1;32mMARBOT IS ONLINE!\x1b[0m");
-    println!("    📡 Listening on    : \x1b[36mhttp://0.0.0.0:{}\x1b[0m", port);
+    println!("    📡 Listening on    : \x1b[36m[http://0.0.0.0](http://0.0.0.0):{}\x1b[0m", port);
     println!("    📍 Webhook URL     : \x1b[36mhttp://localhost:{}/webhook\x1b[0m", port);
     println!("\x1b[1;30m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\x1b[0m");
     println!("\nWaiting for incoming messages...\n");
@@ -393,10 +393,6 @@ async fn webhook(
                     .ok()
                     .flatten();
 
-                let current_deadline = current_assignment.as_ref()
-                    .and_then(|a| a.deadline)
-                    .map(|dt| dt.naive_utc());
-
                 // 3. Identifikasi field apa yang hilang (PENTING untuk konteks AI)
                 let missing_fields = if let Some(ref a) = current_assignment {
                     clarification::identify_missing_fields(a)
@@ -405,121 +401,124 @@ async fn webhook(
                 };
 
                 // 4. Parse Jawaban User menggunakan AI (Async)
-                // Note: Kita menggunakan modul 'clarification', bukan 'clarification_ai'
-                match clarification::parse_clarification_response(
-                    &payload.payload.body, 
-                    current_deadline, 
-                    &missing_fields
-                ).await {
-                    Ok(updates) => {
-                        // Extract fields from updates HashMap
-                        let new_deadline = updates.get("deadline")
-                            .and_then(|d| crud::parse_deadline(d).ok());
-                        let new_title = updates.get("title").cloned();
-                        let new_description = updates.get("description").cloned();
-                        
-                        // Parse parallel_codes
-                        let new_parallel_codes = updates.get("parallel_codes")
-                            .map(|codes_str| {
-                                codes_str.split(',')
-                                    .map(|s| s.trim().to_lowercase())
-                                    .collect::<Vec<String>>()
-                            });
+                if let Some(ref assignment_obj) = current_assignment {
+                    match clarification::parse_clarification_response(
+                        &payload.payload.body, 
+                        assignment_obj, 
+                        &missing_fields
+                    ).await {
+                        Ok(updates) => {
+                            // Extract fields from updates HashMap
+                            let new_deadline = updates.get("deadline")
+                                .and_then(|d| crud::parse_deadline(d).ok());
+                            let new_title = updates.get("title").cloned();
+                            let new_description = updates.get("description").cloned();
+                            
+                            // Parse parallel_codes
+                            let new_parallel_codes = updates.get("parallel_codes")
+                                .map(|codes_str| {
+                                    codes_str.split(',')
+                                        .map(|s| s.trim().to_lowercase())
+                                        .collect::<Vec<String>>()
+                                });
 
-                        // Handle course_id lookup if course_name is provided
-                        let course_id = if let Some(course_name) = updates.get("course_name") {
-                            match crud::get_course_by_name(&state.pool, course_name).await {
-                                Ok(Some(course)) => Some(course.id),
-                                Ok(None) => {
-                                    let error_msg = format!("❌ Mata kuliah '{}' tidak ditemukan.", course_name);
-                                    let _ = send_reply(chat_id, &error_msg).await;
-                                    return StatusCode::OK;
+                            // Handle course_id lookup if course_name is provided
+                            let course_id = if let Some(course_name) = updates.get("course_name") {
+                                match crud::get_course_by_name(&state.pool, course_name).await {
+                                    Ok(Some(course)) => Some(course.id),
+                                    Ok(None) => {
+                                        let error_msg = format!("❌ Mata kuliah '{}' tidak ditemukan.", course_name);
+                                        let _ = send_reply(chat_id, &error_msg).await;
+                                        return StatusCode::OK;
+                                    }
+                                    Err(e) => {
+                                        eprintln!("❌ Failed to lookup course: {}", e);
+                                        None
+                                    }
+                                }
+                            } else {
+                                None
+                            };
+
+                            // Update Database
+                            match crud::update_assignment_fields(
+                                &state.pool,
+                                assignment_id,
+                                new_deadline,
+                                new_title,
+                                new_description,
+                                new_parallel_codes,
+                                None,
+                            ).await {
+                                Ok(_) => {
+                                    // Update course_id jika ada perubahan
+                                    if let Some(cid) = course_id {
+                                        let _ = sqlx::query("UPDATE assignments SET course_id = $1 WHERE id = $2")
+                                            .bind(cid)
+                                            .bind(assignment_id)
+                                            .execute(&state.pool)
+                                            .await;
+                                    }
+                                    
+                                    // Konfirmasi Berhasil
+                                    if let Ok(Some(full_assignment)) = crud::get_assignment_with_course_by_id(&state.pool, assignment_id).await {
+                                        let deadline_display = full_assignment.deadline
+                                            .map(|d| {
+                                                let indonesia_time = d + ChronoDuration::hours(7);
+                                                indonesia_time.format("%Y-%m-%d %H:%M WIB").to_string()
+                                            })
+                                            .unwrap_or("(belum ditentukan)".to_string());
+
+                                        let response = format!(
+                                            "*[KLARIF TERSIMPAN]*\n\
+                                            _Terima kasih! Data berhasil diperbarui._\n\
+                                            \n\
+                                            📝 *{}*\n\
+                                            📚 {}\n\
+                                            📄 {}\n\
+                                            ⏰ {}\n\
+                                            🧩 Parallel: {}",
+                                            full_assignment.title,
+                                            full_assignment.course_name,
+                                            full_assignment.description.as_deref().unwrap_or("-"),
+                                            deadline_display,
+                                            full_assignment.format_parallel_display()
+                                        );
+                                        
+                                        let _ = send_reply(chat_id, &response).await;
+                                    } else {
+                                        let _ = send_reply(chat_id, "✅ *KLARIFIKASI TERSIMPAN*").await;
+                                    }
                                 }
                                 Err(e) => {
-                                    eprintln!("❌ Failed to lookup course: {}", e);
-                                    None
+                                    let error_msg = format!("❌ Gagal menyimpan database: {}", e);
+                                    let _ = send_reply(chat_id, &error_msg).await;
                                 }
                             }
-                        } else {
-                            None
-                        };
-
-                        // Update Database
-                        match crud::update_assignment_fields(
-                            &state.pool,
-                            assignment_id,
-                            new_deadline,
-                            new_title,
-                            new_description,
-                            new_parallel_codes,
-                            None,
-                        ).await {
-                            Ok(_) => {
-                                // Update course_id jika ada perubahan
-                                if let Some(cid) = course_id {
-                                    let _ = sqlx::query("UPDATE assignments SET course_id = $1 WHERE id = $2")
-                                        .bind(cid)
-                                        .bind(assignment_id)
-                                        .execute(&state.pool)
-                                        .await;
+                        }
+                        Err(err_type) => {
+                            // Handle Error dari AI Parser
+                            match err_type.as_str() {
+                                "cancelled" => {
+                                    let cancel_msg = clarification::generate_cancellation_message(assignment_id);
+                                    let _ = send_reply(chat_id, &cancel_msg).await;
                                 }
-                                
-                                // Konfirmasi Berhasil
-                                if let Ok(Some(full_assignment)) = crud::get_assignment_with_course_by_id(&state.pool, assignment_id).await {
-                                    let deadline_display = full_assignment.deadline
-                                        .map(|d| {
-                                            let indonesia_time = d + ChronoDuration::hours(7);
-                                            indonesia_time.format("%Y-%m-%d %H:%M WIB").to_string()
-                                        })
-                                        .unwrap_or("(belum ditentukan)".to_string());
-
-                                    let response = format!(
-                                        "*[KLARIF TERSIMPAN]*\n\
-                                        _Terima kasih! Data berhasil diperbarui._\n\
-                                        \n\
-                                        📝 *{}*\n\
-                                        📚 {}\n\
-                                        📄 {}\n\
-                                        ⏰ {}\n\
-                                        🧩 Parallel: {}",
-                                        full_assignment.title,
-                                        full_assignment.course_name,
-                                        full_assignment.description.as_deref().unwrap_or("-"),
-                                        deadline_display,
-                                        full_assignment.format_parallel_display()
-                                    );
-                                    
-                                    let _ = send_reply(chat_id, &response).await;
-                                } else {
-                                    let _ = send_reply(chat_id, "✅ *KLARIFIKASI TERSIMPAN*").await;
+                                "no_data" => {
+                                    let parse_fail_msg = clarification::generate_parse_failed_message();
+                                    let _ = send_reply(chat_id, &parse_fail_msg).await;
                                 }
-                            }
-                            Err(e) => {
-                                let error_msg = format!("❌ Gagal menyimpan database: {}", e);
-                                let _ = send_reply(chat_id, &error_msg).await;
+                                "no_date" => {
+                                    let no_date_msg = clarification::generate_no_date_message();
+                                    let _ = send_reply(chat_id, &no_date_msg).await;
+                                }
+                                _ => {
+                                    let _ = send_reply(chat_id, "❌ Maaf, aku tidak mengerti format pesanmu.").await;
+                                }
                             }
                         }
                     }
-                    Err(err_type) => {
-                        // Handle Error dari AI Parser
-                        match err_type.as_str() {
-                            "cancelled" => {
-                                let cancel_msg = clarification::generate_cancellation_message(assignment_id);
-                                let _ = send_reply(chat_id, &cancel_msg).await;
-                            }
-                            "no_data" => {
-                                let parse_fail_msg = clarification::generate_parse_failed_message();
-                                let _ = send_reply(chat_id, &parse_fail_msg).await;
-                            }
-                            "no_date" => {
-                                let no_date_msg = clarification::generate_no_date_message();
-                                let _ = send_reply(chat_id, &no_date_msg).await;
-                            }
-                            _ => {
-                                let _ = send_reply(chat_id, "❌ Maaf, aku tidak mengerti format pesanmu.").await;
-                            }
-                        }
-                    }
+                } else {
+                    let _ = send_reply(chat_id, "❌ Data tugas tidak ditemukan/sudah dihapus.").await;
                 }
 
                 return StatusCode::OK;
@@ -934,9 +933,7 @@ async fn handle_single_assignment(
         crud::get_course_by_name(&pool, name).await.ok().flatten().map(|c| c.id)
     } else { None };
     
-    // ========================================
-    // IMPROVED DUPLICATE DETECTION
-    // ========================================
+    // DUPLICATE DETECTION
     if let Some(_cid) = course_id {
         if let Some(cname) = &course_name {
             let course_map: HashMap<uuid::Uuid, String> = sqlx::query_as::<_, (uuid::Uuid, String)>(
@@ -947,7 +944,6 @@ async fn handle_single_assignment(
             .map(|r| r.into_iter().collect())
             .unwrap_or_default();
             
-            // ✅ FIXED: Don't pass course_id filter - get ALL recent assignments
             let existing_assignments = crud::get_recent_assignments_for_update(&pool)
                 .await
                 .unwrap_or_default();
@@ -1000,10 +996,8 @@ async fn handle_single_assignment(
         }
     }
     
-    // ========================================
+
     // CREATE NEW ASSIGNMENT (no duplicate found)
-    // ========================================
-    
     let new_assignment = NewAssignment {
         course_id, 
         title: title_clone.clone(), 
