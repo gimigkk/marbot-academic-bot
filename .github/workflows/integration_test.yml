@@ -64,17 +64,21 @@ jobs:
         run: cargo install sqlx-cli --no-default-features --features postgres
       
       - name: Run migrations
-        run: sqlx migrate run
+        run: |
+          cd backend
+          sqlx migrate run
       
       - name: Run tests
-        run: cargo test --test integration_tests -- --test-threads=1 --nocapture
+        run: |
+          cd backend
+          cargo test --test integration_tests -- --test-threads=1 --nocapture
       
       - name: Upload results
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: test-results
-          path: test-results.json
+          path: backend/test-results.json
           if-no-files-found: warn
       
       - name: Comment PR with results
@@ -84,7 +88,7 @@ jobs:
           script: |
             const fs = require('fs');
             try {
-              const results = JSON.parse(fs.readFileSync('test-results.json', 'utf8'));
+              const results = JSON.parse(fs.readFileSync('backend/test-results.json', 'utf8'));
               const passed = results.filter(r => r.passed).length;
               const failed = results.filter(r => !r.passed).length;
               const rate = ((passed / results.length) * 100).toFixed(1);
