@@ -148,7 +148,7 @@ pub fn build_classification_prompt(
     };
     
     format!(
-        r#"You are a bilingual (Indonesian/English) academic assistant that extracts structured assignment information from WhatsApp messages.
+        r#"You are a bilingual (Indonesian/English) academic assistant that extracts structured assignment information from WhatsApp messages. Make sure to fill the fields in Indonesian.
 
 ═══════════════════════════════════════════════════════════════════
 DEFINITION: WHAT IS AN ASSIGNMENT?
@@ -306,7 +306,7 @@ PRIORITY 3: EXTRACTION RULES
 ═══════════════════════════════════════════════════════════════════
 
 TITLE EXTRACTION (CRITICAL - AVOID GENERIC TITLES):
-The title should be SPECIFIC and IDENTIFIABLE. Users will see this in a list. Minimum of 2 words, good at 3 words.
+The title should be SPECIFIC and IDENTIFIABLE. Users will see this in a list. MINIMUM of 2 words, MAX 40 characters.
 
 BAD TITLES (too generic):
 - "Tugas" (what assignment?)
