@@ -90,19 +90,33 @@ jobs:
           name: test-results
           path: |
             backend/test-results.json
+            backend/test-summary.json
             backend/test-output.log
           if-no-files-found: warn
       
-      - name: Show test output
+      - name: Display summary
         if: always()
         run: |
-          if [ -f backend/test-output.log ]; then
-            echo "=== Test Output ==="
-            cat backend/test-output.log
-          fi
-          if [ -f backend/test-results.json ]; then
-            echo "=== Test Results ==="
-            cat backend/test-results.json
+          if [ -f backend/test-summary.json ]; then
+            echo "📊 Test Summary"
+            cat backend/test-summary.json | jq -r '
+              "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+              "Total: \(.total)",
+              "✅ Passed: \(.passed)",
+              "❌ Failed: \(.failed)",
+              "📈 Success Rate: \(.success_rate)%",
+              "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+              "",
+              "📂 By Category:",
+              (.by_category | to_entries[] | "  \(.key): \(.value.passed)/\(.value.total) (\(.value.success_rate)%)"),
+              "",
+              (if .failures | length > 0 then
+                "❌ Failed Tests:",
+                (.failures[] | "  • \(.name) [\(.category)]", "    Expected: \(.expected), Got: \(.actual)")
+              else
+                "✅ All tests passed!"
+              end)
+            '
           fi
       
       - name: Comment PR with results
@@ -112,21 +126,52 @@ jobs:
           script: |
             const fs = require('fs');
             try {
-              const results = JSON.parse(fs.readFileSync('backend/test-results.json', 'utf8'));
-              const passed = results.filter(r => r.passed).length;
-              const failed = results.filter(r => !r.passed).length;
-              const rate = ((passed / results.length) * 100).toFixed(1);
+              const summary = JSON.parse(fs.readFileSync('backend/test-summary.json', 'utf8'));
               
               let comment = `## 🧪 Integration Test Results\n\n`;
-              comment += `- ✅ Passed: ${passed}\n`;
-              comment += `- ❌ Failed: ${failed}\n`;
-              comment += `- 📈 Success Rate: ${rate}%\n\n`;
+              comment += `| Metric | Value |\n`;
+              comment += `|--------|-------|\n`;
+              comment += `| Total Tests | ${summary.total} |\n`;
+              comment += `| ✅ Passed | ${summary.passed} |\n`;
+              comment += `| ❌ Failed | ${summary.failed} |\n`;
+              comment += `| 📈 Success Rate | ${summary.success_rate.toFixed(1)}% |\n\n`;
               
-              if (failed > 0) {
-                comment += `### Failed Tests\n`;
-                results.filter(r => !r.passed).forEach(t => {
-                  comment += `- **${t.name}**: Expected \`${t.expected}\`, got \`${t.actual}\`\n`;
+              if (Object.keys(summary.by_category).length > 0) {
+                comment += `### 📂 Results by Category\n\n`;
+                comment += `| Category | Passed | Total | Rate |\n`;
+                comment += `|----------|--------|-------|------|\n`;
+                
+                Object.entries(summary.by_category)
+                  .sort(([a], [b]) => a.localeCompare(b))
+                  .forEach(([category, stats]) => {
+                    const icon = stats.success_rate === 100 ? '✅' : stats.success_rate >= 80 ? '⚠️' : '❌';
+                    comment += `| ${icon} ${category} | ${stats.passed} | ${stats.total} | ${stats.success_rate.toFixed(0)}% |\n`;
+                  });
+                comment += `\n`;
+              }
+              
+              if (summary.failures.length > 0) {
+                comment += `### ❌ Failed Tests\n\n`;
+                comment += `<details>\n<summary>Show ${summary.failures.length} failure(s)</summary>\n\n`;
+                
+                summary.failures.forEach((failure, i) => {
+                  comment += `\n**${i + 1}. ${failure.name}** \`[${failure.category}]\`\n`;
+                  comment += `- Expected: \`${failure.expected}\`\n`;
+                  comment += `- Got: \`${failure.actual}\`\n`;
+                  if (failure.error) {
+                    comment += `- Error: ${failure.error}\n`;
+                  }
+                  if (failure.message_preview) {
+                    const preview = failure.message_preview.length > 80 
+                      ? failure.message_preview.substring(0, 80) + '...'
+                      : failure.message_preview;
+                    comment += `- Message: \`${preview}\`\n`;
+                  }
                 });
+                
+                comment += `\n</details>\n`;
+              } else {
+                comment += `### ✅ All Tests Passed! 🎉\n`;
               }
               
               github.rest.issues.createComment({

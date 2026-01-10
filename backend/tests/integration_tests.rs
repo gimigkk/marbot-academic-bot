@@ -2,8 +2,9 @@ use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 use std::collections::HashMap;
 use std::fs;
+use std::sync::Arc;
+use tokio::sync::Semaphore;
 
-// Import from marbot crate
 use marbot::models::AIClassification;
 use marbot::parser::ai_extractor::extract_with_ai;
 use marbot::database::crud;
@@ -16,10 +17,10 @@ struct TestCase {
     #[serde(default)]
     quoted_message: Option<String>,
     #[serde(default)]
-    description: Option<String>,
+    category: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Clone)]
 struct TestResult {
     name: String,
     passed: bool,
@@ -27,20 +28,50 @@ struct TestResult {
     actual: String,
     duration_ms: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
+    category: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    message_preview: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct TestSummary {
+    total: usize,
+    passed: usize,
+    failed: usize,
+    success_rate: f64,
+    by_category: HashMap<String, CategoryStats>,
+    failures: Vec<FailureDetail>,
+}
+
+#[derive(Debug, Serialize)]
+struct CategoryStats {
+    total: usize,
+    passed: usize,
+    failed: usize,
+    success_rate: f64,
+}
+
+#[derive(Debug, Serialize)]
+struct FailureDetail {
+    name: String,
+    category: String,
+    expected: String,
+    actual: String,
+    message_preview: String,
     error: Option<String>,
 }
 
 #[tokio::test]
 async fn run_all_test_cases() {
-    // Load test environment variables
-    // Try .env.test first, fall back to .env
+    // Load test environment
     if std::path::Path::new(".env.test").exists() {
         dotenv::from_filename(".env.test").ok();
     } else {
         dotenv::dotenv().ok();
     }
     
-    // Connect to database
     let database_url = std::env::var("DATABASE_URL")
         .expect("DATABASE_URL must be set");
     
@@ -55,7 +86,6 @@ async fn run_all_test_cases() {
     let test_cases: Vec<TestCase> = serde_json::from_str(&test_data)
         .expect("Failed to parse test_cases.json");
     
-    // Get test limit from env or run all
     let limit = std::env::var("TEST_LIMIT")
         .ok()
         .and_then(|s| s.parse::<usize>().ok())
@@ -65,39 +95,63 @@ async fn run_all_test_cases() {
     println!("║  🧪 Running {} test cases", limit);
     println!("╚══════════════════════════════════════════════╝\n");
     
-    let mut results = Vec::new();
-    let mut passed = 0;
-    let mut failed = 0;
+    // Run tests in parallel with semaphore to limit concurrency
+    let semaphore = Arc::new(Semaphore::new(3)); // Max 3 concurrent tests
+    let pool = Arc::new(pool);
+    
+    let mut handles = vec![];
     
     for (i, test_case) in test_cases.iter().take(limit).enumerate() {
-        println!("┌─ [{}/{}] {}", i + 1, limit, test_case.name);
+        let sem = semaphore.clone();
+        let pool = pool.clone();
+        let test_case = test_case.clone();
+        let test_num = i + 1;
+        let total = limit;
         
-        let start = std::time::Instant::now();
-        let result = run_single_test(&pool, test_case).await;
-        let duration = start.elapsed().as_millis() as u64;
-        
-        let mut test_result = result;
-        test_result.duration_ms = duration;
-        
-        if test_result.passed {
-            println!("└─ ✅ PASS ({} ms)\n", duration);
-            passed += 1;
-        } else {
-            println!("└─ ❌ FAIL: Expected '{}', got '{}' ({} ms)", 
-                test_result.expected, test_result.actual, duration);
-            if let Some(ref err) = test_result.error {
-                println!("   Error: {}\n", err);
+        let handle = tokio::spawn(async move {
+            let _permit = sem.acquire().await.unwrap();
+            
+            println!("┌─ [{}/{}] {}", test_num, total, test_case.name);
+            
+            let start = std::time::Instant::now();
+            let result = run_single_test(&pool, &test_case).await;
+            let duration = start.elapsed().as_millis() as u64;
+            
+            let mut test_result = result;
+            test_result.duration_ms = duration;
+            
+            if test_result.passed {
+                println!("└─ ✅ PASS ({} ms)\n", duration);
+            } else {
+                println!("└─ ❌ FAIL: Expected '{}', got '{}' ({} ms)", 
+                    test_result.expected, test_result.actual, duration);
+                if let Some(ref err) = test_result.error {
+                    println!("   Error: {}\n", err);
+                }
             }
-            failed += 1;
-        }
-        
-        results.push(test_result);
-        
-        // Rate limit: 2s between calls to avoid API limits
-        if i < limit - 1 {
+            
+            // Add delay to respect rate limits
             tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+            
+            test_result
+        });
+        
+        handles.push(handle);
+    }
+    
+    // Collect results
+    let mut results = Vec::new();
+    for handle in handles {
+        if let Ok(result) = handle.await {
+            results.push(result);
         }
     }
+    
+    // Sort by test name for consistent output
+    results.sort_by(|a, b| a.name.cmp(&b.name));
+    
+    // Generate summary
+    let summary = generate_summary(&results);
     
     // Save results
     let results_json = serde_json::to_string_pretty(&results)
@@ -105,24 +159,134 @@ async fn run_all_test_cases() {
     fs::write("test-results.json", results_json)
         .expect("Failed to write test-results.json");
     
-    // Print summary
+    let summary_json = serde_json::to_string_pretty(&summary)
+        .expect("Failed to serialize summary");
+    fs::write("test-summary.json", summary_json)
+        .expect("Failed to write test-summary.json");
+    
+    // Print detailed summary
+    print_summary(&summary);
+    
+    if summary.failed > 0 {
+        panic!("{} test case(s) failed", summary.failed);
+    }
+}
+
+impl Clone for TestCase {
+    fn clone(&self) -> Self {
+        TestCase {
+            name: self.name.clone(),
+            message: self.message.clone(),
+            expected_type: self.expected_type.clone(),
+            quoted_message: self.quoted_message.clone(),
+            category: self.category.clone(),
+        }
+    }
+}
+
+fn generate_summary(results: &[TestResult]) -> TestSummary {
+    let total = results.len();
+    let passed = results.iter().filter(|r| r.passed).count();
+    let failed = total - passed;
+    let success_rate = (passed as f64 / total as f64) * 100.0;
+    
+    // Group by category
+    let mut by_category: HashMap<String, CategoryStats> = HashMap::new();
+    for result in results {
+        let cat = result.category.clone().unwrap_or_else(|| "uncategorized".to_string());
+        let stats = by_category.entry(cat).or_insert(CategoryStats {
+            total: 0,
+            passed: 0,
+            failed: 0,
+            success_rate: 0.0,
+        });
+        
+        stats.total += 1;
+        if result.passed {
+            stats.passed += 1;
+        } else {
+            stats.failed += 1;
+        }
+    }
+    
+    // Calculate success rates
+    for stats in by_category.values_mut() {
+        stats.success_rate = (stats.passed as f64 / stats.total as f64) * 100.0;
+    }
+    
+    // Collect failure details
+    let failures: Vec<FailureDetail> = results
+        .iter()
+        .filter(|r| !r.passed)
+        .map(|r| FailureDetail {
+            name: r.name.clone(),
+            category: r.category.clone().unwrap_or_else(|| "uncategorized".to_string()),
+            expected: r.expected.clone(),
+            actual: r.actual.clone(),
+            message_preview: r.message_preview.clone().unwrap_or_default(),
+            error: r.error.clone(),
+        })
+        .collect();
+    
+    TestSummary {
+        total,
+        passed,
+        failed,
+        success_rate,
+        by_category,
+        failures,
+    }
+}
+
+fn print_summary(summary: &TestSummary) {
     println!("╔══════════════════════════════════════════════╗");
     println!("║  📊 TEST SUMMARY");
     println!("╠══════════════════════════════════════════════╣");
-    println!("║  ✅ Passed: {:<33} ║", passed);
-    println!("║  ❌ Failed: {:<33} ║", failed);
-    println!("║  📈 Success Rate: {:<26.1}% ║", 
-        (passed as f64 / (passed + failed) as f64) * 100.0);
-    println!("╚══════════════════════════════════════════════╝\n");
+    println!("║  ✅ Passed: {:<33} ║", summary.passed);
+    println!("║  ❌ Failed: {:<33} ║", summary.failed);
+    println!("║  📈 Success Rate: {:<26.1}% ║", summary.success_rate);
+    println!("╚══════════════════════════════════════════════╝");
     
-    // Fail if any tests failed
-    if failed > 0 {
-        panic!("{} test case(s) failed", failed);
+    if !summary.by_category.is_empty() {
+        println!("\n╔══════════════════════════════════════════════╗");
+        println!("║  📂 BY CATEGORY");
+        println!("╠══════════════════════════════════════════════╣");
+        
+        let mut categories: Vec<_> = summary.by_category.iter().collect();
+        categories.sort_by_key(|(name, _)| *name);
+        
+        for (category, stats) in categories {
+            println!("║  {}: {}/{} ({:.0}%)", 
+                category, stats.passed, stats.total, stats.success_rate);
+        }
+        println!("╚══════════════════════════════════════════════╝");
+    }
+    
+    if !summary.failures.is_empty() {
+        println!("\n╔══════════════════════════════════════════════╗");
+        println!("║  ❌ FAILED TESTS ({} failures)", summary.failures.len());
+        println!("╠══════════════════════════════════════════════╣");
+        
+        for (i, failure) in summary.failures.iter().enumerate() {
+            println!("║  {}. {} [{}]", i + 1, failure.name, failure.category);
+            println!("║     Expected: {}", failure.expected);
+            println!("║     Got: {}", failure.actual);
+            if let Some(ref err) = failure.error {
+                println!("║     Error: {}", err);
+            }
+            let preview = if failure.message_preview.len() > 60 {
+                format!("{}...", &failure.message_preview[..60])
+            } else {
+                failure.message_preview.clone()
+            };
+            println!("║     Message: {}", preview);
+            println!("║");
+        }
+        println!("╚══════════════════════════════════════════════╝\n");
     }
 }
 
 async fn run_single_test(pool: &PgPool, test_case: &TestCase) -> TestResult {
-    // Get context data
     let courses_list = match crud::get_all_courses_formatted(pool).await {
         Ok(list) => list,
         Err(e) => {
@@ -132,7 +296,9 @@ async fn run_single_test(pool: &PgPool, test_case: &TestCase) -> TestResult {
                 expected: test_case.expected_type.clone(),
                 actual: "error".to_string(),
                 duration_ms: 0,
+                category: test_case.category.clone(),
                 error: Some(format!("Failed to get courses: {}", e)),
+                message_preview: Some(test_case.message.chars().take(100).collect()),
             };
         }
     };
@@ -147,7 +313,6 @@ async fn run_single_test(pool: &PgPool, test_case: &TestCase) -> TestResult {
     .map(|rows| rows.into_iter().collect())
     .unwrap_or_default();
     
-    // Call AI extraction
     let result = extract_with_ai(
         &test_case.message,
         &courses_list,
@@ -175,7 +340,9 @@ async fn run_single_test(pool: &PgPool, test_case: &TestCase) -> TestResult {
                 expected: test_case.expected_type.clone(),
                 actual: actual_type.to_string(),
                 duration_ms: 0,
+                category: test_case.category.clone(),
                 error: None,
+                message_preview: Some(test_case.message.chars().take(100).collect()),
             }
         }
         Err(e) => TestResult {
@@ -184,7 +351,9 @@ async fn run_single_test(pool: &PgPool, test_case: &TestCase) -> TestResult {
             expected: test_case.expected_type.clone(),
             actual: "error".to_string(),
             duration_ms: 0,
+            category: test_case.category.clone(),
             error: Some(e),
+            message_preview: Some(test_case.message.chars().take(100).collect()),
         }
     }
 }

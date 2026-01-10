@@ -1,63 +1,201 @@
 [
   {
-    "name": "Simple assignment announcement",
-    "message": "Tugas Pemrograman LKP 15 deadline besok jam 23:59",
+    "name": "Category 1.1 - Basic reminder with emoji",
+    "message": "📢 REMINDER RPL K1 📢\nHalooo teman-teman!!!!\nmau ngingetin nih, Jangan lupa kerjain Tugas 1 di Class yaa guyss✨🙌🏻\n\nDeadline:\n📅 Senin, 20 Januari 2026 pukul 23.59\n\nJangan sampai kelewatan yaa!!🤩👋🏻",
     "expected_type": "assignment_info",
-    "description": "Basic assignment with explicit deadline"
+    "category": "standard_reminders"
   },
   {
-    "name": "Assignment with parallel code in title",
-    "message": "🚨 GRAFKOM K2 🚨\nTugas LKP 14 dikumpulkan ketika praktikum",
+    "name": "Category 1.2 - All caps urgent",
+    "message": "🚨🚨🚨 REMINDER STRUKDAT P2 🚨🚨🚨\n\nJANGAN LUPA KERJAIN LKP 5 YAA\n\nDEADLINE MALAM INI JAM 23:59!!!",
     "expected_type": "assignment_info",
-    "description": "Parallel code extraction from course abbreviation"
+    "category": "standard_reminders"
   },
   {
-    "name": "Multiple assignments in one message",
+    "name": "Category 1.3 - Mixed case with typos",
+    "message": "reminder MeTkUn k3\nbesok ada kuis yaa jangan lupa belajar\nmateri bab 4-6",
+    "expected_type": "assignment_info",
+    "category": "standard_reminders"
+  },
+  {
+    "name": "Category 1.9 - Jaksel style informal",
+    "message": "guys literally jangan lupa PEMROG assignment yaa\ndeadline nya tonight jam 12\nkalau telat bakal kena penalti",
+    "expected_type": "assignment_info",
+    "category": "standard_reminders"
+  },
+  {
+    "name": "Category 2.1 - Full date format",
+    "message": "Reminder RPL K1\n\nDeadline tugas: Senin, 20 Januari 2026\nJangan lupa dikerjakan ya",
+    "expected_type": "assignment_info",
+    "category": "date_variations"
+  },
+  {
+    "name": "Category 2.2 - Numeric date slash",
+    "message": "STRUKDAT P2\n\nLKP 5 deadline 20/01/2026 jam 23:59",
+    "expected_type": "assignment_info",
+    "category": "date_variations"
+  },
+  {
+    "name": "Category 2.6 - Besok (tomorrow)",
+    "message": "INFO RPL K2\n\nKuliah besok jam 8 pagi ya guys\nJangan telat",
+    "expected_type": "unrecognized",
+    "category": "date_variations"
+  },
+  {
+    "name": "Category 2.10 - Malam ini (tonight)",
+    "message": "REMINDER METCUAN P2\n\nDeadline tugas malam ini jam 23:59\n3 JAM LAGI GES 😮",
+    "expected_type": "assignment_info",
+    "category": "date_variations"
+  },
+  {
+    "name": "Category 3.1 - Online with Zoom link",
+    "message": "INFO RPL K1\n\nKuliah besok ONLINE jam 10.00\n\nLink Zoom:\nhttps://ipb-university.zoom.us/j/12345678901?pwd=abc123def456\n\nMeeting ID: 123 4567 8901\nPasscode: 123456",
+    "expected_type": "unrecognized",
+    "category": "online_offline_mode"
+  },
+  {
+    "name": "Category 3.2 - Clear offline with room",
+    "message": "Reminder STRUKDAT P2\n\nBesok praktikum OFFLINE\nRuangan: Lab Komputer 1\nJam: 13.00-15.30",
+    "expected_type": "unrecognized",
+    "category": "online_offline_mode"
+  },
+  {
+    "name": "Category 3.5 - Asynchronous mode",
+    "message": "📣 INFO PEMROG K1 📣\n\nUntuk pertemuan minggu ini dilakukan secara ASYNCHRONOUS\n\nVideo pembelajaran sudah diupload di Class\nBatas akhir tonton + kerjain tugas: Minggu, 26 Jan 2026, 23:59",
+    "expected_type": "assignment_info",
+    "category": "online_offline_mode"
+  },
+  {
+    "name": "Category 4.2 - All classes announcement",
+    "message": "📢 REMINDER RPL SEMUA KELAS 📢\n\nJangan lupa isi EPBM sebelum deadline\nDeadline: Jumat, 24 Jan 2026, 16:00",
+    "expected_type": "assignment_info",
+    "category": "multiple_classes"
+  },
+  {
+    "name": "Category 5.1 - Simple assignment",
+    "message": "📢 Tugas RPL K1 📢\n\nKerjakan Latihan #5 di Class\nDeadline: Senin, 20 Jan 17:00",
+    "expected_type": "assignment_info",
+    "category": "assignments_tasks"
+  },
+  {
+    "name": "Category 5.2 - Multiple tasks",
+    "message": "REMINDER STRUKDAT K2:\n\n1. LKP 5 - Deadline Rabu 23:59\n2. Tugas Proyek Fase 2 - Deadline Jumat 23:59\n3. Quiz di Class - Deadline Minggu 14:20\n\nJangan sampai ada yang kelewat yaa😆🤩",
+    "expected_type": "multiple_assignments",
+    "category": "assignments_tasks"
+  },
+  {
+    "name": "Category 5.11 - Late submission warning",
+    "message": "🚨 GRAFKOM K2 🚨\n\nDeadline tugas MALAM INI pukul 23:59\nYang terlambat tidak akan dinilai!!",
+    "expected_type": "assignment_info",
+    "category": "assignments_tasks"
+  },
+  {
+    "name": "Category 5.12 - Extension announcement",
+    "message": "Info PEMROG K3\n\nDeadline tugas diperpanjang sampai Rabu\n(dari yang sebelumnya Senin)\n\nManfaatkan waktu tambahan dengan baik ya",
+    "expected_type": "assignment_update",
+    "category": "assignments_tasks"
+  },
+  {
+    "name": "Category 6.1 - Quiz announcement",
+    "message": "📢 REMINDER RPL K1 📢\n\nBESOK AKAN DIADAKAN KUIS DI KULIAH!!!\nMateri: Chapter 1-4\nDurasi: 20 menit di awal kelas\n\nMohon persiapkan diri dengan baik 😋",
+    "expected_type": "assignment_info",
+    "category": "quiz_exam"
+  },
+  {
+    "name": "Category 6.11 - Surprise quiz",
+    "message": "GRAFKOM K1\n\nMaaf info mendadak\nHari ini ada kuis di akhir kelas\nMateri pertemuan kemarin",
+    "expected_type": "assignment_info",
+    "category": "quiz_exam"
+  },
+  {
+    "name": "Category 7.1 - Simple correction",
+    "message": "koreksi RPL K1\n\nKuliah besok jam 10, bukan jam 9",
+    "expected_type": "unrecognized",
+    "category": "corrections_updates"
+  },
+  {
+    "name": "Category 7.9 - Deadline extension",
+    "message": "GOOD NEWS STRUKDAT K1\n\nDeadline tugas diperpanjang sampai Minggu\n(dari Jumat)\n\nManfaatkan waktu tambahan dgn baik",
+    "expected_type": "assignment_update",
+    "category": "corrections_updates"
+  },
+  {
+    "name": "Category 9.1 - No course mentioned",
+    "message": "Guys jangan lupa besok ada kuis ya\nBelajar materi minggu lalu\n\nJam 10 di kelas biasa",
+    "expected_type": "unrecognized",
+    "category": "edge_cases"
+  },
+  {
+    "name": "Category 9.5 - Personal chat",
+    "message": "guys ada yang punya catatan metcuan chapter 3?\nboleh minta foto?\nmakasih",
+    "expected_type": "unrecognized",
+    "category": "edge_cases"
+  },
+  {
+    "name": "Category 9.7 - Greeting only",
+    "message": "Assalamualaikum teman-teman\nSelamat pagi",
+    "expected_type": "unrecognized",
+    "category": "edge_cases"
+  },
+  {
+    "name": "Category 10.5 - Asynchronous with video requirement",
+    "message": "INFO PEMROG K1 📣\n\nUntuk PEMROG K1 hari Kamis jam 08:00 sampai 09:40 pembelajaran dilakukan dengan cara Asynchronous.\n\nKetentuan:\n1. Format video bebas, boleh papan tulis, ada muka/gak ada muka\n2. Gak ada minimal durasi video, tapi maksimal 40 menit\n\nBatas akhir unggah file jawaban + video jawaban: Minggu, 26 Januari 2026, pukul 23.59",
+    "expected_type": "assignment_info",
+    "category": "real_patterns"
+  },
+  {
+    "name": "Category 10.10 - Shared spreadsheet",
+    "message": "📢 *METCUAN K1* 📢\nHalooo sobat Metcuan K1👋🏻\n\nBerikut google sheet daftar kelompok tugas Metcuan K1 ya: https://docs.google.com/spreadsheets/d/1kFkFitdI-FyhiOsi5qkEwdFhV60hHqg6nbvsRAnHT5M/edit?usp=sharing\n\nCek kelompok kalian dan mulai koordinasi yaa",
+    "expected_type": "assignment_info",
+    "category": "real_patterns"
+  },
+  {
+    "name": "Multiple assignments same parallel",
     "message": "Ada 2 tugas:\n1. Pemrog LKP 15 deadline besok\n2. Grafkom Quiz 3 deadline lusa",
     "expected_type": "multiple_assignments",
-    "description": "Batch assignment detection"
+    "category": "complex"
   },
   {
-    "name": "Assignment update",
+    "name": "Assignment update - postponed",
     "message": "LKP 14 Pemrograman diundur jadi minggu depan",
     "expected_type": "assignment_update",
-    "description": "Update existing assignment"
+    "category": "complex"
   },
   {
     "name": "Quoted message update",
     "message": "Deadline berubah jadi Jumat jam 14:00",
     "quoted_message": "Tugas Pemrograman LKP 14 deadline hari ini",
     "expected_type": "assignment_update",
-    "description": "Update via reply to original message"
+    "category": "complex"
   },
   {
-    "name": "Not an assignment - greeting",
+    "name": "Not assignment - greeting",
     "message": "Halo guys, ada yang bisa bantu?",
     "expected_type": "unrecognized",
-    "description": "Should reject casual conversation"
+    "category": "edge_cases"
   },
   {
-    "name": "Not an assignment - class schedule",
+    "name": "Not assignment - class schedule",
     "message": "Praktikum besok jam 8 pagi ya jangan lupa",
     "expected_type": "unrecognized",
-    "description": "Should reject class attendance announcements"
+    "category": "edge_cases"
   },
   {
     "name": "Assignment with relative deadline",
     "message": "Tugas Struktur Data dikumpulkan besok sebelum kelas",
     "expected_type": "assignment_info",
-    "description": "Relative time reference"
+    "category": "date_variations"
   },
   {
     "name": "Assignment for multiple parallels",
     "message": "Tugas Grafkom untuk K1, K2, dan K3 deadline Jumat",
     "expected_type": "assignment_info",
-    "description": "Multiple parallel codes"
+    "category": "multiple_classes"
   },
   {
     "name": "Assignment with 'all' parallel",
     "message": "Tugas RPL untuk semua kelas deadline minggu depan",
     "expected_type": "assignment_info",
-    "description": "Universal parallel code"
+    "category": "multiple_classes"
   }
 ]
