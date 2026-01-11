@@ -226,7 +226,7 @@ log "🔍 Ensuring waha and dozzle are running..."
 docker compose up -d --no-recreate waha dozzle
 
 log "⏳ Waiting for backend to start..."
-sleep 20
+sleep 3
 
 log "🏥 Checking backend health..."
 HEALTH_CHECK_SUCCESS=false
