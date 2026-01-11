@@ -26,151 +26,277 @@ jobs:
       - name: 📊 Calculate commit statistics
         id: stats
         run: |
-          echo -e "\033[1;36m========================================\033[0m"
-          echo -e "\033[1;36m📊 ANALYZING COMMIT STATISTICS\033[0m"
-          echo -e "\033[1;36m========================================\033[0m"
-          echo ""
-          
-          # Get additions and deletions
-          echo -e "\033[1;33m→ Calculating code changes...\033[0m"
           ADDITIONS=$(git show --shortstat | grep -oP '\d+(?= insertion)' || echo "0")
           DELETIONS=$(git show --shortstat | grep -oP '\d+(?= deletion)' || echo "0")
-          echo -e "  \033[0;32m✓ Additions: +$ADDITIONS lines\033[0m"
-          echo -e "  \033[0;31m✓ Deletions: -$DELETIONS lines\033[0m"
-          echo ""
-          
-          # Get short SHA
-          echo -e "\033[1;33m→ Extracting commit hash...\033[0m"
           SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
-          echo -e "  \033[0;35m✓ Short SHA: $SHORT_SHA\033[0m"
-          echo ""
-          
-          # Get full commit message
-          echo -e "\033[1;33m→ Processing commit message...\033[0m"
           COMMIT_MSG_RAW='${{ github.event.head_commit.message }}'
-          echo -e "  \033[0;90m  Original: $COMMIT_MSG_RAW\033[0m"
-          
-          # Sanitize commit message (replace newlines, escape quotes, limit length)
           COMMIT_MSG=$(echo "$COMMIT_MSG_RAW" | tr '\n' ' ' | tr '\r' ' ' | sed 's/  */ /g' | sed 's/"/\\"/g' | head -c 150)
-          echo -e "  \033[0;32m✓ Sanitized: $COMMIT_MSG\033[0m"
-          echo ""
-          
-          # Get author name
-          echo -e "\033[1;33m→ Identifying author...\033[0m"
           AUTHOR_NAME="${{ github.event.head_commit.author.name }}"
-          echo -e "  \033[0;34m✓ Author: $AUTHOR_NAME\033[0m"
-          echo ""
           
-          # Output all values
-          echo -e "\033[1;32m→ Saving outputs for next jobs...\033[0m"
           echo "additions=$ADDITIONS" >> $GITHUB_OUTPUT
           echo "deletions=$DELETIONS" >> $GITHUB_OUTPUT
           echo "short_sha=$SHORT_SHA" >> $GITHUB_OUTPUT
           echo "commit_message=$COMMIT_MSG" >> $GITHUB_OUTPUT
           echo "author_name=$AUTHOR_NAME" >> $GITHUB_OUTPUT
-          echo -e "  \033[0;32m✓ All outputs saved successfully\033[0m"
-          echo ""
+
+  build:
+    name: 🔨 Build Rust Binary
+    runs-on: ubuntu-latest
+    needs: prepare
+    timeout-minutes: 30
+    continue-on-error: true  # Don't fail the entire workflow if build fails
+    outputs:
+      build-success: ${{ steps.build-result.outputs.success }}
+    
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+      
+      - name: 🦀 Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-gnu
+      
+      - name: 📦 Cache Cargo dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "marbot-release"
+          cache-on-failure: true
+      
+      - name: 🔧 Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libssl-dev
+      
+      - name: 🏗️ Build release binary
+        id: build
+        continue-on-error: true
+        env:
+          SQLX_OFFLINE: true
+        run: |
+          echo "🔨 Building for x86_64-unknown-linux-gnu..."
+          cargo build --release --target x86_64-unknown-linux-gnu
           
-          # Print summary
-          echo -e "\033[1;36m========================================\033[0m"
-          echo -e "\033[1;36m✅ STATISTICS COMPLETE\033[0m"
-          echo -e "\033[1;36m========================================\033[0m"
-          
-          echo "### 📊 Commit Statistics" >> $GITHUB_STEP_SUMMARY
-          echo "- **Commit:** \`$SHORT_SHA\`" >> $GITHUB_STEP_SUMMARY
-          echo "- **Author:** $AUTHOR_NAME" >> $GITHUB_STEP_SUMMARY
-          echo "- **Changes:** +$ADDITIONS / -$DELETIONS" >> $GITHUB_STEP_SUMMARY
-          echo "- **Message:** $COMMIT_MSG" >> $GITHUB_STEP_SUMMARY
+          echo "📊 Binary information:"
+          ls -lh target/x86_64-unknown-linux-gnu/release/marbot
+          file target/x86_64-unknown-linux-gnu/release/marbot
+      
+      - name: 🔐 Generate SHA256 checksum
+        id: checksum
+        if: steps.build.outcome == 'success'
+        run: |
+          cd target/x86_64-unknown-linux-gnu/release
+          sha256sum marbot > marbot.sha256
+          CHECKSUM=$(cat marbot.sha256 | awk '{print $1}')
+          echo "checksum=$CHECKSUM" >> $GITHUB_OUTPUT
+          echo "✅ SHA256: $CHECKSUM"
+      
+      - name: 📦 Upload binary artifact
+        if: steps.build.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: marbot-binary
+          path: |
+            target/x86_64-unknown-linux-gnu/release/marbot
+            target/x86_64-unknown-linux-gnu/release/marbot.sha256
+          retention-days: 1
+          if-no-files-found: error
+      
+      - name: 📝 Set build result
+        id: build-result
+        run: |
+          if [ "${{ steps.build.outcome }}" == "success" ]; then
+            echo "success=true" >> $GITHUB_OUTPUT
+            echo "✅ Build succeeded"
+          else
+            echo "success=false" >> $GITHUB_OUTPUT
+            echo "⚠️ Build failed - will fallback to VPS build"
+          fi
 
   deploy:
     name: 🚀 Deploy to Server
     runs-on: ubuntu-latest
-    needs: prepare
-    timeout-minutes: 15
+    needs: [prepare, build]
+    if: always()  # Run even if build fails
+    timeout-minutes: 20
     
     steps:
-      - name: 📋 Display deployment info
-        run: |
-          echo -e "\033[1;35m========================================\033[0m"
-          echo -e "\033[1;35m🚀 STARTING VPS DEPLOYMENT\033[0m"
-          echo -e "\033[1;35m========================================\033[0m"
-          echo ""
-          echo -e "\033[1;33mDeployment Details:\033[0m"
-          echo -e "  \033[0;36m• Commit:  \033[1;37m${{ needs.prepare.outputs.short_sha }}\033[0m"
-          echo -e "  \033[0;36m• Author:  \033[1;37m${{ needs.prepare.outputs.author_name }}\033[0m"
-          echo -e "  \033[0;36m• Changes: \033[0;32m+${{ needs.prepare.outputs.additions }}\033[0m \033[0;31m-${{ needs.prepare.outputs.deletions }}\033[0m"
-          echo -e "  \033[0;36m• Message: \033[0;90m${{ needs.prepare.outputs.commit_message }}\033[0m"
-          echo ""
-          echo -e "\033[1;33m→ Establishing SSH connection to VPS...\033[0m"
+      - name: 📥 Checkout code (for Dockerfiles and update script)
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            update.sh
+            Dockerfile
+            Dockerfile.prebuilt
+          sparse-checkout-cone-mode: false
       
-      - name: 🔐 SSH to VPS and deploy
-        uses: appleboy/ssh-action@v1.0.3
+      - name: 🔍 Check build status
+        id: build-check
+        run: |
+          if [ "${{ needs.build.outputs.build-success }}" == "true" ]; then
+            echo "mode=prebuilt" >> $GITHUB_OUTPUT
+            echo "✅ Using prebuilt binary from GitHub Actions"
+          else
+            echo "mode=vps-build" >> $GITHUB_OUTPUT
+            echo "⚠️ GitHub Actions build failed - will build on VPS"
+          fi
+      
+      - name: 📥 Download binary artifact
+        if: steps.build-check.outputs.mode == 'prebuilt'
+        uses: actions/download-artifact@v4
+        with:
+          name: marbot-binary
+          path: ./binary
+      
+      - name: 🔐 Verify binary integrity
+        if: steps.build-check.outputs.mode == 'prebuilt'
+        run: |
+          cd binary
+          sha256sum -c marbot.sha256
+          echo "✅ Binary integrity verified"
+      
+      - name: 📤 Transfer files to VPS (prebuilt mode)
+        if: steps.build-check.outputs.mode == 'prebuilt'
+        uses: appleboy/scp-action@v1
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USERNAME }}
           key: ${{ secrets.VPS_SSH_KEY }}
           port: ${{ secrets.VPS_PORT }}
+          source: "binary/marbot,binary/marbot.sha256,update.sh,Dockerfile.prebuilt"
+          target: "/tmp/marbot-deploy-${{ needs.prepare.outputs.short_sha }}/"
+          strip_components: 0
+          overwrite: true
+      
+      - name: 📤 Transfer files to VPS (VPS build mode)
+        if: steps.build-check.outputs.mode == 'vps-build'
+        uses: appleboy/scp-action@v1
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USERNAME }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT }}
+          source: "update.sh,Dockerfile"
+          target: "/tmp/marbot-deploy-${{ needs.prepare.outputs.short_sha }}/"
+          strip_components: 0
+          overwrite: true
+      
+      - name: 🚀 Deploy with prebuilt binary
+        if: steps.build-check.outputs.mode == 'prebuilt'
+        uses: appleboy/ssh-action@v1
+        env:
+          COMMIT_SHA: ${{ needs.prepare.outputs.short_sha }}
+          COMMIT_MSG: ${{ needs.prepare.outputs.commit_message }}
+          AUTHOR: ${{ needs.prepare.outputs.author_name }}
+          ADDITIONS: ${{ needs.prepare.outputs.additions }}
+          DELETIONS: ${{ needs.prepare.outputs.deletions }}
+          BUILD_MODE: "prebuilt"
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USERNAME }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT }}
+          envs: COMMIT_SHA,COMMIT_MSG,AUTHOR,ADDITIONS,DELETIONS,BUILD_MODE
           script: |
-            echo -e "\033[1;32m========================================\033[0m"
-            echo -e "\033[1;32m🔗 CONNECTED TO VPS\033[0m"
-            echo -e "\033[1;32m========================================\033[0m"
-            echo ""
-            echo -e "\033[1;33m→ Navigating to project directory...\033[0m"
-            cd /opt/marbot-academic-bot
-            echo -e "  \033[0;32m✓ Current directory: $(pwd)\033[0m"
-            echo ""
-            echo -e "\033[1;33m→ Running update script...\033[0m"
-            echo -e "  \033[0;90m  Script: ./update.sh\033[0m"
-            echo ""
+            set -e
+            
+            DEPLOY_DIR="/tmp/marbot-deploy-${COMMIT_SHA}"
+            PROJECT_DIR="/opt/marbot-academic-bot"
+            
+            echo "🔍 Verifying binary integrity on VPS..."
+            cd "$DEPLOY_DIR/binary"
+            sha256sum -c marbot.sha256 || {
+              echo "❌ Binary integrity check failed!"
+              exit 1
+            }
+            echo "✅ Binary integrity verified on VPS"
+            
+            echo "📦 Preparing binary..."
+            chmod +x marbot
+            
+            echo "🚀 Deploying to project directory..."
+            cd "$PROJECT_DIR"
+            
+            # Move update script
+            cp "$DEPLOY_DIR/update.sh" ./update.sh
+            chmod +x ./update.sh
+            
+            # Move Dockerfile.prebuilt
+            cp "$DEPLOY_DIR/Dockerfile.prebuilt" ./Dockerfile.prebuilt
+            
+            # Move verified binary
+            mv "$DEPLOY_DIR/binary/marbot" ./marbot-new
+            
+            # Run update script with environment variables
+            export COMMIT_SHA COMMIT_MSG AUTHOR ADDITIONS DELETIONS BUILD_MODE
             bash update.sh
-            echo ""
-            echo -e "\033[1;32m========================================\033[0m"
-            echo -e "\033[1;32m✅ UPDATE SCRIPT COMPLETE\033[0m"
-            echo -e "\033[1;32m========================================\033[0m"
+            
+            # Cleanup
+            rm -rf "$DEPLOY_DIR"
+            
+            echo "✅ Deployment complete (prebuilt binary)!"
+      
+      - name: 🚀 Deploy with VPS build (fallback)
+        if: steps.build-check.outputs.mode == 'vps-build'
+        uses: appleboy/ssh-action@v1
+        env:
+          COMMIT_SHA: ${{ needs.prepare.outputs.short_sha }}
+          COMMIT_MSG: ${{ needs.prepare.outputs.commit_message }}
+          AUTHOR: ${{ needs.prepare.outputs.author_name }}
+          ADDITIONS: ${{ needs.prepare.outputs.additions }}
+          DELETIONS: ${{ needs.prepare.outputs.deletions }}
+          BUILD_MODE: "vps-build"
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USERNAME }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT }}
+          envs: COMMIT_SHA,COMMIT_MSG,AUTHOR,ADDITIONS,DELETIONS,BUILD_MODE
+          script: |
+            set -e
+            
+            DEPLOY_DIR="/tmp/marbot-deploy-${COMMIT_SHA}"
+            PROJECT_DIR="/opt/marbot-academic-bot"
+            
+            echo "⚠️ GitHub Actions build failed - building on VPS"
+            
+            cd "$PROJECT_DIR"
+            
+            # Move update script
+            cp "$DEPLOY_DIR/update.sh" ./update.sh
+            chmod +x ./update.sh
+            
+            # Move Dockerfile (original)
+            cp "$DEPLOY_DIR/Dockerfile" ./Dockerfile
+            
+            # Run update script with environment variables (will build on VPS)
+            export COMMIT_SHA COMMIT_MSG AUTHOR ADDITIONS DELETIONS BUILD_MODE
+            bash update.sh
+            
+            # Cleanup
+            rm -rf "$DEPLOY_DIR"
+            
+            echo "✅ Deployment complete (VPS build fallback)!"
       
       - name: ✅ Deployment successful
         run: |
-          echo ""
-          echo -e "\033[1;42m                                        \033[0m"
-          echo -e "\033[1;42m  ✅ DEPLOYMENT SUCCESSFUL!             \033[0m"
-          echo -e "\033[1;42m                                        \033[0m"
-          echo ""
-          echo -e "\033[0;32m✓ Server has been updated successfully\033[0m"
-          echo -e "\033[0;32m✓ Update script executed without errors\033[0m"
-          echo -e "\033[0;32m✓ Docker containers rebuilt and restarted\033[0m"
-          echo ""
-          
-          echo "### ✅ Deployment Successful!" >> $GITHUB_STEP_SUMMARY
-          echo "The VPS has been updated successfully." >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Deployment Process:**" >> $GITHUB_STEP_SUMMARY
-          echo "1. ✓ Code pulled from GitHub" >> $GITHUB_STEP_SUMMARY
-          echo "2. ✓ Backend Docker container rebuilt" >> $GITHUB_STEP_SUMMARY
-          echo "3. ✓ Backend service restarted" >> $GITHUB_STEP_SUMMARY
-          echo "4. ✓ Health check passed" >> $GITHUB_STEP_SUMMARY
-          echo "5. ✓ WhatsApp notification sent from VPS" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ steps.build-check.outputs.mode }}" == "prebuilt" ]; then
+            echo "✅ Binary built on GitHub Actions (x86_64-unknown-linux-gnu)"
+            echo "✅ Binary integrity verified with SHA256"
+          else
+            echo "⚠️ GitHub Actions build failed"
+            echo "✅ Fallback to VPS build successful"
+          fi
+          echo "✅ Deployment completed successfully"
 
   notify-success:
     name: 📱 Send Success Notification
     runs-on: ubuntu-latest
-    needs: [prepare, deploy]
+    needs: [prepare, build, deploy]
     if: success()
     timeout-minutes: 2
     
     steps:
-      - name: 📝 Prepare notification payload
-        run: |
-          echo -e "\033[1;32m========================================\033[0m"
-          echo -e "\033[1;32m📱 SENDING GITHUB ACTIONS NOTIFICATION\033[0m"
-          echo -e "\033[1;32m========================================\033[0m"
-          echo ""
-          echo -e "\033[1;33m→ Building notification message...\033[0m"
-          echo -e "  \033[0;90m  Platform: WhatsApp\033[0m"
-          echo -e "  \033[0;90m  Type: Success Message (GitHub Actions)\033[0m"
-          echo -e "  \033[0;90m  Commit: ${{ needs.prepare.outputs.short_sha }}\033[0m"
-          echo -e "  \033[0;36m  Note: VPS also sends its own notification\033[0m"
-          echo ""
-      
       - name: 📤 Send WhatsApp notification
         uses: joelwmale/webhook-action@master
         with:
@@ -180,38 +306,17 @@ jobs:
             {
               "session": "default",
               "chatId": "${{ secrets.DEBUG_GROUP_ID }}",
-              "text": "*[ 🤖 GITHUB ACTIONS SUCCESS ]*\n_${{ needs.prepare.outputs.commit_message }}_\n\n*[ `#${{ needs.prepare.outputs.short_sha }}` by ${{ needs.prepare.outputs.author_name }} ]* +${{ needs.prepare.outputs.additions }} -${{ needs.prepare.outputs.deletions }}\n\n✅ Workflow completed\n📦 VPS deployment triggered\nhttps://github.com/${{ github.repository }}/commit/${{ needs.prepare.outputs.short_sha }}",
-              "linkPreview": false
+              "text": "*[ MARBOT UPDATE SUCCESS ]*\n_${{ needs.prepare.outputs.commit_message }}_\n\n*[ `#${{ needs.prepare.outputs.short_sha }}` by ${{ needs.prepare.outputs.author_name }} ]* +${{ needs.prepare.outputs.additions }} -${{ needs.prepare.outputs.deletions }}\nhttps://github.com/${{ github.repository }}/commit/${{ needs.prepare.outputs.short_sha }}"
             }
-      
-      - name: ✅ Notification sent
-        if: success()
-        run: |
-          echo ""
-          echo -e "\033[0;32m✓ GitHub Actions notification delivered to WhatsApp\033[0m"
-          echo -e "\033[0;36m  (VPS will send detailed deployment status separately)\033[0m"
-          echo ""
 
   notify-failure:
     name: 📱 Send Failure Notification
     runs-on: ubuntu-latest
-    needs: [prepare, deploy]
+    needs: [prepare, build, deploy]
     if: failure()
     timeout-minutes: 2
     
     steps:
-      - name: 📝 Prepare failure notification
-        run: |
-          echo -e "\033[1;31m========================================\033[0m"
-          echo -e "\033[1;31m📱 SENDING FAILURE NOTIFICATION\033[0m"
-          echo -e "\033[1;31m========================================\033[0m"
-          echo ""
-          echo -e "\033[1;33m→ Building failure alert...\033[0m"
-          echo -e "  \033[0;90m  Platform: WhatsApp\033[0m"
-          echo -e "  \033[0;90m  Type: Failure Alert\033[0m"
-          echo -e "  \033[0;31m  ⚠ Deployment encountered errors\033[0m"
-          echo ""
-      
       - name: 📤 Send WhatsApp notification
         uses: joelwmale/webhook-action@master
         with:
@@ -221,120 +326,41 @@ jobs:
             {
               "session": "default",
               "chatId": "${{ secrets.DEBUG_GROUP_ID }}",
-              "text": "*[ ❌ GITHUB ACTIONS FAILED ]*\n_${{ needs.prepare.outputs.commit_message }}_\n\n*[ `#${{ needs.prepare.outputs.short_sha }}` by ${{ needs.prepare.outputs.author_name }} ]* +${{ needs.prepare.outputs.additions }} -${{ needs.prepare.outputs.deletions }}\n\n❌ Workflow failed\n🔍 Check logs below:\n${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}",
-              "linkPreview": false
+              "text": "*[ MARBOT UPDATE FAILED ]*\n_${{ needs.prepare.outputs.commit_message }}_\n\n*[ `#${{ needs.prepare.outputs.short_sha }}` by ${{ needs.prepare.outputs.author_name }} ]* +${{ needs.prepare.outputs.additions }} -${{ needs.prepare.outputs.deletions }}\n\n❌ Deployment failed\n🔍 Check logs:\n${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
             }
-      
-      - name: ⚠️ Failure notification sent
-        if: success()
-        run: |
-          echo ""
-          echo -e "\033[0;33m⚠ Failure notification delivered to WhatsApp\033[0m"
-          echo -e "\033[0;33m⚠ Team has been alerted to investigate\033[0m"
-          echo ""
 
   summary:
     name: 📊 Deployment Summary
     runs-on: ubuntu-latest
-    needs: [prepare, deploy, notify-success, notify-failure]
+    needs: [prepare, build, deploy, notify-success, notify-failure]
     if: always()
     timeout-minutes: 2
     
     steps:
       - name: 📝 Generate deployment report
         run: |
-          echo -e "\033[1;36m========================================\033[0m"
-          echo -e "\033[1;36m📊 GENERATING DEPLOYMENT REPORT\033[0m"
-          echo -e "\033[1;36m========================================\033[0m"
-          echo ""
-          
-          # Check deployment status
-          if [ "${{ needs.deploy.result }}" == "success" ]; then
-            echo -e "\033[1;42m                                        \033[0m"
-            echo -e "\033[1;42m  ✅ DEPLOYMENT: SUCCESS                \033[0m"
-            echo -e "\033[1;42m                                        \033[0m"
-            STATUS_EMOJI="✅"
-            STATUS_TEXT="SUCCESS"
-            STATUS_COLOR="\033[0;32m"
-          else
-            echo -e "\033[1;41m                                        \033[0m"
-            echo -e "\033[1;41m  ❌ DEPLOYMENT: FAILED                 \033[0m"
-            echo -e "\033[1;41m                                        \033[0m"
-            STATUS_EMOJI="❌"
-            STATUS_TEXT="FAILED"
-            STATUS_COLOR="\033[0;31m"
-          fi
-          
-          echo ""
-          echo -e "\033[1;33m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m"
-          echo -e "\033[1;33m  DEPLOYMENT DETAILS\033[0m"
-          echo -e "\033[1;33m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m"
-          echo ""
-          echo -e "  \033[1;36m📝 Commit:\033[0m       \033[1;37m${{ needs.prepare.outputs.short_sha }}\033[0m"
-          echo -e "  \033[1;36m👤 Author:\033[0m       \033[1;37m${{ needs.prepare.outputs.author_name }}\033[0m"
-          echo -e "  \033[1;36m📊 Changes:\033[0m      \033[0;32m+${{ needs.prepare.outputs.additions }}\033[0m / \033[0;31m-${{ needs.prepare.outputs.deletions }}\033[0m"
-          echo -e "  \033[1;36m💬 Message:\033[0m      \033[0;90m${{ needs.prepare.outputs.commit_message }}\033[0m"
-          echo ""
-          
-          echo -e "\033[1;33m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m"
-          echo -e "\033[1;33m  JOB STATUS\033[0m"
-          echo -e "\033[1;33m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m"
-          echo ""
-          
-          # Prepare job status
-          if [ "${{ needs.prepare.result }}" == "success" ]; then
-            echo -e "  \033[1;35m📋 Prepare:\033[0m      \033[0;32m✓ Success\033[0m"
-          else
-            echo -e "  \033[1;35m📋 Prepare:\033[0m      \033[0;31m✗ ${{ needs.prepare.result }}\033[0m"
-          fi
-          
-          # Deploy job status
-          if [ "${{ needs.deploy.result }}" == "success" ]; then
-            echo -e "  \033[1;35m🚀 Deploy:\033[0m       \033[0;32m✓ Success\033[0m"
-          else
-            echo -e "  \033[1;35m🚀 Deploy:\033[0m       \033[0;31m✗ ${{ needs.deploy.result }}\033[0m"
-          fi
-          
-          # Notification status
-          if [ "${{ needs.notify-success.result }}" != "skipped" ]; then
-            if [ "${{ needs.notify-success.result }}" == "success" ]; then
-              echo -e "  \033[1;35m📱 Notify:\033[0m       \033[0;32m✓ Success sent\033[0m"
-            else
-              echo -e "  \033[1;35m📱 Notify:\033[0m       \033[0;31m✗ Failed to send\033[0m"
-            fi
-          elif [ "${{ needs.notify-failure.result }}" != "skipped" ]; then
-            if [ "${{ needs.notify-failure.result }}" == "success" ]; then
-              echo -e "  \033[1;35m📱 Notify:\033[0m       \033[0;33m⚠ Failure sent\033[0m"
-            else
-              echo -e "  \033[1;35m📱 Notify:\033[0m       \033[0;31m✗ Failed to send\033[0m"
-            fi
-          fi
-          
-          echo ""
-          echo -e "\033[1;36m========================================\033[0m"
-          echo -e "\033[1;36m📊 REPORT COMPLETE\033[0m"
-          echo -e "\033[1;36m========================================\033[0m"
-          echo ""
-          
-          # Generate GitHub summary
           echo "# 📊 Deployment Report" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           
           if [ "${{ needs.deploy.result }}" == "success" ]; then
             echo "## ✅ Status: SUCCESS" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
-            echo "🎉 Deployment completed successfully!" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "**Process:**" >> $GITHUB_STEP_SUMMARY
-            echo "1. GitHub Actions triggered deployment" >> $GITHUB_STEP_SUMMARY
-            echo "2. VPS pulled latest code" >> $GITHUB_STEP_SUMMARY
-            echo "3. Docker backend container rebuilt" >> $GITHUB_STEP_SUMMARY
-            echo "4. Health checks passed" >> $GITHUB_STEP_SUMMARY
-            echo "5. Notifications sent (GitHub + VPS)" >> $GITHUB_STEP_SUMMARY
+            
+            if [ "${{ needs.build.outputs.build-success }}" == "true" ]; then
+              echo "🎉 Deployment completed with GitHub Actions build!" >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "**Build Method:** GitHub Actions (optimized)" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "🎉 Deployment completed with VPS build fallback!" >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "**Build Method:** VPS Fallback (GitHub Actions build failed)" >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "⚠️ **Note:** GitHub Actions build failed but deployment succeeded via VPS build." >> $GITHUB_STEP_SUMMARY
+            fi
           else
             echo "## ❌ Status: FAILED" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
-            echo "⚠️ Deployment encountered errors. Check the logs above for details." >> $GITHUB_STEP_SUMMARY
+            echo "⚠️ Deployment encountered errors." >> $GITHUB_STEP_SUMMARY
           fi
           
           echo "" >> $GITHUB_STEP_SUMMARY
@@ -352,5 +378,5 @@ jobs:
           echo "| Job | Status |" >> $GITHUB_STEP_SUMMARY
           echo "|-----|--------|" >> $GITHUB_STEP_SUMMARY
           echo "| Prepare | ${{ needs.prepare.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Build (GitHub) | ${{ needs.build.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Deploy | ${{ needs.deploy.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Notify | ${{ needs.notify-success.result != 'skipped' && needs.notify-success.result || needs.notify-failure.result }} |" >> $GITHUB_STEP_SUMMARY
