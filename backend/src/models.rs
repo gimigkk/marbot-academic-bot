@@ -220,6 +220,7 @@ pub struct Assignment {
     pub parallel_codes: Vec<String>,
     pub sender_id: Option<String>,
     pub message_ids: Vec<String>,
+    pub reminder_1h_sent: bool,  // ⚠️ ADD THIS IF MISSING
     pub relating_messages: Vec<String>,
 }
 

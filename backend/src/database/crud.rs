@@ -169,7 +169,9 @@ pub async fn get_last_completed_assignment(
 
 /// Get all assignments
 pub async fn get_assignments(pool: &PgPool) -> Result<Vec<Assignment>> {
-    let assignments = sqlx::query_as::<_, Assignment>(
+    println!("🔍 DEBUG: Calling get_assignments()...");
+    
+    let result = sqlx::query_as::<_, Assignment>(
         r#"
         SELECT 
             id,
@@ -188,11 +190,21 @@ pub async fn get_assignments(pool: &PgPool) -> Result<Vec<Assignment>> {
         "#
     )
     .fetch_all(pool)
-    .await?;
+    .await;
 
-    println!("✅ Found {} recent assignments", assignments.len());
+    match &result {
+        Ok(assignments) => {
+            println!("✅ DEBUG: Successfully fetched {} assignments", assignments.len());
+            if assignments.is_empty() {
+                println!("⚠️  DEBUG: No assignments found in database!");
+            }
+        }
+        Err(e) => {
+            eprintln!("❌ DEBUG: get_assignments() failed: {:?}", e);
+        }
+    }
 
-    Ok(assignments)
+    result
 }
 
 /// Get all courses as a HashMap for AI context
