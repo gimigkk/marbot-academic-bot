@@ -3,8 +3,6 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
-      args:
-        - DATABASE_URL=${DATABASE_URL}
     container_name: marbot_backend
     restart: unless-stopped
     environment:
