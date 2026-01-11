@@ -8,7 +8,7 @@ axum = "0.7"
 tokio = { version = "1", features = ["full"] }
 reqwest = { version = "0.11", features = ["json"] }
 dotenv = "0.15"
-sqlx = { version = "0.8", features = [ "runtime-tokio-rustls", "postgres", "macros", "uuid", "chrono", "json" ] }
+sqlx = { version = "0.8", features = [ "runtime-tokio-rustls", "postgres", "macros", "uuid", "chrono", "json", "migrate" ] }
 dotenvy = "0.15"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
