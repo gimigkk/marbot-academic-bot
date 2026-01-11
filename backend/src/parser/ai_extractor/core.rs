@@ -429,6 +429,9 @@ async fn try_groq_standard_text(prompt: &str) -> Result<AIClassification, String
             "messages": [{"role": "user", "content": prompt}],
             "temperature": 0.2,
             "max_tokens": 4096,
+            "top_p": 0.95,  // ADD
+            "frequency_penalty": 0.0,  // ADD
+            "presence_penalty": 0.0,   // ADD
             "response_format": { "type": "json_object" }
         });
         
@@ -515,6 +518,9 @@ async fn try_groq_vision(prompt: &str, image_base64: &str) -> Result<AIClassific
             }],
             "temperature": 0.2,
             "max_tokens": 4096,
+            "top_p": 0.95,  // ADD: For consistency with reasoning models
+            "frequency_penalty": 0.0,  // ADD: Prevent repetition
+            "presence_penalty": 0.0,   // ADD: Prevent topic drift
             "response_format": { "type": "json_object" }
         });
         
@@ -691,6 +697,7 @@ async fn try_gemini_duplicate_check(prompt: &str) -> Result<Option<Uuid>, String
             "generationConfig": {
                 "temperature": 0.0,
                 "maxOutputTokens": 1024,
+                "topP": 0.95,  // ADD
                 "responseMimeType": "application/json"
             }
         });
@@ -762,7 +769,9 @@ async fn try_groq_reasoning_duplicate_check(prompt: &str) -> Result<Option<Uuid>
             "model": model,
             "messages": [{"role": "user", "content": prompt}],
             "temperature": 0.0,
-            "max_completion_tokens": 2048,
+            "max_completion_tokens": 2048,  // or max_tokens for standard
+            "top_p": 0.95,  // ADD
+            "frequency_penalty": 0.0,  // ADD
             "response_format": { "type": "json_object" }
         });
         
@@ -1113,6 +1122,9 @@ async fn try_groq_standard_matching(prompt: &str) -> Result<Option<Uuid>, String
             "model": model,
             "messages": [{"role": "user", "content": prompt}],
             "temperature": 0.2,
+            "top_p": 0.95,
+            "frequency_penalty": 0.0,
+            "presence_penalty": 0.0,
             "max_tokens": 4096,
             "response_format": { "type": "json_object" }
         });
