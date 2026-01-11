@@ -30,7 +30,7 @@ jobs:
           DELETIONS=$(git show --shortstat | grep -oP '\d+(?= deletion)' || echo "0")
           SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
           COMMIT_MSG_RAW='${{ github.event.head_commit.message }}'
-          COMMIT_MSG=$(echo "$COMMIT_MSG_RAW" | tr '\n' ' ' | tr '\r' ' ' | sed 's/  */ /g' | sed 's/"/\\"/g' | head -c 150)
+          COMMIT_MSG=$(echo "$COMMIT_MSG_RAW" | tr '\n' ' ' | tr '\r' ' ' | sed 's/  */ /g' | sed 's/"/\\"/g' | head -c 150 | xargs)
           AUTHOR_NAME="${{ github.event.head_commit.author.name }}"
           
           echo "additions=$ADDITIONS" >> $GITHUB_OUTPUT
