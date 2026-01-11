@@ -240,19 +240,21 @@ PRIORITY 2: CLASSIFICATION LOGIC
 ═══════════════════════════════════════════════════════════════════
 
 STEP A: Check for QUOTED MESSAGE context (HIGHEST PRIORITY)
-IF QUOTED MESSAGE REFERENCE exists in hints:
-  → User is replying to previous message
-  → Look for update indicators: deadline changes, clarifications, corrections
-  → Common patterns:
-    * Time changes: "deadline besok", "diundur", "dipercepat", "changed to"
-    * Additional info: replies to assignment announcement with details
-    * Corrections: "bukan", "salah", "sebenarnya", "actually"
-  
-IF reply contains NEW assignment content (different course/topic):
-  → Classify as NEW assignment, not update
-  
-IF reply adds details to quoted assignment (deadline, description):
-  → Classify as UPDATE
+
+When user replies to a quoted assignment message:
+→ Look for: time/date mentions, change indicators, or clarifications
+→ Reference = QUOTED message (extract course + title)
+→ Changes = REPLY message (extract new info)
+→ Don't hallucinate fields - only set what user actually provides
+
+UPDATE examples:
+- "deadline hari ini" → set new_deadline only
+- "diundur besok" → set new_deadline only
+- "jam 14:00" → set new_deadline with that time
+
+NOT updates (NEW assignments):
+- Reply announces different course/topic
+- Reply says "ada lagi" (another assignment)
 
 STEP B: Check for MULTIPLE_ASSIGNMENTS
 Signals indicating multiple assignments:
