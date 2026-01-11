@@ -575,99 +575,7 @@ async fn try_groq_vision(prompt: &str, image_base64: &str) -> Result<AIClassific
     Err("All Groq vision models failed".to_string())
 }
 
-// ===== MATCHING (GEMINI ONLY) =====
-
-pub async fn match_update_to_assignment(
-    changes: &str,
-    keywords: &[String],
-    active_assignments: &[Assignment],
-    course_map: &HashMap<Uuid, String>,
-    parallel_codes: &[String],
-) -> Result<Option<Uuid>, String> {
-    let api_key = std::env::var("GEMINI_API_KEY")
-        .map_err(|_| "GEMINI_API_KEY not set in .env".to_string())?;
-    
-    let prompt = build_matching_prompt(changes, keywords, active_assignments, course_map, parallel_codes);
-    
-    println!("\x1b[1;30m┌── 🤖 AI MATCHING (GEMINI ONLY) ─────────────\x1b[0m");
-    println!("│ 🔍 Keywords   : {:?}", keywords);
-    
-    if !parallel_codes.is_empty() {
-        println!("│ 🧩 Parallels  : [{}]", parallel_codes.join(", "));
-    }
-    
-    for (index, model) in GEMINI_MODELS.iter().enumerate() {
-        // SECURITY FIX: API key moved from URL to header
-        let url = format!(
-            "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent",
-            model
-        );
-        
-        let request_body = json!({
-            "contents": [{"parts": [{"text": prompt}]}],
-            "generationConfig": {
-                "temperature": 0.2,
-                "maxOutputTokens": 4096,
-                "responseMimeType": "application/json"
-            }
-        });
-        
-        let client = reqwest::Client::new();
-        let response = match client
-            .post(&url)
-            .header("X-Goog-Api-Key", &api_key)
-            .json(&request_body)
-            .send()
-            .await
-        {
-            Ok(r) => r,
-            Err(e) => {
-                eprintln!("│ ❌ Failed     : {} (Attempt {}/{})", model, index + 1, GEMINI_MODELS.len());
-                eprintln!("│    Error: {}", e);
-                continue;
-            }
-        };
-        
-        let status = response.status();
-        
-        if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
-            eprintln!("│ ⚠️  R-LIMIT   : {} (Attempt {}/{})", model, index + 1, GEMINI_MODELS.len());
-            if index < GEMINI_MODELS.len() - 1 {
-                continue;
-            } else {
-                println!("\x1b[1;30m└──────────────────────────────────────────────\x1b[0m");
-                return Err("All Gemini models rate limited for matching.".to_string());
-            }
-        }
-        
-        if status.is_success() {
-            println!("│ \x1b[32m✅ SUCCESS\x1b[0m    : {} (Attempt {}/{})", model, index + 1, GEMINI_MODELS.len());
-            
-            let gemini_response: GeminiResponse = response.json().await
-                .map_err(|e| e.to_string())?;
-            let ai_text = extract_ai_text(&gemini_response)?;
-            
-            let result = parse_match_result(ai_text)?;
-            println!("\x1b[1;30m└──────────────────────────────────────────────\x1b[0m");
-            
-            return Ok(result);
-        }
-        
-        eprintln!("│ ❌ ERROR     : {} (Attempt {}/{}) - {}", model, index + 1, GEMINI_MODELS.len(), status);
-        
-        if index < GEMINI_MODELS.len() - 1 {
-            continue;
-        } else {
-            println!("\x1b[1;30m└──────────────────────────────────────────────\x1b[0m");
-            return Err(format!("AI matching failed with all models: {}", status));
-        }
-    }
-    
-    println!("\x1b[1;30m└──────────────────────────────────────────────\x1b[0m");
-    Err("No models available for matching".to_string())
-}
-
-// ===== DEDUPLICATION AI =====
+// ===== DEDUPLICATION AI (WITH FULL FALLBACK) =====
 
 pub async fn check_duplicate_assignment(
     title: &str,
@@ -726,10 +634,7 @@ pub async fn check_duplicate_assignment(
         return Ok(None);
     }
     
-    // ===== AI CHECK =====
-    let api_key = std::env::var("GEMINI_API_KEY")
-        .map_err(|_| "GEMINI_API_KEY not set".to_string())?;
-    
+    // ===== AI CHECK WITH FALLBACK =====
     let filtered_owned: Vec<Assignment> = filtered.into_iter().cloned().collect();
     let prompt = build_duplicate_detection_prompt(
         title,
@@ -740,14 +645,47 @@ pub async fn check_duplicate_assignment(
         course_map,
     );
     
+    // TIER 1: Try Gemini models first
+    match try_gemini_duplicate_check(&prompt).await {
+        Ok(result) => return Ok(result),
+        Err(e) => {
+            eprintln!("⚠️  Gemini duplicate check failed: {}", e);
+            eprintln!("🔄 Falling back to Groq...");
+        }
+    }
+    
+    // TIER 2: Groq reasoning models
+    match try_groq_reasoning_duplicate_check(&prompt).await {
+        Ok(result) => return Ok(result),
+        Err(e) => {
+            eprintln!("⚠️  Groq Reasoning duplicate check failed: {}", e);
+        }
+    }
+    
+    // TIER 3: Groq standard text models (final fallback)
+    match try_groq_standard_duplicate_check(&prompt).await {
+        Ok(result) => return Ok(result),
+        Err(e) => {
+            eprintln!("⚠️  Groq Standard duplicate check failed: {}", e);
+        }
+    }
+    
+    Err("All models failed".to_string())
+}
+
+// ===== GEMINI DUPLICATE CHECK =====
+
+async fn try_gemini_duplicate_check(prompt: &str) -> Result<Option<Uuid>, String> {
+    let api_key = std::env::var("GEMINI_API_KEY")
+        .map_err(|_| "GEMINI_API_KEY not set".to_string())?;
+    
     for (index, model) in GEMINI_MODELS.iter().enumerate() {
-        // SECURITY FIX: API key moved from URL to header
         let url = format!(
             "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent",
             model
         );
         
-        let request_body = serde_json::json!({
+        let request_body = json!({
             "contents": [{"parts": [{"text": prompt}]}],
             "generationConfig": {
                 "temperature": 0.0,
@@ -770,8 +708,16 @@ pub async fn check_duplicate_assignment(
         
         let status = response.status();
         
+        if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
+            if index < GEMINI_MODELS.len() - 1 {
+                continue;
+            } else {
+                return Err("All Gemini models rate limited".to_string());
+            }
+        }
+        
         if status.is_success() {
-            let gemini_response: super::parsing::GeminiResponse = response.json().await
+            let gemini_response: GeminiResponse = response.json().await
                 .map_err(|e| format!("Parse error: {}", e))?;
             
             let ai_text = extract_ai_text(&gemini_response)?;
@@ -780,30 +726,447 @@ pub async fn check_duplicate_assignment(
                 .map_err(|e| format!("JSON error: {}", e))?;
             
             if result.is_duplicate && result.confidence == "high" {
-                if let Some(id_str) = result.matched_assignment_id {
-                    if let Ok(uuid) = Uuid::parse_str(&id_str) {
-                        println!("🔍 Duplicate detected: {} - Reason: {}", title, result.reason);
+                if let Some(ref id_str) = result.matched_assignment_id {
+                    if let Ok(uuid) = Uuid::parse_str(id_str) {
+                        println!("🔍 Duplicate detected: {} - Reason: {}", id_str, result.reason);
                         return Ok(Some(uuid));
                     }
                 }
             } else if result.is_duplicate {
-                println!("⚠️  Low confidence duplicate: {} - Reason: {}", title, result.reason);
+                println!("⚠️  Low confidence duplicate - Reason: {}", result.reason);
             }
             
             return Ok(None);
         }
         
-        if status == reqwest::StatusCode::TOO_MANY_REQUESTS 
-            && index < GEMINI_MODELS.len() - 1 {
+        if index < GEMINI_MODELS.len() - 1 {
             continue;
-        }
-        
-        if index == GEMINI_MODELS.len() - 1 {
-            return Err("All models failed".to_string());
         }
     }
     
-    Err("No models available".to_string())
+    Err("All Gemini models failed".to_string())
+}
+
+// ===== GROQ REASONING DUPLICATE CHECK =====
+
+async fn try_groq_reasoning_duplicate_check(prompt: &str) -> Result<Option<Uuid>, String> {
+    let api_key = std::env::var("GROQ_API_KEY")
+        .map_err(|_| "GROQ_API_KEY not set".to_string())?;
+    
+    for (index, model) in GROQ_REASONING_MODELS.iter().enumerate() {
+        let url = "https://api.groq.com/openai/v1/chat/completions";
+        
+        let request_body = json!({
+            "model": model,
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.0,
+            "max_completion_tokens": 2048,
+            "response_format": { "type": "json_object" }
+        });
+        
+        let client = reqwest::Client::new();
+        let response = match client
+            .post(url)
+            .header("Authorization", format!("Bearer {}", api_key))
+            .header("Content-Type", "application/json")
+            .json(&request_body)
+            .send()
+            .await
+        {
+            Ok(r) => r,
+            Err(_) => continue,
+        };
+        
+        let status = response.status();
+        
+        if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
+            if index < GROQ_REASONING_MODELS.len() - 1 {
+                continue;
+            } else {
+                return Err("All Groq reasoning models rate limited".to_string());
+            }
+        }
+        
+        if status.is_success() {
+            let groq_response: GroqResponse = response.json().await
+                .map_err(|e| format!("Parse error: {}", e))?;
+            
+            let ai_text = extract_groq_text(&groq_response)?;
+            
+            let result: DuplicateCheckResult = serde_json::from_str(&ai_text)
+                .map_err(|e| format!("JSON error: {}", e))?;
+            
+            if result.is_duplicate && result.confidence == "high" {
+                if let Some(ref id_str) = result.matched_assignment_id {
+                    if let Ok(uuid) = Uuid::parse_str(id_str) {
+                        println!("🔍 Duplicate detected: {} - Reason: {}", id_str, result.reason);
+                        return Ok(Some(uuid));
+                    }
+                }
+            } else if result.is_duplicate {
+                println!("⚠️  Low confidence duplicate - Reason: {}", result.reason);
+            }
+            
+            return Ok(None);
+        }
+        
+        if index < GROQ_REASONING_MODELS.len() - 1 {
+            continue;
+        }
+    }
+    
+    Err("All Groq reasoning models failed".to_string())
+}
+
+// ===== GROQ STANDARD DUPLICATE CHECK (FINAL FALLBACK) =====
+
+async fn try_groq_standard_duplicate_check(prompt: &str) -> Result<Option<Uuid>, String> {
+    let api_key = std::env::var("GROQ_API_KEY")
+        .map_err(|_| "GROQ_API_KEY not set".to_string())?;
+    
+    for (index, model) in GROQ_TEXT_MODELS.iter().enumerate() {
+        let url = "https://api.groq.com/openai/v1/chat/completions";
+        
+        let request_body = json!({
+            "model": model,
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.0,
+            "max_tokens": 2048,
+            "response_format": { "type": "json_object" }
+        });
+        
+        let client = reqwest::Client::new();
+        let response = match client.post(url)
+            .header("Authorization", format!("Bearer {}", api_key))
+            .header("Content-Type", "application/json")
+            .json(&request_body)
+            .send()
+            .await
+        {
+            Ok(r) => r,
+            Err(_) => continue,
+        };
+        
+        let status = response.status();
+        
+        if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
+            if index < GROQ_TEXT_MODELS.len() - 1 {
+                continue;
+            } else {
+                return Err("All Groq standard models rate limited".to_string());
+            }
+        }
+        
+        if status.is_success() {
+            let groq_response: GroqResponse = response.json().await
+                .map_err(|e| format!("Parse error: {}", e))?;
+            
+            let ai_text = extract_groq_text(&groq_response)?;
+            
+            let result: DuplicateCheckResult = serde_json::from_str(&ai_text)
+                .map_err(|e| format!("JSON error: {}", e))?;
+            
+            if result.is_duplicate && result.confidence == "high" {
+                if let Some(ref id_str) = result.matched_assignment_id {
+                    if let Ok(uuid) = Uuid::parse_str(id_str) {
+                        println!("🔍 Duplicate detected: {} - Reason: {}", id_str, result.reason);
+                        return Ok(Some(uuid));
+                    }
+                }
+            } else if result.is_duplicate {
+                println!("⚠️  Low confidence duplicate - Reason: {}", result.reason);
+            }
+            
+            return Ok(None);
+        }
+        
+        if index < GROQ_TEXT_MODELS.len() - 1 {
+            continue;
+        }
+    }
+    
+    Err("All Groq standard models failed".to_string())
+}
+
+// ===== MATCHING (WITH FULL FALLBACK) =====
+
+pub async fn match_update_to_assignment(
+    changes: &str,
+    keywords: &[String],
+    active_assignments: &[Assignment],
+    course_map: &HashMap<Uuid, String>,
+    parallel_codes: &[String],
+) -> Result<Option<Uuid>, String> {
+    let prompt = build_matching_prompt(changes, keywords, active_assignments, course_map, parallel_codes);
+    
+    println!("\x1b[1;30m┌── 🤖 AI MATCHING ────────────────────────────\x1b[0m");
+    println!("│ 🔍 Keywords   : {:?}", keywords);
+    
+    if !parallel_codes.is_empty() {
+        println!("│ 🧩 Parallels  : [{}]", parallel_codes.join(", "));
+    }
+    
+    // TIER 1: Try Gemini models first
+    match try_gemini_matching(&prompt).await {
+        Ok(result) => {
+            println!("\x1b[1;30m└──────────────────────────────────────────────\x1b[0m");
+            return Ok(result);
+        }
+        Err(e) => {
+            eprintln!("│ ⚠️  Gemini failed: {}", e);
+            eprintln!("│ 🔄 Falling back to Groq...");
+        }
+    }
+    
+    // TIER 2: Groq reasoning models
+    match try_groq_reasoning_matching(&prompt).await {
+        Ok(result) => {
+            println!("\x1b[1;30m└──────────────────────────────────────────────\x1b[0m");
+            return Ok(result);
+        }
+        Err(e) => {
+            eprintln!("│ ⚠️  Groq Reasoning failed: {}", e);
+        }
+    }
+    
+    // TIER 3: Groq standard text models (final fallback)
+    match try_groq_standard_matching(&prompt).await {
+        Ok(result) => {
+            println!("\x1b[1;30m└──────────────────────────────────────────────\x1b[0m");
+            return Ok(result);
+        }
+        Err(e) => {
+            eprintln!("│ ⚠️  Groq Standard failed: {}", e);
+        }
+    }
+    
+    println!("\x1b[1;30m└──────────────────────────────────────────────\x1b[0m");
+    Err("All models failed for matching".to_string())
+}
+
+// ===== GEMINI MATCHING =====
+
+async fn try_gemini_matching(prompt: &str) -> Result<Option<Uuid>, String> {
+    let api_key = std::env::var("GEMINI_API_KEY")
+        .map_err(|_| "GEMINI_API_KEY not set in .env".to_string())?;
+    
+    for (index, model) in GEMINI_MODELS.iter().enumerate() {
+        let url = format!(
+            "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent",
+            model
+        );
+        
+        let request_body = json!({
+            "contents": [{"parts": [{"text": prompt}]}],
+            "generationConfig": {
+                "temperature": 0.2,
+                "maxOutputTokens": 4096,
+                "responseMimeType": "application/json"
+            }
+        });
+        
+        let client = reqwest::Client::new();
+        let response = match client
+            .post(&url)
+            .header("X-Goog-Api-Key", &api_key)
+            .json(&request_body)
+            .send()
+            .await
+        {
+            Ok(r) => r,
+            Err(e) => {
+                eprintln!("│ \x1b[31m❌ REQUEST FAILED\x1b[0m : {} (Gemini Matching {}/{})", 
+                    model, index + 1, GEMINI_MODELS.len());
+                eprintln!("│    Error: {}", e);
+                continue;
+            }
+        };
+        
+        let status = response.status();
+        
+        if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
+            eprintln!("│ ⚠️  R-LIMIT   : {} (Gemini Matching {}/{})", 
+                model, index + 1, GEMINI_MODELS.len());
+            if index < GEMINI_MODELS.len() - 1 {
+                continue;
+            } else {
+                return Err("All Gemini models rate limited for matching".to_string());
+            }
+        }
+        
+        if status.is_success() {
+            println!("│ \x1b[32m✅ SUCCESS\x1b[0m    : {} (Gemini Matching {}/{})", 
+                model, index + 1, GEMINI_MODELS.len());
+            
+            let gemini_response: GeminiResponse = response.json().await
+                .map_err(|e| format!("Failed to deserialize: {}", e))?;
+            
+            let ai_text = extract_ai_text(&gemini_response)?;
+            let result = parse_match_result(ai_text)?;
+            
+            return Ok(result);
+        }
+        
+        let error_text = response.text().await
+            .unwrap_or_else(|_| "Unknown error".to_string());
+        eprintln!("│ ❌ ERROR     : {} (Gemini Matching {}/{}) - {}", 
+            model, index + 1, GEMINI_MODELS.len(), status);
+        eprintln!("│    {}", truncate_for_log(&error_text, 60));
+        
+        if index < GEMINI_MODELS.len() - 1 {
+            continue;
+        }
+    }
+    
+    Err("All Gemini models failed for matching".to_string())
+}
+
+// ===== GROQ REASONING MATCHING =====
+
+async fn try_groq_reasoning_matching(prompt: &str) -> Result<Option<Uuid>, String> {
+    let api_key = std::env::var("GROQ_API_KEY")
+        .map_err(|_| "GROQ_API_KEY not set in .env".to_string())?;
+    
+    for (index, model) in GROQ_REASONING_MODELS.iter().enumerate() {
+        let url = "https://api.groq.com/openai/v1/chat/completions";
+        
+        let request_body = json!({
+            "model": model,
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.2,
+            "top_p": 0.95,
+            "max_completion_tokens": 4096,
+            "response_format": { "type": "json_object" }
+        });
+        
+        let client = reqwest::Client::new();
+        let response = match client
+            .post(url)
+            .header("Authorization", format!("Bearer {}", api_key))
+            .header("Content-Type", "application/json")
+            .json(&request_body)
+            .send()
+            .await
+        {
+            Ok(r) => r,
+            Err(e) => {
+                eprintln!("│ \x1b[31m❌ REQUEST FAILED\x1b[0m : {} (Groq Matching {}/{})", 
+                    model, index + 1, GROQ_REASONING_MODELS.len());
+                eprintln!("│    Error: {}", e);
+                continue;
+            }
+        };
+        
+        let status = response.status();
+        
+        if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
+            eprintln!("│ ⚠️  R-LIMIT   : {} (Groq Matching {}/{})", 
+                model, index + 1, GROQ_REASONING_MODELS.len());
+            if index < GROQ_REASONING_MODELS.len() - 1 {
+                continue;
+            } else {
+                return Err("All Groq reasoning models rate limited for matching".to_string());
+            }
+        }
+        
+        if status.is_success() {
+            println!("│ \x1b[32m✅ SUCCESS\x1b[0m    : {} (Groq Matching {}/{})", 
+                model, index + 1, GROQ_REASONING_MODELS.len());
+            
+            let groq_response: GroqResponse = response.json().await
+                .map_err(|e| format!("Failed to deserialize: {}", e))?;
+            
+            let ai_text = extract_groq_text(&groq_response)?;
+            let result = parse_match_result(&ai_text)?;
+            
+            return Ok(result);
+        }
+        
+        let error_text = response.text().await
+            .unwrap_or_else(|_| "Unknown error".to_string());
+        eprintln!("│ ❌ ERROR     : {} (Groq Matching {}/{}) - {}", 
+            model, index + 1, GROQ_REASONING_MODELS.len(), status);
+        eprintln!("│    {}", truncate_for_log(&error_text, 60));
+        
+        if index < GROQ_REASONING_MODELS.len() - 1 {
+            continue;
+        }
+    }
+    
+    Err("All Groq reasoning models failed for matching".to_string())
+}
+
+// ===== GROQ STANDARD MATCHING (FINAL FALLBACK) =====
+
+async fn try_groq_standard_matching(prompt: &str) -> Result<Option<Uuid>, String> {
+    let api_key = std::env::var("GROQ_API_KEY")
+        .map_err(|_| "GROQ_API_KEY not set in .env".to_string())?;
+    
+    for (index, model) in GROQ_TEXT_MODELS.iter().enumerate() {
+        let url = "https://api.groq.com/openai/v1/chat/completions";
+        
+        let request_body = json!({
+            "model": model,
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.2,
+            "max_tokens": 4096,
+            "response_format": { "type": "json_object" }
+        });
+        
+        let client = reqwest::Client::new();
+        let response = match client.post(url)
+            .header("Authorization", format!("Bearer {}", api_key))
+            .header("Content-Type", "application/json")
+            .json(&request_body)
+            .send()
+            .await
+        {
+            Ok(r) => r,
+            Err(e) => {
+                eprintln!("│ \x1b[31m❌ REQUEST FAILED\x1b[0m : {} (Groq Standard Matching {}/{})", 
+                    model, index + 1, GROQ_TEXT_MODELS.len());
+                eprintln!("│    Error: {}", e);
+                continue;
+            }
+        };
+        
+        let status = response.status();
+        
+        if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
+            eprintln!("│ ⚠️  R-LIMIT   : {} (Groq Standard Matching {}/{})", 
+                model, index + 1, GROQ_TEXT_MODELS.len());
+            if index < GROQ_TEXT_MODELS.len() - 1 {
+                continue;
+            } else {
+                return Err("All Groq standard models rate limited for matching".to_string());
+            }
+        }
+        
+        if status.is_success() {
+            println!("│ \x1b[33m⚠️  STANDARD\x1b[0m   : {} (Groq Standard Matching {}/{})", 
+                model, index + 1, GROQ_TEXT_MODELS.len());
+            
+            let groq_response: GroqResponse = response.json().await
+                .map_err(|e| format!("Failed to deserialize: {}", e))?;
+            
+            let ai_text = extract_groq_text(&groq_response)?;
+            let result = parse_match_result(&ai_text)?;
+            
+            return Ok(result);
+        }
+        
+        let error_text = response.text().await
+            .unwrap_or_else(|_| "Unknown error".to_string());
+        eprintln!("│ ❌ ERROR     : {} (Groq Standard Matching {}/{}) - {}", 
+            model, index + 1, GROQ_TEXT_MODELS.len(), status);
+        eprintln!("│    {}", truncate_for_log(&error_text, 60));
+        
+        if index < GROQ_TEXT_MODELS.len() - 1 {
+            continue;
+        }
+    }
+    
+    Err("All Groq standard models failed for matching".to_string())
 }
 
 // ===== LOGGING HELPER =====

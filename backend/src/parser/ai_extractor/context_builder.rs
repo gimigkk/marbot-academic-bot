@@ -503,20 +503,22 @@ fn build_quoted_section(
         format!(
             r#"
 
-QUOTED ASSIGNMENT (from database - HIGHEST PRIORITY):
+CRITICAL: User is replying to this assignment from database:
   Course: {}
   Title: {}
-  Current Parallels: [{}]
-  → User is updating/referencing this assignment
-  → YOU MUST extract ALL these parallel codes for schedule lookup"#,
+  Parallels: [{}]
+  
+  Action: Determine if user is UPDATING this assignment or announcing a NEW one.
+  - If adding deadline/details to this assignment → UPDATE
+  - If announcing different work → NEW"#,
             assignment.course_name,
             assignment.title,
             assignment.parallel_codes.join(", ")
         )
     } else if let Some(ctx) = quoted_context {
         format!(
-            "\n\nQUOTED MESSAGE CONTEXT:\n{}\n(User is replying to/referencing this message)",
-            ctx
+            "\n\nUser is replying to: \"{}\"\nCheck if this is an update or new info.",
+            ctx.chars().take(100).collect::<String>()
         )
     } else {
         String::new()

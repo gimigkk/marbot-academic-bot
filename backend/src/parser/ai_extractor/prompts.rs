@@ -216,40 +216,43 @@ Classify this message using the PRIORITY ORDER below. Return ONE of:
 PRIORITY 1: ASSIGNMENT VALIDATION (CHECK FIRST - MANDATORY)
 ═══════════════════════════════════════════════════════════════════
 
-Before any classification, apply the THREE REQUIREMENTS test:
+Check if message is assignment-related by asking: "Is this about academic work students need to complete?"
 
-Question 1: Does this require students to CREATE work? (not just attend/read)
-Question 2: Is there a DELIVERABLE to submit? (not just participation)  
-Question 3: Will it be GRADED/CHECKED? (not just presence)
+RECOGNIZE AS ASSIGNMENT if message mentions:
+- Work to submit: "tugas", "assignment", "dikumpulkan", "submit", "deadline"
+- Academic assessments: "quiz", "ujian", "exam", "test", "kuis"  
+- Academic deliverables: "laporan", "report", "project", "LKP", "presentasi"
+- Work with deadlines: mentions course + any time reference
 
-If ANY answer is NO → IMMEDIATELY classify as UNRECOGNIZED
+REJECT AS NON-ASSIGNMENT (class schedules/announcements):
+- Pure attendance: "praktikum besok" (no mention of work to submit)
+- Class times: "kelas hari Rabu jam 10"
+- Meeting announcements: "zoom meeting tomorrow"
+- Course content: "baca chapter 5" WITHOUT submission requirement
 
-Common patterns to REJECT (false positives):
-- "Praktikum [course] besok" → Class schedule, no deliverable mentioned
-- "Kelas [course] hari Rabu" → Attendance announcement
-- "Meeting with advisor tomorrow" → Attendance
-- "Baca chapter 5" → Reading (no submission requirement)
-- "Topik diskusi minggu ini" → Informational
-- "Pertemuan zoom jam 2" → Class session
+Key principle: If unclear whether work must be submitted, treat as ASSIGNMENT.
+It's better to create an assignment that can be deleted than miss a real one.
 
-Common patterns to ACCEPT (true assignments):
-- "Tugas dikumpulkan ketika praktikum" → Has deliverable (collected during class)
-- "Submit before next class" → Has deliverable
-- "Kumpulkan di pertemuan berikutnya" → Has deliverable
-
-ONLY proceed to PRIORITY 2 if all three requirements are met.
+When message just says "TUGAS" - this IS assignment-related. The AI will ask for clarification to get missing details.
 
 ═══════════════════════════════════════════════════════════════════
 PRIORITY 2: CLASSIFICATION LOGIC
 ═══════════════════════════════════════════════════════════════════
 
-STEP A: Check for QUOTED MESSAGE context (if present in hints)
-- If QUOTED MESSAGE REFERENCE exists, user is replying to previous assignment
-- Common reply patterns:
-  * "diundur" / "berubah" / "changed" → UPDATE to quoted assignment
-  * "diperjelas" / "clarification" → UPDATE with details
-  * "ada lagi" / "another one" → NEW assignment (not updating quoted one)
-- Extract course/parallel info from quoted context for better matching
+STEP A: Check for QUOTED MESSAGE context (HIGHEST PRIORITY)
+IF QUOTED MESSAGE REFERENCE exists in hints:
+  → User is replying to previous message
+  → Look for update indicators: deadline changes, clarifications, corrections
+  → Common patterns:
+    * Time changes: "deadline besok", "diundur", "dipercepat", "changed to"
+    * Additional info: replies to assignment announcement with details
+    * Corrections: "bukan", "salah", "sebenarnya", "actually"
+  
+IF reply contains NEW assignment content (different course/topic):
+  → Classify as NEW assignment, not update
+  
+IF reply adds details to quoted assignment (deadline, description):
+  → Classify as UPDATE
 
 STEP B: Check for MULTIPLE_ASSIGNMENTS
 Signals indicating multiple assignments:
