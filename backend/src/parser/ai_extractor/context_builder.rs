@@ -8,8 +8,8 @@ use sqlx::PgPool;
 use once_cell::sync::Lazy;
 
 use super::schedule_oracle::ScheduleOracle;
-use super::parsing::{extract_groq_text, GroqResponse};
-use super::GROQ_TEXT_MODELS;
+use super::parsing::{GeminiResponse, GroqResponse, extract_ai_text, extract_groq_text};
+use super::{GEMINI_MODELS, GROQ_REASONING_MODELS, GROQ_TEXT_MODELS};
 
 // ===== CONSTANTS & STATICS =====
 
@@ -427,16 +427,10 @@ async fn call_context_resolver_ai(
     quoted_assignment: Option<&QuotedAssignmentInfo>,
 ) -> Result<AIHints, String> {
     
-    // Format history with transparency (show relevance scores)
     let history_text = format_history_for_prompt(sender_history);
-    
-    // Build quoted section with database info (highest priority)
     let quoted_section = build_quoted_section(quoted_assignment, quoted_context);
-    
-    // Build parallel extraction hint
     let parallel_hint = build_parallel_hint(text_extracted_parallels);
     
-    // Build optimized prompt with clear priority hierarchy
     let prompt = build_context_resolver_prompt(
         message,
         &history_text,
@@ -445,23 +439,226 @@ async fn call_context_resolver_ai(
         courses_list,
     );
     
-    // Try models in sequence
-    let api_key = std::env::var("GROQ_API_KEY")
-        .map_err(|_| "GROQ_API_KEY not set".to_string())?;
+    // TIER 1: Try Gemini models first (PRIORITY)
+    match try_gemini_context(&prompt).await {
+        Ok(hints) => return Ok(hints),
+        Err(e) => {
+            println!("│ \x1b[33m⚠️  CONTEXT\x1b[0m   : Gemini failed - {}", e);
+            println!("│ \x1b[36m🔄 CONTEXT\x1b[0m   : Falling back to Groq...");
+        }
+    }
     
-    for model in GROQ_TEXT_MODELS {
-        match call_groq_api(&api_key, model, &prompt).await {
-            Ok(json_text) => {
-                return parse_ai_hints(&json_text);
-            }
-            Err(e) => {
-                eprintln!("Context AI failed with {}: {}", model, e);
-                continue;
-            }
+    // TIER 2: Groq reasoning models
+    match try_groq_reasoning_context(&prompt).await {
+        Ok(hints) => return Ok(hints),
+        Err(e) => {
+            println!("│ \x1b[33m⚠️  CONTEXT\x1b[0m   : Groq Reasoning failed - {}", e);
+        }
+    }
+    
+    // TIER 3: Groq standard text models (final fallback)
+    match try_groq_standard_context(&prompt).await {
+        Ok(hints) => return Ok(hints),
+        Err(e) => {
+            println!("│ \x1b[31m❌ CONTEXT\x1b[0m   : All models failed - {}", e);
         }
     }
     
     Err("All context resolver models failed".to_string())
+}
+
+// ===== GEMINI CONTEXT RESOLUTION =====
+
+async fn try_gemini_context(prompt: &str) -> Result<AIHints, String> {
+    let api_key = std::env::var("GEMINI_API_KEY")
+        .map_err(|_| "GEMINI_API_KEY not set".to_string())?;
+    
+    for model in GEMINI_MODELS {
+        let url = format!(
+            "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent",
+            model
+        );
+        
+        let request_body = json!({
+            "contents": [{"parts": [{"text": prompt}]}],
+            "generationConfig": {
+                "temperature": 0.1,
+                "maxOutputTokens": 1000,
+                "responseMimeType": "application/json"
+            }
+        });
+        
+        let client = reqwest::Client::new();
+        let response = match client
+            .post(&url)
+            .header("X-Goog-Api-Key", &api_key)
+            .json(&request_body)
+            .send()
+            .await
+        {
+            Ok(r) => r,
+            Err(_) => continue,
+        };
+        
+        if response.status() == reqwest::StatusCode::TOO_MANY_REQUESTS {
+            continue;
+        }
+        
+        if response.status().is_success() {
+            let gemini_response: GeminiResponse = response.json().await
+                .map_err(|e| format!("Parse error: {}", e))?;
+            
+            let ai_text = extract_ai_text(&gemini_response)?;
+            return parse_ai_hints(&ai_text);
+        }
+    }
+    
+    Err("All Gemini models failed".to_string())
+}
+
+// ===== GROQ REASONING CONTEXT RESOLUTION =====
+
+async fn try_groq_reasoning_context(prompt: &str) -> Result<AIHints, String> {
+    let api_key = std::env::var("GROQ_API_KEY")
+        .map_err(|_| "GROQ_API_KEY not set".to_string())?;
+    
+    for model in GROQ_REASONING_MODELS {
+        let url = "https://api.groq.com/openai/v1/chat/completions";
+        
+        let request_body = json!({
+            "model": model,
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.1,
+            "max_completion_tokens": 2048,
+            "response_format": {"type": "json_object"}
+        });
+        
+        let client = reqwest::Client::new();
+        let response = match client
+            .post(url)
+            .header("Authorization", format!("Bearer {}", api_key))
+            .header("Content-Type", "application/json")
+            .json(&request_body)
+            .send()
+            .await
+        {
+            Ok(r) => r,
+            Err(_) => continue,
+        };
+        
+        if response.status() == reqwest::StatusCode::TOO_MANY_REQUESTS {
+            continue;
+        }
+        
+        if response.status().is_success() {
+            let groq_response: GroqResponse = response.json().await
+                .map_err(|e| format!("Parse error: {}", e))?;
+            
+            let ai_text = extract_groq_text(&groq_response)?;
+            return parse_ai_hints(&ai_text);
+        }
+    }
+    
+    Err("All Groq reasoning models failed".to_string())
+}
+
+// ===== GROQ STANDARD CONTEXT RESOLUTION (FINAL FALLBACK) =====
+
+async fn try_groq_standard_context(prompt: &str) -> Result<AIHints, String> {
+    let api_key = std::env::var("GROQ_API_KEY")
+        .map_err(|_| "GROQ_API_KEY not set".to_string())?;
+    
+    for (index, model) in GROQ_TEXT_MODELS.iter().enumerate() {
+        let url = "https://api.groq.com/openai/v1/chat/completions";
+        
+        let request_body = json!({
+            "model": model,
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.1,
+            "max_tokens": 1000,
+            "response_format": {"type": "json_object"}
+        });
+        
+        let client = reqwest::Client::new();
+        let response = match client.post(url)
+            .header("Authorization", format!("Bearer {}", api_key))
+            .header("Content-Type", "application/json")
+            .json(&request_body)
+            .send()
+            .await
+        {
+            Ok(r) => r,
+            Err(e) => {
+                if index == GROQ_TEXT_MODELS.len() - 1 {
+                    return Err(format!("Request failed: {}", e));
+                }
+                continue;
+            }
+        };
+        
+        let status = response.status();
+        
+        if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
+            let error_text = response.text().await
+                .unwrap_or_else(|_| String::new());
+            
+            if let Some(retry_after) = extract_retry_after(&error_text) {
+                println!("│ \x1b[33m⚠️  CONTEXT\x1b[0m   : {} - ⏳ Rate limit (retry in {})", model, retry_after);
+            } else {
+                println!("│ \x1b[33m⚠️  CONTEXT\x1b[0m   : {} - ⏳ Rate limit", model);
+            }
+            
+            if index < GROQ_TEXT_MODELS.len() - 1 {
+                continue;
+            } else {
+                return Err("All Groq standard models rate limited".to_string());
+            }
+        }
+        
+        if status.is_success() {
+            let groq_response: GroqResponse = response.json().await
+                .map_err(|e| format!("Parse error: {}", e))?;
+            
+            let ai_text = extract_groq_text(&groq_response)?;
+            return parse_ai_hints(&ai_text);
+        }
+        
+        if status == reqwest::StatusCode::BAD_REQUEST {
+            println!("│ \x1b[31m❌ CONTEXT\x1b[0m   : {} - 400 Bad Request", model);
+            if index < GROQ_TEXT_MODELS.len() - 1 {
+                continue;
+            }
+        }
+        
+        let error_text = response.text().await
+            .unwrap_or_else(|_| "Unknown error".to_string());
+        
+        if index == GROQ_TEXT_MODELS.len() - 1 {
+            return Err(format!("{}", status.as_u16()));
+        }
+    }
+    
+    Err("All Groq standard models failed".to_string())
+}
+
+fn truncate_error(error: &str, max_len: usize) -> String {
+    if error.len() <= max_len {
+        return error.to_string();
+    }
+    
+    // Try to extract just the message field from JSON
+    if let Some(start) = error.find("\"message\":\"") {
+        let msg_start = start + 11;
+        if let Some(end) = error[msg_start..].find('\"') {
+            let message = &error[msg_start..msg_start + end];
+            if message.len() <= max_len {
+                return message.to_string();
+            }
+            return format!("{}...", &message[..max_len - 3]);
+        }
+    }
+    
+    format!("{}...", &error[..max_len - 3])
 }
 
 /// Format sender history for prompt with relevance scoring
@@ -683,20 +880,60 @@ async fn call_groq_api(api_key: &str, model: &str, prompt: &str) -> Result<Strin
         .json(&request_body)
         .send()
         .await
-        .map_err(|e| format!("Request failed: {}", e))?;
+        .map_err(|e| format!("Network error: {}", e))?;
     
     let status = response.status();
     
     if !status.is_success() {
         let error_text = response.text().await
             .unwrap_or_else(|_| "Unknown error".to_string());
-        return Err(format!("API error: {} - {}", status, error_text));
+        
+        // ✅ CLEAN ERROR MESSAGES
+        if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
+            if let Some(retry_after) = extract_retry_after(&error_text) {
+                return Err(format!("⏳ Rate limit (retry in {})", retry_after));
+            }
+            return Err("⏳ Rate limit".to_string());
+        }
+        
+        if status == reqwest::StatusCode::BAD_REQUEST {
+            return Err("400 Bad Request".to_string());
+        }
+        
+        return Err(format!("{}", status.as_u16()));
     }
     
     let groq_response: GroqResponse = response.json().await
         .map_err(|e| format!("Parse error: {}", e))?;
     
     extract_groq_text(&groq_response)
+}
+
+fn extract_retry_after(error_text: &str) -> Option<String> {
+    // Parse "Please try again in 17m58.271999999s"
+    if let Some(start) = error_text.find("try again in ") {
+        let rest = &error_text[start + 13..];
+        if let Some(end) = rest.find('.') {
+            let time = &rest[..end];
+            return Some(format_duration(time));
+        } else if let Some(end) = rest.find('s') {
+            let time = &rest[..end];
+            return Some(format_duration(time));
+        }
+    }
+    None
+}
+
+fn format_duration(duration: &str) -> String {
+    if duration.contains('m') {
+        let parts: Vec<&str> = duration.split('m').collect();
+        if let Some(mins) = parts.first() {
+            if let Ok(m) = mins.parse::<i32>() {
+                return format!("~{}min", m + 1);
+            }
+        }
+    }
+    duration.to_string()
 }
 
 /// Parse AI hints from JSON response

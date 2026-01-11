@@ -8,9 +8,10 @@ mod context_builder;
 // ===== MODEL CONFIGURATION =====
 
 // Groq reasoning models (PRIORITY - best for complex logic)
-pub const GROQ_REASONING_MODELS: &[&str; 3] = &[
+pub const GROQ_REASONING_MODELS: &[&str; 4] = &[
     "openai/gpt-oss-120b",            // OpenAI's flagship 120B reasoning model (recommended replacement)
-    "deepseek-r1-distill-qwen-32b",   // DeepSeek R1 distilled into Qwen 32B (available, fast)
+    "deepseek-r1-distill-llama-70b",  // DeepSeek R1 distilled into Qwen 32B (available, fast)
+    "meta-llama/llama-4-maverick-17b-128e-instruct",
     "openai/gpt-oss-20b",             // Lighter GPT-OSS variant
 ];
 
