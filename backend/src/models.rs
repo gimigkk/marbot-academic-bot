@@ -155,7 +155,7 @@ pub enum AIClassification {
         title: String,
         deadline: Option<String>,
         description: Option<String>,
-        parallel_codes: Vec<String>,  // ✅ Changed from Option<String>
+        parallel_codes: Vec<String>,  
         #[serde(default)]
         #[serde(skip_serializing_if = "Option::is_none")]
         original_message: Option<String>,
@@ -175,13 +175,16 @@ pub enum AIClassification {
         new_title: Option<String>,
         new_deadline: Option<String>,
         new_description: Option<String>,
-        parallel_codes: Vec<String>,  // ✅ Changed from Option<String>
+        parallel_codes: Vec<String>,  
         #[serde(default)]
         #[serde(skip_serializing_if = "Option::is_none")]
         original_message: Option<String>,
     },
     
-    Unrecognized,
+    Unrecognized {
+        #[serde(default)]
+        reason: Option<String>,
+    },
 }
 
 /// Individual assignment data for batch processing

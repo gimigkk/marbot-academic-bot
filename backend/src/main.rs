@@ -889,7 +889,17 @@ async fn handle_ai_classification(
             });
         }
         
-        AIClassification::Unrecognized => {}
+        AIClassification::Unrecognized { reason } => {
+            // Send just the reason to debug group if available
+            if let Some(debug_id) = debug_group_id {
+                let message = reason
+                    .as_ref()
+                    .map(|r| format!("_{}_", r))
+                    .unwrap_or_else(|| "_Unrecognized, no reason provided_".to_string());
+                
+                let _ = send_reply(&debug_id, &message).await;
+            }
+        }
     }
 }
 

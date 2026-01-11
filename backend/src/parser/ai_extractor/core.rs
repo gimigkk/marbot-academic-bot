@@ -177,17 +177,18 @@ pub async fn extract_with_ai(
         match try_groq_vision(&prompt, img).await {
             Ok(classification) => {
                 match classification {
-                    AIClassification::Unrecognized => {
-                        println!("│ ℹ️  Vision Result: Unrecognized (image likely irrelevant)");
+                    AIClassification::Unrecognized {reason}=> {
+                        let reason_display = reason.as_deref().unwrap_or("No reason provided");
+                        println!("│ ℹ️  Vision Result: Unrecognized ({})", reason_display);
                         println!("│ 🔄 Retrying with Gemini text-only...");
                         
                         match try_gemini_models(&prompt).await {
                             Ok(text_result) => {
                                 match text_result {
-                                    AIClassification::Unrecognized => {
+                                    AIClassification::Unrecognized {..} => {
                                         println!("│ ⚠️  Gemini: Still unrecognized");
                                         println!("\x1b[1;30m└──────────────────────────────────────────────\x1b[0m");
-                                        return Ok(AIClassification::Unrecognized);
+                                        return Ok(AIClassification::Unrecognized{reason});
                                     }
                                     _ => {
                                         log_classification_success(&text_result);
@@ -392,7 +393,7 @@ async fn try_groq_reasoning(prompt: &str) -> Result<AIClassification, String> {
             
             let classification = parse_classification(&ai_text)?;
             
-            if matches!(classification, AIClassification::Unrecognized) && !ai_text.contains("unrecognized") {
+            if matches!(classification, AIClassification::Unrecognized { .. }) && !ai_text.contains("unrecognized") {
                 eprintln!("│ ⚠️  Invalid JSON from Groq, trying next model");
                 continue;
             }
@@ -468,7 +469,7 @@ async fn try_groq_standard_text(prompt: &str) -> Result<AIClassification, String
             
             let classification = parse_classification(&ai_text)?;
             
-            if matches!(classification, AIClassification::Unrecognized) && !ai_text.contains("unrecognized") {
+            if matches!(classification, AIClassification::Unrecognized { .. }) && !ai_text.contains("unrecognized") {
                 eprintln!("│ ⚠️  Invalid JSON, trying next model");
                 continue;
             }
@@ -554,7 +555,7 @@ async fn try_groq_vision(prompt: &str, image_base64: &str) -> Result<AIClassific
             
             let classification = parse_classification(&ai_text)?;
             
-            if matches!(classification, AIClassification::Unrecognized) && !ai_text.contains("unrecognized") {
+            if matches!(classification, AIClassification::Unrecognized { .. }) && !ai_text.contains("unrecognized") {
                 eprintln!("│ ⚠️  Invalid JSON from Groq, trying next model");
                 continue;
             }
@@ -1206,8 +1207,9 @@ fn log_classification_success(classification: &AIClassification) {
             println!("│\n│ ✅ Result   : Update detected (keywords: {:?}, parallels: {})", 
                 reference_keywords, parallels);
         }
-        AIClassification::Unrecognized => {
-            println!("│\n│ ℹ️  Result   : Unrecognized");
+        AIClassification::Unrecognized { reason } => {
+            let reason_display = reason.as_deref().unwrap_or("No reason provided");
+            println!("│\n│ ℹ️  Result   : Unrecognized ({})", reason_display);
         }
     }
 }

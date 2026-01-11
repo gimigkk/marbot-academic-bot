@@ -82,7 +82,9 @@ pub(super) fn parse_classification(ai_text: &str) -> Result<AIClassification, St
     
     if !is_valid_json_object(cleaned) {
         eprintln!("⚠️  Response is not a valid JSON object");
-        return Ok(AIClassification::Unrecognized);
+        return Ok(AIClassification::Unrecognized { 
+            reason: Some("Invalid JSON response from AI".to_string()) 
+        });
     }
     
     match serde_json::from_str::<AIClassification>(cleaned) {
@@ -90,7 +92,9 @@ pub(super) fn parse_classification(ai_text: &str) -> Result<AIClassification, St
         Err(e) => {
             eprintln!("❌ JSON parse error: {}", e);
             eprintln!("   Tried to parse: {}", cleaned);
-            Ok(AIClassification::Unrecognized)
+            Ok(AIClassification::Unrecognized { 
+                reason: Some(format!("JSON parsing failed: {}", e)) 
+            })
         }
     }
 }

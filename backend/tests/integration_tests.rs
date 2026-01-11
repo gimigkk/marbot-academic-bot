@@ -457,7 +457,7 @@ async fn run_single_test(pool: &PgPool, test_case: &TestCase) -> TestResult {
                 AIClassification::AssignmentInfo { .. } => "assignment_info",
                 AIClassification::AssignmentUpdate { .. } => "assignment_update",
                 AIClassification::MultipleAssignments { .. } => "multiple_assignments",
-                AIClassification::Unrecognized => "unrecognized",
+                AIClassification::Unrecognized { .. }=> "unrecognized",
             };
             
             let passed = actual_type == test_case.expected_type;

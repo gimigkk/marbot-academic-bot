@@ -409,7 +409,7 @@ OUTPUT FORMATS
 ═══════════════════════════════════════════════════════════════════
 
 UNRECOGNIZED (for non-assignments):
-{{"type": "unrecognized"}}
+{{"type": "unrecognized", "reason": "Brief explanation why this is not an assignment"}}
 
 MULTIPLE_ASSIGNMENTS:
 {{
