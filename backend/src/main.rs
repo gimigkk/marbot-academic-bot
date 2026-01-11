@@ -227,7 +227,7 @@ async fn main() {
 
     println!("\x1b[1;30m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\x1b[0m");
     println!(" 🚀 \x1b[1;32mMARBOT IS ONLINE!\x1b[0m");
-    println!("    📡 Listening on    : \x1b[36m[http://0.0.0.0](http://0.0.0.0):{}\x1b[0m", port);
+    println!("    📡 Listening on    : \x1b[36mhttp://0.0.0.0:{}\x1b[0m", port);
     println!("    📍 Webhook URL     : \x1b[36mhttp://localhost:{}/webhook\x1b[0m", port);
     println!("\x1b[1;30m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\x1b[0m");
     println!("\nWaiting for incoming messages...\n");
@@ -555,7 +555,7 @@ async fn webhook(
                 CommandResponse::ResendMessages { messages, summary } => {
                     // send each stored message
                     for (i, msg_content) in messages.iter().enumerate() {
-                        let formatted_msg = format!("*↱* _Forwarded_ \n\n{}", msg_content);
+                        let formatted_msg = format!("*⮣* _Forwarded_ \n\n{}", msg_content);
                         
                         if let Err(e) = send_reply(chat_id, &formatted_msg).await {
                             eprintln!("❌ Failed to send message {}: {}", i + 1, e);
@@ -628,12 +628,14 @@ async fn webhook(
                     println!("🧠 AI Latency: {:.2?}", ai_duration);
 
                     println!("✅ AI Classification: {:?}\n", classification);
+                    
                     handle_ai_classification(
                         state.pool.clone(), 
                         classification, 
                         &payload.payload.id, 
                         sender_phone, 
                         &payload.payload.body,
+                        chat_id,
                         debug_group_id
                     ).await;
                 }
@@ -659,12 +661,14 @@ async fn handle_ai_classification(
     message_id: &str,
     sender_id: &str,
     message_body: &str,
+    source_chat_id: &str, 
     debug_group_id: Option<String>,
 ) {
     let message_id = message_id.to_string();
     let sender_id = sender_id.to_string();
     let message_body = message_body.to_string();
-    
+    let source_chat_id = source_chat_id.to_string(); // Clone untuk async block
+
     match classification {
         // NEW: Handle multiple assignments
         AIClassification::MultipleAssignments { assignments, .. } => {
@@ -761,6 +765,7 @@ async fn handle_ai_classification(
             });
         }
         
+        // ============ FITUR BARU: NOTIFIKASI AKADEMIK PADA UPDATE ============
         AIClassification::AssignmentUpdate { 
             reference_keywords, 
             changes, 
@@ -774,6 +779,7 @@ async fn handle_ai_classification(
             let msg_id = message_id.clone();
             let msg_body = message_body.clone();
             let debug_clone = debug_group_id.clone();
+            let source_chat_clone = source_chat_id.clone(); // Clone untuk spawn
 
             tokio::spawn(async move {
                 let course_map: HashMap<uuid::Uuid, String> = sqlx::query_as::<_, (uuid::Uuid, String)>(
@@ -795,6 +801,42 @@ async fn handle_ai_classification(
                     .await
                     .unwrap_or_default();
                 
+                // ============ HELPER FUNCTION: NOTIFIKASI AKADEMIK ============
+                async fn send_academic_alert(
+                    title: &str, 
+                    course: &str, 
+                    deadline_utc: Option<chrono::DateTime<chrono::Utc>>,
+                    source_chat: &str
+                ) {
+                    // Hanya kirim notifikasi jika ada deadline baru
+                    if let Some(deadline) = deadline_utc {
+                        // Ambil daftar channel akademik dari environment variable
+                        let academic_env = std::env::var("ACADEMIC_CHANNELS").unwrap_or_default();
+                        let channels: Vec<&str> = academic_env.split(',').map(|s| s.trim()).collect();
+                        
+                        // Format waktu Indonesia (WIB)
+                        let wib = chrono::FixedOffset::east_opt(7 * 3600).unwrap();
+                        let deadline_wib = deadline.with_timezone(&wib);
+                        let deadline_str = deadline_wib.format("%A, %d %b %H:%M WIB").to_string();
+
+                        for channel_id in channels {
+                            if channel_id.is_empty() { continue; }
+                            
+                            // Jangan kirim notifikasi jika update berasal dari grup akademik itu sendiri
+                            if source_chat != channel_id {
+                                let msg = format!(
+                                "[Update] {}\nDeadline: {}",
+                                title, deadline_str
+                                );
+                                
+                                // Kirim notifikasi ke channel akademik
+                                let _ = send_reply(channel_id, &msg).await;
+                            }
+                        }
+                    }
+                }
+                // ============ END HELPER FUNCTION ============
+
                 // SMART UPDATE: Check for re-announcement
                 if let Some(ref title) = new_title {
                     if let (Some(_course_id), Some(cname)) = (course_id, &course_name) {
@@ -823,6 +865,13 @@ async fn handle_ai_classification(
                                 Some(msg_id.clone()),
                                 Some(msg_body.clone()),
                             ).await;
+                            
+                            // ============ FITUR: KIRIM NOTIFIKASI AKADEMIK ============
+                            // Hanya kirim jika deadline berubah
+                            if deadline_parsed.is_some() {
+                                send_academic_alert(title, cname, deadline_parsed, &source_chat_clone).await;
+                            }
+                            // ============ END ============
                             
                             if let Some(debug_id) = debug_clone {
                                 let _ = send_reply(
@@ -854,7 +903,8 @@ async fn handle_ai_classification(
                         let deadline_parsed = new_deadline.as_ref()
                             .and_then(|d| crud::parse_deadline(d).ok());
                         
-                        if let Ok(_) = crud::update_assignment_fields(
+                        // Update database
+                        if let Ok(updated_assign) = crud::update_assignment_fields(
                             &pool_clone,
                             assignment_id,
                             deadline_parsed,
@@ -864,6 +914,29 @@ async fn handle_ai_classification(
                             Some(msg_id),
                             Some(msg_body),
                         ).await {
+
+                            // ============ FITUR : KIRIM NOTIFIKASI AKADEMIK ============
+                            // Hanya kirim jika deadline berubah
+                            if deadline_parsed.is_some() {
+                                // Ambil nama matkul untuk notifikasi
+                                let course_name_for_alert = if let Some(cid) = updated_assign.course_id {
+                                    course_map.get(&cid)
+                                        .cloned()
+                                        .unwrap_or_else(|| "General".to_string())
+                                } else {
+                                    course_name.unwrap_or_else(|| "General".to_string())
+                                };
+                                
+                                // Kirim notifikasi ke channel akademik
+                                send_academic_alert(
+                                    &updated_assign.title, 
+                                    &course_name_for_alert, 
+                                    deadline_parsed, 
+                                    &source_chat_clone
+                                ).await;
+                            }
+                            // ============ END ============
+                            
                             if let Some(debug_id) = debug_clone {
                                 let _ = send_reply(
                                     &debug_id,
@@ -1014,7 +1087,7 @@ async fn handle_single_assignment(
         parallel_codes: final_parallel_codes.clone(),
         sender_id: Some(sender_id.to_string()), 
         message_id: message_id.to_string(),
-        relating_messages: vec![message_body.to_string()],  // still error
+        relating_messages: vec![message_body.to_string()],
     };
     
     match crud::create_assignment(&pool, new_assignment).await {
