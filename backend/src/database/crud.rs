@@ -52,23 +52,23 @@ pub async fn create_assignment(
         .collect();
 
     // B. Insert Assignment
-    sqlx::query!(
+    sqlx::query(
         r#"
         INSERT INTO assignments (
             course_id, parallel_codes, title, description, 
             deadline, sender_id, message_ids, relating_messages
         )
-        VALUES ($1, $2, $3, $4, $5, $6, ARRAY[$7], ARRAY[$8])
-        "#,
-        new_assignment.course_id,
-        &clean_parallel_codes,
-        new_assignment.title,
-        new_assignment.description,
-        new_assignment.deadline,
-        new_assignment.sender_id,
-        new_assignment.message_id,
-        &new_assignment.relating_messages as &[String],
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        "#
     )
+    .bind(new_assignment.course_id)
+    .bind(&clean_parallel_codes)
+    .bind(&new_assignment.title)
+    .bind(&new_assignment.description)
+    .bind(new_assignment.deadline)
+    .bind(&new_assignment.sender_id)
+    .bind(&vec![new_assignment.message_id.clone()])  // Wrap in Vec
+    .bind(&new_assignment.relating_messages)
     .execute(&mut *tx)
     .await?;
 
@@ -205,7 +205,18 @@ pub async fn get_assignment_by_title_and_course(
     
     let result = sqlx::query_as::<_, Assignment>(
         r#"
-        SELECT * FROM assignments
+        SELECT 
+            id,
+            created_at,
+            course_id,
+            title,
+            description,
+            deadline,
+            parallel_codes,
+            sender_id,
+            message_ids,
+            relating_messages
+        FROM assignments
         WHERE title = $1 AND course_id = $2
         "#
     )

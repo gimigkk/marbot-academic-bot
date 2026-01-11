@@ -220,7 +220,7 @@ pub struct Assignment {
     pub parallel_codes: Vec<String>,
     pub sender_id: Option<String>,
     pub message_ids: Vec<String>,
-    pub relating_message_content: String,
+    pub relating_messages: Vec<String>,
 }
 
 #[derive(Debug, Clone, FromRow, Serialize, Deserialize)]

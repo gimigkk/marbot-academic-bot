@@ -1002,37 +1002,76 @@ async fn handle_single_assignment(
     
     match crud::create_assignment(&pool, new_assignment).await {
         Ok(_) => {
-            // Assignment created successfully
             println!("✅ Assignment created: {}", title_clone);
             
-            // Check if clarification is needed
+            // ============ DEBUG CLARIFICATION ============
+            println!("🔍 Starting clarification check...");
+            println!("   course_id: {:?}", course_id);
+            
             if let Some(cid) = course_id {
-                if let Ok(Some(assignment)) = crud::get_assignment_by_title_and_course(&pool, &title_clone, cid).await {
-                    if let Ok(Some(full_assign)) = crud::get_assignment_with_course_by_id(&pool, assignment.id).await {
-                        let missing = clarification::identify_missing_fields(&full_assign);
+                println!("   ✅ Has course_id: {}", cid);
+                
+                // Step 1: Try to get assignment by title and course
+                match crud::get_assignment_by_title_and_course(&pool, &title_clone, cid).await {
+                    Ok(Some(assignment)) => {
+                        println!("   ✅ Found assignment by title: {}", assignment.id);
                         
-                        // Actually send clarification if fields are missing
-                        if !missing.is_empty() {
-                            println!("🔔 Clarification needed for: {:?}", missing);
-                            
-                            if let Some(debug_id) = &debug_group_id {
-                                let (info_msg, template_msg) = clarification::generate_clarification_messages(&full_assign, &missing);
+                        // Step 2: Try to get full assignment with course
+                        match crud::get_assignment_with_course_by_id(&pool, assignment.id).await {
+                            Ok(Some(full_assign)) => {
+                                println!("   ✅ Got full assignment data");
+                                println!("      - Course: {}", full_assign.course_name);
+                                println!("      - Title: {}", full_assign.title);
+                                println!("      - Deadline: {:?}", full_assign.deadline);
+                                println!("      - Description: {:?}", full_assign.description);
+                                println!("      - Parallels: {:?}", full_assign.parallel_codes);
                                 
-                                // Combine messages
-                                let combined_msg = format!("{}\n{}", info_msg, template_msg);
+                                // Step 3: Identify missing fields
+                                let missing = clarification::identify_missing_fields(&full_assign);
+                                println!("   🔍 Missing fields: {:?}", missing);
+                                
+                                if !missing.is_empty() {
+                                    println!("   🔔 Clarification needed!");
+                                    
+                                    if let Some(debug_id) = &debug_group_id {
+                                        println!("   📤 Sending to debug group: {}", debug_id);
+                                        
+                                        let (info_msg, template_msg) = clarification::generate_clarification_messages(&full_assign, &missing);
+                                        let combined_msg = format!("{}\n{}", info_msg, template_msg);
 
-                                // Send the clarification request
-                                if let Err(e) = send_reply(debug_id, &combined_msg).await {
-                                    eprintln!("❌ Failed to send clarification: {}", e);
+                                        match send_reply(debug_id, &combined_msg).await {
+                                            Ok(_) => println!("   ✅ Clarification sent successfully!"),
+                                            Err(e) => eprintln!("   ❌ Failed to send clarification: {}", e),
+                                        }
+                                    } else {
+                                        println!("   ⚠️ No debug_group_id set!");
+                                    }
+                                    return; // Don't send success message
                                 } else {
-                                    println!("✅ Clarification request sent");
+                                    println!("   ℹ️ No clarification needed - all fields present");
                                 }
                             }
-                            return; // Don't send success message if clarification is needed
+                            Ok(None) => {
+                                eprintln!("   ❌ get_assignment_with_course_by_id returned None");
+                            }
+                            Err(e) => {
+                                eprintln!("   ❌ get_assignment_with_course_by_id failed: {}", e);
+                            }
                         }
                     }
+                    Ok(None) => {
+                        eprintln!("   ❌ get_assignment_by_title_and_course returned None");
+                    }
+                    Err(e) => {
+                        eprintln!("   ❌ get_assignment_by_title_and_course failed: {}", e);
+                    }
                 }
+            } else {
+                println!("   ⚠️ No course_id - skipping clarification");
             }
+            
+            println!("🔍 Clarification check complete\n");
+            // ============ END DEBUG ============
 
             // Success message (only if NO clarification needed)
             if let Some(debug_id) = &debug_group_id {
@@ -1055,6 +1094,7 @@ async fn handle_single_assignment(
                     String::new()
                 };
                 
+                println!("📤 Sending success message...");
                 let _ = send_reply(
                     debug_id, 
                     &format!("{}✨ *NEW TASK*: {}\n📚 {}{}{}", 
