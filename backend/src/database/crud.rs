@@ -171,8 +171,19 @@ pub async fn get_last_completed_assignment(
 pub async fn get_assignments(pool: &PgPool) -> Result<Vec<Assignment>> {
     let assignments = sqlx::query_as::<_, Assignment>(
         r#"
-        SELECT a.* FROM assignments a
-        ORDER BY a.created_at DESC
+        SELECT 
+            id,
+            created_at,
+            course_id,
+            title,
+            description,
+            deadline,
+            parallel_codes,
+            sender_id,
+            message_ids,
+            relating_messages
+        FROM assignments
+        ORDER BY created_at DESC
         LIMIT 20
         "#
     )
@@ -352,19 +363,31 @@ pub async fn get_active_assignments_for_user(
 pub async fn get_recent_assignments_for_update(
     pool: &PgPool
 ) -> Result<Vec<Assignment>, sqlx::Error> {
-    // No need for transaction for a simple read query
-    let assignments = 
-        sqlx::query_as::<_, Assignment>(
-            r#"
-            SELECT * FROM assignments
-            WHERE created_at > NOW() - INTERVAL '30 days'
-            ORDER BY created_at DESC
-            LIMIT 20
-            "#
-        )
-        .fetch_all(pool)
-        .await?;
-
+    let assignments = sqlx::query_as::<_, Assignment>(
+        r#"
+        SELECT 
+            id,
+            created_at,
+            course_id,
+            title,
+            description,
+            deadline,
+            parallel_codes,
+            sender_id,
+            message_ids,
+            relating_messages
+        FROM assignments
+        WHERE created_at > NOW() - INTERVAL '30 days'
+        ORDER BY created_at DESC
+        LIMIT 20
+        "#
+    )
+    .fetch_all(pool)
+    .await?;
+    
+    // ✅ ADD DEBUG LOG
+    println!("🔍 Fetched {} assignments for duplicate check", assignments.len());
+    
     Ok(assignments)
 }
 
