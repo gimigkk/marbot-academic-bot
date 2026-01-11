@@ -555,7 +555,7 @@ async fn webhook(
                 CommandResponse::ResendMessages { messages, summary } => {
                     // send each stored message
                     for (i, msg_content) in messages.iter().enumerate() {
-                        let formatted_msg = format!("📨 *Pesan {}*\n━━━━━━━━━━━━\n{}", i + 1, msg_content);
+                        let formatted_msg = format!("*⮣* _Forwarded_ \n\n{}", msg_content);
                         
                         if let Err(e) = send_reply(chat_id, &formatted_msg).await {
                             eprintln!("❌ Failed to send message {}: {}", i + 1, e);
