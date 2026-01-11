@@ -127,7 +127,7 @@ pub async fn build_context(
         get_sender_history(pool, sender_id, &text_extracted_parallels).await
             .unwrap_or_default()
     } else {
-        println!("│ ⏭️  Skipping sender history (explicit context available)");
+        println!("│ ⏭️ Skipping sender history (explicit context available)");
         SenderHistory::default()
     };
     
@@ -443,7 +443,7 @@ async fn call_context_resolver_ai(
     match try_gemini_context(&prompt).await {
         Ok(hints) => return Ok(hints),
         Err(e) => {
-            println!("│ \x1b[33m⚠️  CONTEXT\x1b[0m   : Gemini failed - {}", e);
+            println!("│ \x1b[33m⚠️ CONTEXT\x1b[0m   : Gemini failed - {}", e);
             println!("│ \x1b[36m🔄 CONTEXT\x1b[0m   : Falling back to Groq...");
         }
     }
@@ -452,7 +452,7 @@ async fn call_context_resolver_ai(
     match try_groq_reasoning_context(&prompt).await {
         Ok(hints) => return Ok(hints),
         Err(e) => {
-            println!("│ \x1b[33m⚠️  CONTEXT\x1b[0m   : Groq Reasoning failed - {}", e);
+            println!("│ \x1b[33m⚠️ CONTEXT\x1b[0m   : Groq Reasoning failed - {}", e);
         }
     }
     
@@ -603,9 +603,9 @@ async fn try_groq_standard_context(prompt: &str) -> Result<AIHints, String> {
                 .unwrap_or_else(|_| String::new());
             
             if let Some(retry_after) = extract_retry_after(&error_text) {
-                println!("│ \x1b[33m⚠️  CONTEXT\x1b[0m   : {} - ⏳ Rate limit (retry in {})", model, retry_after);
+                println!("│ \x1b[33m⚠️ CONTEXT\x1b[0m   : {} - ⏳ Rate limit (retry in {})", model, retry_after);
             } else {
-                println!("│ \x1b[33m⚠️  CONTEXT\x1b[0m   : {} - ⏳ Rate limit", model);
+                println!("│ \x1b[33m⚠️ CONTEXT\x1b[0m   : {} - ⏳ Rate limit", model);
             }
             
             if index < GROQ_TEXT_MODELS.len() - 1 {
@@ -630,9 +630,6 @@ async fn try_groq_standard_context(prompt: &str) -> Result<AIHints, String> {
             }
         }
         
-        let error_text = response.text().await
-            .unwrap_or_else(|_| "Unknown error".to_string());
-        
         if index == GROQ_TEXT_MODELS.len() - 1 {
             return Err(format!("{}", status.as_u16()));
         }
@@ -641,25 +638,6 @@ async fn try_groq_standard_context(prompt: &str) -> Result<AIHints, String> {
     Err("All Groq standard models failed".to_string())
 }
 
-fn truncate_error(error: &str, max_len: usize) -> String {
-    if error.len() <= max_len {
-        return error.to_string();
-    }
-    
-    // Try to extract just the message field from JSON
-    if let Some(start) = error.find("\"message\":\"") {
-        let msg_start = start + 11;
-        if let Some(end) = error[msg_start..].find('\"') {
-            let message = &error[msg_start..msg_start + end];
-            if message.len() <= max_len {
-                return message.to_string();
-            }
-            return format!("{}...", &message[..max_len - 3]);
-        }
-    }
-    
-    format!("{}...", &error[..max_len - 3])
-}
 
 /// Format sender history for prompt with relevance scoring
 fn format_history_for_prompt(history: &SenderHistory) -> String {
@@ -860,54 +838,6 @@ FINAL REMINDER:
     )
 }
 
-/// Call Groq API for context resolution
-async fn call_groq_api(api_key: &str, model: &str, prompt: &str) -> Result<String, String> {
-    let url = "https://api.groq.com/openai/v1/chat/completions";
-    
-    let request_body = json!({
-        "model": model,
-        "messages": [{"role": "user", "content": prompt}],
-        "temperature": 0.1,
-        "max_tokens": 1000,
-        "response_format": {"type": "json_object"}
-    });
-    
-    let client = reqwest::Client::new();
-    let response = client
-        .post(url)
-        .header("Authorization", format!("Bearer {}", api_key))
-        .header("Content-Type", "application/json")
-        .json(&request_body)
-        .send()
-        .await
-        .map_err(|e| format!("Network error: {}", e))?;
-    
-    let status = response.status();
-    
-    if !status.is_success() {
-        let error_text = response.text().await
-            .unwrap_or_else(|_| "Unknown error".to_string());
-        
-        // ✅ CLEAN ERROR MESSAGES
-        if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
-            if let Some(retry_after) = extract_retry_after(&error_text) {
-                return Err(format!("⏳ Rate limit (retry in {})", retry_after));
-            }
-            return Err("⏳ Rate limit".to_string());
-        }
-        
-        if status == reqwest::StatusCode::BAD_REQUEST {
-            return Err("400 Bad Request".to_string());
-        }
-        
-        return Err(format!("{}", status.as_u16()));
-    }
-    
-    let groq_response: GroqResponse = response.json().await
-        .map_err(|e| format!("Parse error: {}", e))?;
-    
-    extract_groq_text(&groq_response)
-}
 
 fn extract_retry_after(error_text: &str) -> Option<String> {
     // Parse "Please try again in 17m58.271999999s"
