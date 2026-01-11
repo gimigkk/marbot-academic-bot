@@ -1,0 +1,41 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT \n            a.id, a.title, COALESCE(c.aliases[1], c.name) as \"course_name!\", a.deadline\n        FROM assignments a\n        JOIN courses c ON a.course_id = c.id\n        WHERE a.deadline > $1 \n          AND a.deadline <= $2 \n          AND a.reminder_1h_sent = FALSE\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "title",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "course_name!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "deadline",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Timestamptz",
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      null,
+      true
+    ]
+  },
+  "hash": "28869995c3a7f0766bdac3fd8439c711a8e3e6b003cedbed8483b30b1d1a4fbd"
+}
