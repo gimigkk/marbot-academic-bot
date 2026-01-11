@@ -1,4 +1,3 @@
-# Your ORIGINAL Dockerfile - kept as-is for VPS fallback build
 # Build stage
 FROM rust:slim-bookworm AS builder
 
@@ -15,7 +14,7 @@ RUN apt-get update && apt-get install -y \
     libssl-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# ✅ Use offline mode
+# Use offline mode
 ENV SQLX_OFFLINE=true
 
 # Build in release mode
@@ -30,11 +29,10 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y \
     ca-certificates \
     libssl3 \
-    wget \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy binary and files
+# Copy binary and files from builder
 COPY --from=builder /app/target/release/marbot /app/marbot
 COPY --from=builder /app/migrations /app/migrations
 COPY --from=builder /app/schedule.json /app/schedule.json

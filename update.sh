@@ -1,6 +1,6 @@
 #!/bin/bash
 
-set -euo pipefail  # Exit on error, undefined variables, and pipe failures
+set -euo pipefail
 
 LOG_FILE="/var/log/marbot-update.log"
 
@@ -8,7 +8,6 @@ log() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" | tee -a "$LOG_FILE"
 }
 
-# Function to send WhatsApp message
 send_whatsapp_message() {
     local message="$1"
     local chat_id="$2"
@@ -34,72 +33,48 @@ PAYLOAD
     rm -f "$temp_payload"
 }
 
-# Rollback function
 rollback() {
     log "⚠️ Rolling back to previous version..."
-    if [ -f "marbot-backup" ]; then
-        docker compose down backend
-        
-        # Determine which Dockerfile to use for rollback
-        if [ -f "Dockerfile.backup-mode" ]; then
-            ROLLBACK_MODE=$(cat Dockerfile.backup-mode)
-            log "Using $ROLLBACK_MODE for rollback"
-            if [ "$ROLLBACK_MODE" = "prebuilt" ]; then
-                # Restore prebuilt binary
-                if [ -f "marbot-binary" ]; then
-                    rm -f marbot-binary
-                fi
-                cp marbot-backup marbot-binary
-                docker compose build --no-cache -f Dockerfile.prebuilt backend
-            else
-                # Use original Dockerfile
-                docker compose build --no-cache backend
-            fi
-        else
-            # Fallback: try to restore with prebuilt if binary exists
-            if [ -f "marbot-binary" ]; then
-                rm -f marbot-binary
-            fi
-            cp marbot-backup marbot-binary
-            if [ -f "Dockerfile.prebuilt" ]; then
-                docker compose build --no-cache -f Dockerfile.prebuilt backend
-            else
-                docker compose build --no-cache backend
-            fi
-        fi
-        
-        docker compose up -d backend
-        log "✅ Rolled back successfully"
-    else
+    
+    if [ ! -d "backend-backup" ]; then
         log "❌ No backup found, cannot rollback!"
+        return 1
     fi
+    
+    docker compose down backend
+    
+    # Restore backed up backend directory
+    rm -rf backend
+    mv backend-backup backend
+    
+    # Build and start
+    docker compose build --no-cache backend
+    docker compose up -d backend
+    
+    log "✅ Rolled back successfully"
 }
 
 log "🔄 Starting MARBOT update..."
 
-# Navigate to project directory
 cd /opt/marbot-academic-bot || exit 1
 
-# Check if .env exists
 if [ ! -f .env ]; then
     log "❌ Error: .env file not found!"
     exit 1
 fi
 
-# Load environment variables
 log "📋 Loading environment variables..."
 set -a
 source .env
 set +a
 
-# Verify required env vars
 if [ -z "$DEBUG_GROUP_ID" ] || [ -z "$WAHA_URL" ] || [ -z "$WAHA_API_KEY" ]; then
     log "⚠️ Warning: WhatsApp notification env vars not set properly"
 fi
 
-# Determine build mode
-BUILD_MODE="${BUILD_MODE:-auto}"
-log "🔧 Build mode: $BUILD_MODE"
+# Get deployment mode from environment (set by GitHub Actions)
+DEPLOY_MODE="${DEPLOY_MODE:-auto}"
+log "🔧 Deployment mode: $DEPLOY_MODE"
 
 # Get commit info from environment or git
 if [ -n "${COMMIT_SHA:-}" ]; then
@@ -109,7 +84,7 @@ if [ -n "${COMMIT_SHA:-}" ]; then
     ADDITIONS="${ADDITIONS:-0}"
     DELETIONS="${DELETIONS:-0}"
 else
-    # Fallback to git if env vars not set
+    # Fallback to git if running manually
     OLD_COMMIT=$(git rev-parse --short HEAD)
     
     log "📥 Pulling latest code from GitHub..."
@@ -144,56 +119,50 @@ No changes"
     COMMIT_AUTHOR=$(git log -1 --pretty=format:"%an" HEAD)
     ADDITIONS=$(git show --shortstat | grep -oP '\d+(?= insertion)' || echo "0")
     DELETIONS=$(git show --shortstat | grep -oP '\d+(?= deletion)' || echo "0")
+    
+    # Auto-detect mode if not set
+    if [ "$DEPLOY_MODE" = "auto" ]; then
+        if [ -f "backend/marbot-new" ]; then
+            DEPLOY_MODE="prebuilt"
+        else
+            DEPLOY_MODE="vps-build"
+        fi
+    fi
 fi
 
 log "📝 New commit: ${COMMIT_MSG}"
 log "👤 Author: ${COMMIT_AUTHOR}"
 log "📊 Changes: +${ADDITIONS} -${DELETIONS}"
 
-# Decide whether to use prebuilt binary or build on VPS
-if [ "$BUILD_MODE" = "prebuilt" ] && [ -f marbot-new ]; then
-    log "✅ Using prebuilt binary from GitHub Actions"
-    USE_PREBUILT=true
-elif [ "$BUILD_MODE" = "vps-build" ]; then
-    log "⚠️ Building on VPS (GitHub Actions build unavailable)"
-    USE_PREBUILT=false
-else
-    # Auto mode: prefer prebuilt if available
-    if [ -f marbot-new ]; then
-        log "✅ Prebuilt binary found, using it"
-        USE_PREBUILT=true
-    else
-        log "⚠️ No prebuilt binary, will build on VPS"
-        USE_PREBUILT=false
-    fi
+# Create backup of current backend
+if [ -d "backend" ]; then
+    log "💾 Backing up current backend directory..."
+    rm -rf backend-backup
+    cp -r backend backend-backup
 fi
 
-if [ "$USE_PREBUILT" = true ]; then
+# Handle deployment based on mode
+if [ "$DEPLOY_MODE" = "prebuilt" ]; then
     # ============================================
     # PREBUILT BINARY MODE
     # ============================================
     log "📦 Using prebuilt binary from GitHub Actions..."
     
-    # Backup current binary if it exists
-    if [ -f marbot-binary ]; then
-        log "💾 Backing up current binary..."
-        cp marbot-binary marbot-backup
-        echo "prebuilt" > Dockerfile.backup-mode
-    fi
-    
-    # Copy prebuilt binary into Docker build context
-    cp marbot-new marbot-binary
-    chmod +x marbot-binary
-    
-    # Use Dockerfile.prebuilt for prebuilt binary
-    if [ ! -f Dockerfile.prebuilt ]; then
-        log "❌ Error: Dockerfile.prebuilt not found!"
+    if [ ! -f "backend/marbot-new" ]; then
+        log "❌ Error: Prebuilt binary not found at backend/marbot-new!"
         exit 1
     fi
     
-    # Build Docker image with prebuilt binary
+    if [ ! -f "backend/Dockerfile.prebuilt" ]; then
+        log "❌ Error: backend/Dockerfile.prebuilt not found!"
+        exit 1
+    fi
+    
+    # Set executable permission
+    chmod +x backend/marbot-new
+    
     log "🔨 Building Docker image with prebuilt binary..."
-    if ! docker compose build --no-cache -f Dockerfile.prebuilt backend; then
+    if ! docker compose build --no-cache backend; then
         log "❌ Docker build failed!"
         rollback
         
@@ -209,25 +178,24 @@ _${COMMIT_MSG}_
         exit 1
     fi
     
-    # Clean up temporary binary
-    rm -f marbot-new
+    BUILD_INFO="Built on GitHub Actions ⚡"
     
 else
     # ============================================
     # VPS BUILD MODE (FALLBACK)
     # ============================================
-    log "⚠️ GitHub Actions build failed - building on VPS..."
+    log "⚠️ Building on VPS (GitHub Actions build unavailable)..."
     
-    # Backup mode indicator
-    echo "vps-build" > Dockerfile.backup-mode
-    
-    # Make sure Dockerfile (original) exists
-    if [ ! -f Dockerfile ]; then
-        log "❌ Error: Dockerfile not found!"
+    if [ ! -f "backend/Dockerfile" ]; then
+        log "❌ Error: backend/Dockerfile not found!"
         exit 1
     fi
     
-    # Build using original Dockerfile
+    if [ ! -f "backend/Cargo.toml" ]; then
+        log "❌ Error: backend/Cargo.toml not found! Source code incomplete."
+        exit 1
+    fi
+    
     log "🔨 Building Docker image on VPS (this may take 10-15 minutes)..."
     if ! docker compose build --no-cache backend; then
         log "❌ VPS build failed!"
@@ -244,20 +212,19 @@ _${COMMIT_MSG}_
         send_whatsapp_message "$FAIL_MSG" "$DEBUG_GROUP_ID" "$WAHA_URL" "$WAHA_API_KEY"
         exit 1
     fi
+    
+    BUILD_INFO="Built on VPS (fallback) 🔄"
 fi
 
 log "🚀 Restarting backend service..."
 docker compose up -d --no-deps backend
 
-# Ensure waha and dozzle are still running
 log "🔍 Ensuring waha and dozzle are running..."
 docker compose up -d --no-recreate waha dozzle
 
-# Wait for backend to be healthy
 log "⏳ Waiting for backend to start..."
 sleep 20
 
-# Check backend health
 log "🏥 Checking backend health..."
 HEALTH_CHECK_SUCCESS=false
 for i in {1..10}; do
@@ -287,7 +254,6 @@ _${COMMIT_MSG}_
     sleep 5
 done
 
-# Check if all services are running
 log "📊 Service status:"
 docker compose ps
 
@@ -312,15 +278,7 @@ fi
 log "✅ Update completed successfully!"
 
 # Remove backup after successful deployment
-rm -f marbot-backup
-rm -f Dockerfile.backup-mode
-
-# Prepare success message
-if [ "$USE_PREBUILT" = true ]; then
-    BUILD_INFO="Built on GitHub Actions ⚡"
-else
-    BUILD_INFO="Built on VPS (fallback) 🔄"
-fi
+rm -rf backend-backup
 
 SUCCESS_MSG="*[ MARBOT UPDATE SUCCESS ]*
 _${COMMIT_MSG}_
