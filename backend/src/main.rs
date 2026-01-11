@@ -804,7 +804,7 @@ async fn handle_ai_classification(
                 // ============ HELPER FUNCTION: NOTIFIKASI AKADEMIK ============
                 async fn send_academic_alert(
                     title: &str, 
-                    course: &str, 
+                    _course: &str, // Course tidak dipakai di format singkat, jadi beri underscore prefix
                     deadline_utc: Option<chrono::DateTime<chrono::Utc>>,
                     source_chat: &str
                 ) {
@@ -814,19 +814,22 @@ async fn handle_ai_classification(
                         let academic_env = std::env::var("ACADEMIC_CHANNELS").unwrap_or_default();
                         let channels: Vec<&str> = academic_env.split(',').map(|s| s.trim()).collect();
                         
-                        // Format waktu Indonesia (WIB)
+                        // Format waktu : "15 Jan 2026, 10.00 WIB"
                         let wib = chrono::FixedOffset::east_opt(7 * 3600).unwrap();
                         let deadline_wib = deadline.with_timezone(&wib);
-                        let deadline_str = deadline_wib.format("%A, %d %b %H:%M WIB").to_string();
+                        // %d=Tanggal, %b=Bulan(Singkat), %Y=Tahun, %H.%M=Jam.Menit
+                        let deadline_str = deadline_wib.format("%d %b %Y, %H.%M WIB").to_string();
 
                         for channel_id in channels {
                             if channel_id.is_empty() { continue; }
                             
+                            // SYARAT PENTING: 
                             // Jangan kirim notifikasi jika update berasal dari grup akademik itu sendiri
                             if source_chat != channel_id {
+                                // FORMAT SINGKAT SESUAI REQUEST
                                 let msg = format!(
-                                "[Update] {}\nDeadline: {}",
-                                title, deadline_str
+                                    "[Update] {}\nDeadline: {}",
+                                    title, deadline_str
                                 );
                                 
                                 // Kirim notifikasi ke channel akademik
