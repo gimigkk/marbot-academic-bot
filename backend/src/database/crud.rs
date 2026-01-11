@@ -606,6 +606,7 @@ pub async fn find_assignment_by_keywords(
 
 /// Update specific fields of an assignment
 #[allow(non_snake_case)]
+#[allow(non_snake_case)]
 pub async fn update_assignment_fields(
     pool: &PgPool,
     id: Uuid,
@@ -616,13 +617,14 @@ pub async fn update_assignment_fields(
     incoming_message_id: Option<String>,
     incoming_message_content: Option<String>,
 ) -> Result<Assignment> {
-    // Removed verbose logging - main.rs already prints "🔄 Updating: Title"
-    
     let mut tx = pool.begin().await?;
     
     // Fetch current assignment
     let current = sqlx::query_as::<_, Assignment>(
-        "SELECT * FROM assignments WHERE id = $1"
+        r#"SELECT 
+            id, created_at, course_id, title, description, deadline,
+            parallel_codes, sender_id, message_ids, reminder_1h_sent, relating_messages
+        FROM assignments WHERE id = $1"#
     )
     .bind(id)
     .fetch_one(&mut *tx)
@@ -635,14 +637,29 @@ pub async fn update_assignment_fields(
     
     // Handle parallel_codes properly
     let final_parallel_codes: Vec<String> = if let Some(codes) = new_parallel_codes {
-        // Normalize new codes to lowercase
         codes.iter().map(|c| c.to_lowercase()).collect()
     } else {
-        // Keep current codes
         current.parallel_codes
     };
     
-    // Single UPDATE query with all fields
+    // ✅ FIX: Build the new arrays in Rust, not in SQL
+    let final_message_ids = if let Some(new_msg_id) = incoming_message_id {
+        let mut ids = current.message_ids.clone();
+        ids.push(new_msg_id);
+        ids
+    } else {
+        current.message_ids
+    };
+    
+    let final_relating_messages = if let Some(new_msg_content) = incoming_message_content {
+        let mut messages = current.relating_messages.clone();
+        messages.push(new_msg_content);
+        messages
+    } else {
+        current.relating_messages
+    };
+    
+    // ✅ FIX: Simple UPDATE with direct array binding
     let assignment = sqlx::query_as::<_, Assignment>(
         r#"
         UPDATE assignments
@@ -650,16 +667,12 @@ pub async fn update_assignment_fields(
             title = $3, 
             description = $4,
             parallel_codes = $5,
-            message_ids = CASE 
-                            WHEN $6::text IS NOT NULL THEN array_append(message_ids, $6)
-                            ELSE message_ids 
-                          END,
-            relating_messages = CASE
-                                  WHEN $7::text IS NOT NULL THEN array_append(relating_messages, $7)
-                                  ELSE relating_messages
-                                END
+            message_ids = $6,
+            relating_messages = $7
         WHERE id = $1
-        RETURNING *
+        RETURNING 
+            id, created_at, course_id, title, description, deadline,
+            parallel_codes, sender_id, message_ids, reminder_1h_sent, relating_messages
         "#
     )
     .bind(id)
@@ -667,14 +680,13 @@ pub async fn update_assignment_fields(
     .bind(&final_title)
     .bind(&final_description)
     .bind(&final_parallel_codes)
-    .bind(incoming_message_id)
-    .bind(incoming_message_content) 
+    .bind(&final_message_ids)
+    .bind(&final_relating_messages)
     .fetch_one(&mut *tx)
     .await?;
     
     tx.commit().await?;
     
-    // Clean success log - just confirmation
     println!("   \x1b[32m✅ Updated\x1b[0m\n");
     
     Ok(assignment)
