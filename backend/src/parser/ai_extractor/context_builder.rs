@@ -484,7 +484,57 @@ async fn try_gemini_context(prompt: &str) -> Result<AIHints, String> {
             "generationConfig": {
                 "temperature": 0.1,
                 "maxOutputTokens": 1000,
-                "responseMimeType": "application/json"
+                "responseMimeType": "application/json",
+                "responseSchema": {
+                    "type": "object",
+                    "description": "Structured extraction of course and parallel code information from academic messages",
+                    "properties": {
+                        "parallel_codes": {
+                            "type": "array",
+                            "description": "Global parallel codes common to ALL courses, or empty array if not applicable",
+                            "items": {"type": "string"}
+                        },
+                        "parallel_confidence": {
+                            "type": "number",
+                            "description": "Confidence level in parallel code extraction (0.0 = no confidence, 1.0 = certain)",
+                            "minimum": 0.0,
+                            "maximum": 1.0
+                        },
+                        "parallel_source": {
+                            "type": "string",
+                            "description": "Source of parallel code information",
+                            "enum": ["quoted_assignment", "explicit", "sender_history", "unknown"]
+                        },
+                        "course_hints": {
+                            "type": "array",
+                            "description": "Per-assignment course information with parallel codes and deadline types",
+                            "items": {
+                                "type": "object",
+                                "description": "Individual assignment information",
+                                "properties": {
+                                    "course_name": {
+                                        "type": "string",
+                                        "description": "Full course name from available courses list"
+                                    },
+                                    "parallel_codes": {
+                                        "type": "array",
+                                        "description": "Parallel codes specific to this assignment (k1-k4, p1-p4, r1-r4, or 'all')",
+                                        "items": {"type": "string"}
+                                    },
+                                    "deadline_type": {
+                                        "type": "string",
+                                        "description": "Classification of deadline information type",
+                                        "enum": ["explicit", "next_meeting", "relative", "unknown"]
+                                    }
+                                },
+                                "required": ["course_name", "parallel_codes", "deadline_type"],
+                                "additionalProperties": false
+                            }
+                        }
+                    },
+                    "required": ["parallel_codes", "parallel_confidence", "parallel_source", "course_hints"],
+                    "additionalProperties": false
+                }
             }
         });
         
@@ -530,7 +580,63 @@ async fn try_groq_reasoning_context(prompt: &str) -> Result<AIHints, String> {
             "messages": [{"role": "user", "content": prompt}],
             "temperature": 0.1,
             "max_completion_tokens": 2048,
-            "response_format": {"type": "json_object"}
+            "response_format": {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "context_extraction",
+                    "strict": true,
+                    "schema": {
+                        "type": "object",
+                        "description": "Structured extraction of course and parallel code information from academic messages",
+                        "properties": {
+                            "parallel_codes": {
+                                "type": "array",
+                                "description": "Global parallel codes common to ALL courses, or empty array if not applicable",
+                                "items": {"type": "string"}
+                            },
+                            "parallel_confidence": {
+                                "type": "number",
+                                "description": "Confidence level in parallel code extraction (0.0 = no confidence, 1.0 = certain)",
+                                "minimum": 0.0,
+                                "maximum": 1.0
+                            },
+                            "parallel_source": {
+                                "type": "string",
+                                "description": "Source of parallel code information",
+                                "enum": ["quoted_assignment", "explicit", "sender_history", "unknown"]
+                            },
+                            "course_hints": {
+                                "type": "array",
+                                "description": "Per-assignment course information with parallel codes and deadline types",
+                                "items": {
+                                    "type": "object",
+                                    "description": "Individual assignment information",
+                                    "properties": {
+                                        "course_name": {
+                                            "type": "string",
+                                            "description": "Full course name from available courses list"
+                                        },
+                                        "parallel_codes": {
+                                            "type": "array",
+                                            "description": "Parallel codes specific to this assignment (k1-k4, p1-p4, r1-r4, or 'all')",
+                                            "items": {"type": "string"}
+                                        },
+                                        "deadline_type": {
+                                            "type": "string",
+                                            "description": "Classification of deadline information type",
+                                            "enum": ["explicit", "next_meeting", "relative", "unknown"]
+                                        }
+                                    },
+                                    "required": ["course_name", "parallel_codes", "deadline_type"],
+                                    "additionalProperties": false
+                                }
+                            }
+                        },
+                        "required": ["parallel_codes", "parallel_confidence", "parallel_source", "course_hints"],
+                        "additionalProperties": false
+                    }
+                }
+            }
         });
         
         let client = reqwest::Client::new();
@@ -576,7 +682,63 @@ async fn try_groq_standard_context(prompt: &str) -> Result<AIHints, String> {
             "messages": [{"role": "user", "content": prompt}],
             "temperature": 0.1,
             "max_tokens": 1000,
-            "response_format": {"type": "json_object"}
+            "response_format": {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "context_extraction",
+                    "strict": true,
+                    "schema": {
+                        "type": "object",
+                        "description": "Structured extraction of course and parallel code information from academic messages",
+                        "properties": {
+                            "parallel_codes": {
+                                "type": "array",
+                                "description": "Global parallel codes common to ALL courses, or empty array if not applicable",
+                                "items": {"type": "string"}
+                            },
+                            "parallel_confidence": {
+                                "type": "number",
+                                "description": "Confidence level in parallel code extraction (0.0 = no confidence, 1.0 = certain)",
+                                "minimum": 0.0,
+                                "maximum": 1.0
+                            },
+                            "parallel_source": {
+                                "type": "string",
+                                "description": "Source of parallel code information",
+                                "enum": ["quoted_assignment", "explicit", "sender_history", "unknown"]
+                            },
+                            "course_hints": {
+                                "type": "array",
+                                "description": "Per-assignment course information with parallel codes and deadline types",
+                                "items": {
+                                    "type": "object",
+                                    "description": "Individual assignment information",
+                                    "properties": {
+                                        "course_name": {
+                                            "type": "string",
+                                            "description": "Full course name from available courses list"
+                                        },
+                                        "parallel_codes": {
+                                            "type": "array",
+                                            "description": "Parallel codes specific to this assignment (k1-k4, p1-p4, r1-r4, or 'all')",
+                                            "items": {"type": "string"}
+                                        },
+                                        "deadline_type": {
+                                            "type": "string",
+                                            "description": "Classification of deadline information type",
+                                            "enum": ["explicit", "next_meeting", "relative", "unknown"]
+                                        }
+                                    },
+                                    "required": ["course_name", "parallel_codes", "deadline_type"],
+                                    "additionalProperties": false
+                                }
+                            }
+                        },
+                        "required": ["parallel_codes", "parallel_confidence", "parallel_source", "course_hints"],
+                        "additionalProperties": false
+                    }
+                }
+            }
         });
         
         let client = reqwest::Client::new();
