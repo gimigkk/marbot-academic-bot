@@ -162,7 +162,8 @@ if [ "$DEPLOY_MODE" = "prebuilt" ]; then
     chmod +x backend/marbot-new
     
     log "🔨 Building Docker image with prebuilt binary..."
-    if ! docker compose build --no-cache backend; then
+    # Build directly with docker, specifying the correct Dockerfile
+    if ! docker build -f backend/Dockerfile.prebuilt -t marbot-academic-bot-backend:latest ./backend; then
         log "❌ Docker build failed!"
         rollback
         
@@ -197,7 +198,8 @@ else
     fi
     
     log "🔨 Building Docker image on VPS (this may take 10-15 minutes)..."
-    if ! docker compose build --no-cache backend; then
+    # Build directly with docker, specifying the correct Dockerfile
+    if ! docker build -f backend/Dockerfile -t marbot-academic-bot-backend:latest ./backend; then
         log "❌ VPS build failed!"
         rollback
         

@@ -2,13 +2,9 @@ version: '3.8'
 
 services:
   backend:
-    build:
-      context: ./backend
-      # Dockerfile is auto-selected based on what exists:
-      # - Dockerfile.prebuilt (if prebuilt binary exists)
-      # - Dockerfile (if building from source on VPS)
-      # Docker Compose will use the first available
-      dockerfile: ${BACKEND_DOCKERFILE:-Dockerfile}
+    # Use the image that was built by update.sh
+    # update.sh builds it with the correct Dockerfile based on deploy mode
+    image: marbot-academic-bot-backend:latest
     container_name: marbot-backend
     environment:
       - DATABASE_URL=${DATABASE_URL}
