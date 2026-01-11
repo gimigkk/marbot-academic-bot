@@ -304,7 +304,7 @@ jobs:
             {
               "session": "default",
               "chatId": "${{ secrets.DEBUG_GROUP_ID }}",
-              "text": "*[ MARBOT UPDATE SUCCESS ]*\n_${{ needs.prepare.outputs.commit_message }}_\n\n*[ `#${{ needs.prepare.outputs.short_sha }}` by ${{ needs.prepare.outputs.author_name }} ]* +${{ needs.prepare.outputs.additions }} -${{ needs.prepare.outputs.deletions }}\nhttps://github.com/${{ github.repository }}/commit/${{ needs.prepare.outputs.short_sha }}"
+              "text": "*[ MARBOT UPDATE SUCCESS ]*\n_${{ needs.prepare.outputs.commit_message }}_\n\n*[ `#${{ needs.prepare.outputs.short_sha }}` by ${{ needs.prepare.outputs.author_name }} ]* +${{ needs.prepare.outputs.additions }} -${{ needs.prepare.outputs.deletions }}\nhttps://github.com/${{ github.repository }}/commit/${{ needs.prepare.outputs.short_sha }}",
               "linkPreview": false
             }
 
@@ -325,14 +325,14 @@ jobs:
             {
               "session": "default",
               "chatId": "${{ secrets.DEBUG_GROUP_ID }}",
-              "text": "*[ MARBOT UPDATE FAILED ]*\n_${{ needs.prepare.outputs.commit_message }}_\n\n*[ `#${{ needs.prepare.outputs.short_sha }}` by ${{ needs.prepare.outputs.author_name }} ]* +${{ needs.prepare.outputs.additions }} -${{ needs.prepare.outputs.deletions }}\n\n❌ Deployment failed\n🔍 Check logs:\n${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+              "text": "*[ MARBOT UPDATE FAILED ]*\n_${{ needs.prepare.outputs.commit_message }}_\n\n*[ `#${{ needs.prepare.outputs.short_sha }}` by ${{ needs.prepare.outputs.author_name }} ]* +${{ needs.prepare.outputs.additions }} -${{ needs.prepare.outputs.deletions }}\n\n❌ Deployment failed\n🔍 Check logs:\n${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}",
               "linkPreview": false
             }
 
   summary:
     name: 📊 Deployment Summary
     runs-on: ubuntu-latest
-    needs: [prepare, build, deploy, notify-success, notify-failure]
+    needs: [prepare, build, deploy]
     if: always()
     timeout-minutes: 2
     
