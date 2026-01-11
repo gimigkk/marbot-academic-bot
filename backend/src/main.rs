@@ -652,32 +652,6 @@ async fn webhook(
     StatusCode::OK
 }
 
-async fn forward_message(chat_id: &str, message_id: &str) -> Result<(), String> {
-    let waha_url = std::env::var("WAHA_URL").unwrap_or_else(|_| "http://localhost:3001".to_string());
-    let api_key = std::env::var("WAHA_API_KEY").map_err(|e| e.to_string())?;
-    
-    let forward_payload = serde_json::json!({
-        "session": "default",
-        "chatId": chat_id,
-        "messageId": message_id
-    });
-    
-    let client = reqwest::Client::new();
-    let response = client
-        .post(format!("{}/api/forwardMessage", waha_url))
-        .header("X-Api-Key", api_key)
-        .header("Content-Type", "application/json")
-        .json(&forward_payload)
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
-    
-    if !response.status().is_success() {
-        return Err(format!("Failed to forward message"));
-    }
-    Ok(())
-}
-
 #[allow(non_snake_case)]
 async fn handle_ai_classification(
     pool: PgPool,
@@ -1036,23 +1010,31 @@ async fn handle_single_assignment(
                 if let Ok(Some(assignment)) = crud::get_assignment_by_title_and_course(&pool, &title_clone, cid).await {
                     if let Ok(Some(full_assign)) = crud::get_assignment_with_course_by_id(&pool, assignment.id).await {
                         let missing = clarification::identify_missing_fields(&full_assign);
+                        
+                        // Actually send clarification if fields are missing
                         if !missing.is_empty() {
+                            println!("🔔 Clarification needed for: {:?}", missing);
+                            
                             if let Some(debug_id) = &debug_group_id {
                                 let (info_msg, template_msg) = clarification::generate_clarification_messages(&full_assign, &missing);
                                 
-                                // Combine with newlines
-                                let combined_msg = format!("{}\n\n{}", info_msg, template_msg);
+                                // Combine messages
+                                let combined_msg = format!("{}\n{}", info_msg, template_msg);
 
-                                // Send once
-                                let _ = send_reply(debug_id, &combined_msg).await;
+                                // Send the clarification request
+                                if let Err(e) = send_reply(debug_id, &combined_msg).await {
+                                    eprintln!("❌ Failed to send clarification: {}", e);
+                                } else {
+                                    println!("✅ Clarification request sent");
+                                }
                             }
-                            return;
+                            return; // Don't send success message if clarification is needed
                         }
                     }
                 }
             }
 
-            // Success message (no clarification needed)
+            // Success message (only if NO clarification needed)
             if let Some(debug_id) = &debug_group_id {
                 let prefix = if assignment_number > 0 {
                     format!("{}. ", assignment_number)
