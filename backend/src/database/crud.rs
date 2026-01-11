@@ -150,7 +150,7 @@ pub async fn get_last_completed_assignment(
             a.deadline,
             a.message_ids,
             a.sender_id,
-            true as is_completed
+            true as is_completed,
             a.relating_messages
         FROM assignments a
         JOIN courses c ON a.course_id = c.id
@@ -254,7 +254,7 @@ pub async fn get_active_assignments_sorted(pool: &PgPool) -> Result<Vec<Assignme
             a.deadline,
             a.message_ids,
             a.sender_id,
-            false as is_completed
+            false as is_completed,
             a.relating_messages
         FROM assignments a
         JOIN courses c ON a.course_id = c.id
@@ -299,7 +299,7 @@ pub async fn get_active_assignments_for_user(
                 SELECT 1 FROM user_completions uc 
                 WHERE uc.assignment_id = a.id 
                 AND uc.user_id = $2
-            ) as is_completed
+            ) as is_completed,
             a.relating_messages
         FROM assignments a
         JOIN courses c ON a.course_id = c.id
@@ -442,7 +442,7 @@ pub async fn get_assignment_with_course_by_id(
             a.deadline,
             a.message_ids,
             a.sender_id,
-            false as is_completed
+            false as is_completed,
             a.relating_messages
         FROM assignments a
         JOIN courses c ON a.course_id = c.id
