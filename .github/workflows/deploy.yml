@@ -40,7 +40,7 @@ jobs:
           echo "author_name=$AUTHOR_NAME" >> $GITHUB_OUTPUT
 
   build:
-    name: 🔨 Build Rust Binary
+    name: 🔨 Build Rust Binary (GitHub Actions)
     runs-on: ubuntu-latest
     needs: prepare
     timeout-minutes: 30
@@ -133,19 +133,23 @@ jobs:
           if [ "${{ needs.build.outputs.build-success }}" == "true" ]; then
             echo "mode=prebuilt" >> $GITHUB_OUTPUT
             echo "✅ Using prebuilt binary from GitHub Actions"
+            echo "### ⚡ DEPLOYMENT MODE: PREBUILT BINARY" >> $GITHUB_STEP_SUMMARY
+            echo "Binary was successfully built on GitHub Actions" >> $GITHUB_STEP_SUMMARY
           else
             echo "mode=vps-build" >> $GITHUB_OUTPUT
             echo "⚠️ GitHub Actions build failed - will build on VPS"
+            echo "### 🔄 DEPLOYMENT MODE: VPS BUILD (FALLBACK)" >> $GITHUB_STEP_SUMMARY
+            echo "Will compile from source on VPS" >> $GITHUB_STEP_SUMMARY
           fi
       
-      - name: 📥 Download binary artifact
+      - name: ⚡ [PREBUILT MODE] Download binary artifact
         if: steps.build-check.outputs.mode == 'prebuilt'
         uses: actions/download-artifact@v4
         with:
           name: marbot-binary
           path: ./artifact
       
-      - name: 📦 Prepare prebuilt deployment package
+      - name: ⚡ [PREBUILT MODE] Prepare deployment package
         if: steps.build-check.outputs.mode == 'prebuilt'
         run: |
           # Create clean deployment structure
@@ -168,7 +172,7 @@ jobs:
           echo "✅ Prebuilt package ready"
           ls -laR deploy/
       
-      - name: 📦 Prepare VPS build deployment package
+      - name: 🔄 [VPS BUILD MODE] Prepare deployment package
         if: steps.build-check.outputs.mode == 'vps-build'
         run: |
           # Create clean deployment structure with full source
@@ -184,14 +188,28 @@ jobs:
           echo "✅ VPS build package ready"
           ls -laR deploy/
       
-      - name: 🔐 Verify binary integrity (prebuilt only)
+      - name: ⚡ [PREBUILT MODE] Verify binary integrity
         if: steps.build-check.outputs.mode == 'prebuilt'
         run: |
           cd deploy/backend
           sha256sum -c marbot.sha256
           echo "✅ Binary integrity verified before transfer"
       
-      - name: 📤 Transfer deployment package to VPS
+      - name: ⚡ [PREBUILT MODE] Transfer deployment package to VPS
+        if: steps.build-check.outputs.mode == 'prebuilt'
+        uses: appleboy/scp-action@v1
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USERNAME }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT }}
+          source: "deploy/*"
+          target: "/tmp/marbot-deploy-${{ needs.prepare.outputs.short_sha }}/"
+          strip_components: 1
+          overwrite: true
+      
+      - name: 🔄 [VPS BUILD MODE] Transfer deployment package to VPS
+        if: steps.build-check.outputs.mode == 'vps-build'
         uses: appleboy/scp-action@v1
         with:
           host: ${{ secrets.VPS_HOST }}
@@ -276,16 +294,21 @@ jobs:
       
       - name: ✅ Deployment successful
         run: |
+          echo "## 🎉 Deployment Complete!" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
           if [ "${{ steps.build-check.outputs.mode }}" == "prebuilt" ]; then
-            echo "✅ Binary built on GitHub Actions (x86_64-unknown-linux-gnu)"
-            echo "✅ Binary integrity verified with SHA256"
-            echo "✅ Deployed prebuilt binary"
+            echo "### ⚡ PREBUILT MODE USED" >> $GITHUB_STEP_SUMMARY
+            echo "✅ Binary built on GitHub Actions (x86_64-unknown-linux-gnu)" >> $GITHUB_STEP_SUMMARY
+            echo "✅ Binary integrity verified with SHA256" >> $GITHUB_STEP_SUMMARY
+            echo "✅ Deployed prebuilt binary (~30 seconds)" >> $GITHUB_STEP_SUMMARY
           else
-            echo "⚠️ GitHub Actions build failed"
-            echo "✅ Full source deployed for VPS build"
-            echo "✅ VPS will build from source"
+            echo "### 🔄 VPS BUILD MODE USED (FALLBACK)" >> $GITHUB_STEP_SUMMARY
+            echo "⚠️ GitHub Actions build failed" >> $GITHUB_STEP_SUMMARY
+            echo "✅ Full source deployed for VPS build" >> $GITHUB_STEP_SUMMARY
+            echo "✅ VPS compiled from source (~10-15 minutes)" >> $GITHUB_STEP_SUMMARY
           fi
-          echo "✅ Deployment package transferred successfully"
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "✅ Deployment package transferred successfully" >> $GITHUB_STEP_SUMMARY
 
   notify-success:
     name: 📱 Send Success Notification
@@ -304,7 +327,8 @@ jobs:
             {
               "session": "default",
               "chatId": "${{ secrets.DEBUG_GROUP_ID }}",
-              "text": "*[ MARBOT UPDATE SUCCESS ]*\n_${{ needs.prepare.outputs.commit_message }}_\n\n*[ `#${{ needs.prepare.outputs.short_sha }}` by ${{ needs.prepare.outputs.author_name }} ]* +${{ needs.prepare.outputs.additions }} -${{ needs.prepare.outputs.deletions }}\nhttps://github.com/${{ github.repository }}/commit/${{ needs.prepare.outputs.short_sha }}"
+              "text": "*[ MARBOT UPDATE SUCCESS ]*\n_${{ needs.prepare.outputs.commit_message }}_\n\n*[ `#${{ needs.prepare.outputs.short_sha }}` by ${{ needs.prepare.outputs.author_name }} ]* +${{ needs.prepare.outputs.additions }} -${{ needs.prepare.outputs.deletions }}\n\nhttps://github.com/${{ github.repository }}/commit/${{ needs.prepare.outputs.short_sha }}",
+              "linkPreview": false
             }
 
   notify-failure:
@@ -324,7 +348,8 @@ jobs:
             {
               "session": "default",
               "chatId": "${{ secrets.DEBUG_GROUP_ID }}",
-              "text": "*[ MARBOT UPDATE FAILED ]*\n_${{ needs.prepare.outputs.commit_message }}_\n\n*[ `#${{ needs.prepare.outputs.short_sha }}` by ${{ needs.prepare.outputs.author_name }} ]* +${{ needs.prepare.outputs.additions }} -${{ needs.prepare.outputs.deletions }}\n\n❌ Deployment failed\n🔍 Check logs:\n${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+              "text": "*[ MARBOT UPDATE FAILED ]*\n_${{ needs.prepare.outputs.commit_message }}_\n\n*[ `#${{ needs.prepare.outputs.short_sha }}` by ${{ needs.prepare.outputs.author_name }} ]* +${{ needs.prepare.outputs.additions }} -${{ needs.prepare.outputs.deletions }}\n\n❌ Deployment failed\n🔍 Check logs:\n${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}",
+              "linkPreview": false
             }
 
   summary:
@@ -347,11 +372,15 @@ jobs:
             if [ "${{ needs.build.outputs.build-success }}" == "true" ]; then
               echo "🎉 Deployment completed with GitHub Actions build!" >> $GITHUB_STEP_SUMMARY
               echo "" >> $GITHUB_STEP_SUMMARY
-              echo "**Build Method:** GitHub Actions (optimized)" >> $GITHUB_STEP_SUMMARY
+              echo "**Build Method:** ⚡ GitHub Actions (prebuilt binary)" >> $GITHUB_STEP_SUMMARY
+              echo "**Compilation:** Skipped on VPS (binary pre-compiled)" >> $GITHUB_STEP_SUMMARY
+              echo "**Deploy Time:** ~30 seconds" >> $GITHUB_STEP_SUMMARY
             else
               echo "🎉 Deployment completed with VPS build fallback!" >> $GITHUB_STEP_SUMMARY
               echo "" >> $GITHUB_STEP_SUMMARY
-              echo "**Build Method:** VPS Fallback (GitHub Actions build failed)" >> $GITHUB_STEP_SUMMARY
+              echo "**Build Method:** 🔄 VPS Fallback" >> $GITHUB_STEP_SUMMARY
+              echo "**Compilation:** Built from source on VPS" >> $GITHUB_STEP_SUMMARY
+              echo "**Deploy Time:** ~10-15 minutes" >> $GITHUB_STEP_SUMMARY
               echo "" >> $GITHUB_STEP_SUMMARY
               echo "⚠️ **Note:** GitHub Actions build failed but deployment succeeded via VPS build." >> $GITHUB_STEP_SUMMARY
             fi
@@ -373,8 +402,12 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### 🔧 Job Results" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| Job | Status |" >> $GITHUB_STEP_SUMMARY
-          echo "|-----|--------|" >> $GITHUB_STEP_SUMMARY
-          echo "| Prepare | ${{ needs.prepare.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Build (GitHub) | ${{ needs.build.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Deploy | ${{ needs.deploy.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Job | Status | Method |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----|--------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Prepare | ${{ needs.prepare.result }} | - |" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ needs.build.outputs.build-success }}" == "true" ]; then
+            echo "| Build (GitHub) | ${{ needs.build.result }} | ✅ Used prebuilt binary |" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "| Build (GitHub) | ${{ needs.build.result }} | ⚠️ Fallback to VPS build |" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "| Deploy | ${{ needs.deploy.result }} | - |" >> $GITHUB_STEP_SUMMARY

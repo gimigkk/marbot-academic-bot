@@ -20,7 +20,8 @@ send_whatsapp_message() {
 {
     "session": "default",
     "chatId": "$chat_id",
-    "text": "$message"
+    "text": "$message",
+    "linkPreview": false
 }
 PAYLOAD
     
@@ -286,6 +287,7 @@ SUCCESS_MSG="*[ MARBOT UPDATE SUCCESS ]*
 _${COMMIT_MSG}_
 
 *[ \`#${NEW_COMMIT}\` by ${COMMIT_AUTHOR} ]* +${ADDITIONS} -${DELETIONS}
+
 https://github.com/gimigkk/marbot-academic-bot/commit/${NEW_COMMIT}
 
 ${BUILD_INFO}"
