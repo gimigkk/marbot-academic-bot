@@ -183,6 +183,7 @@ pub async fn get_assignments(pool: &PgPool) -> Result<Vec<Assignment>> {
             parallel_codes,
             sender_id,
             message_ids,
+            reminder_1h_sent,
             relating_messages
         FROM assignments
         ORDER BY created_at DESC
@@ -238,6 +239,7 @@ pub async fn get_assignment_by_title_and_course(
             parallel_codes,
             sender_id,
             message_ids,
+            reminder_1h_sent,
             relating_messages
         FROM assignments
         WHERE title = $1 AND course_id = $2
@@ -258,9 +260,21 @@ pub async fn get_active_assignments(pool: &PgPool) -> Result<Vec<Assignment>> {
     
     let assignments = sqlx::query_as::<_, Assignment>(
         r#"
-        SELECT a.* FROM assignments a
-        WHERE a.deadline > $1 OR a.deadline IS NULL
-        ORDER BY a.created_at DESC
+        SELECT 
+            id,
+            created_at,
+            course_id,
+            title,
+            description,
+            deadline,
+            parallel_codes,
+            sender_id,
+            message_ids,
+            reminder_1h_sent,
+            relating_messages
+        FROM assignments
+        WHERE deadline > $1 OR deadline IS NULL
+        ORDER BY created_at DESC
         LIMIT 20
         "#
     )
@@ -387,6 +401,7 @@ pub async fn get_recent_assignments_for_update(
             parallel_codes,
             sender_id,
             message_ids,
+            reminder_1h_sent,
             relating_messages
         FROM assignments
         WHERE created_at > NOW() - INTERVAL '30 days'
@@ -397,11 +412,11 @@ pub async fn get_recent_assignments_for_update(
     .fetch_all(pool)
     .await?;
     
-    // ✅ ADD DEBUG LOG
     println!("🔍 Fetched {} assignments for duplicate check", assignments.len());
     
     Ok(assignments)
 }
+
 
 
 /// Find course by name (case-insensitive)
@@ -520,7 +535,10 @@ pub async fn find_assignment_by_keywords(
             .collect();
         
         let mut query = String::from(
-            "SELECT * FROM assignments WHERE course_id = $1 AND ("
+            r#"SELECT 
+                id, created_at, course_id, title, description, deadline, 
+                parallel_codes, sender_id, message_ids, reminder_1h_sent, relating_messages
+            FROM assignments WHERE course_id = $1 AND ("#
         );
         
         let mut conditions = Vec::new();
@@ -564,7 +582,10 @@ pub async fn find_assignment_by_keywords(
     }
     
     let query = format!(
-        "SELECT * FROM assignments WHERE {} ORDER BY created_at DESC LIMIT 5",
+        r#"SELECT 
+            id, created_at, course_id, title, description, deadline, 
+            parallel_codes, sender_id, message_ids, reminder_1h_sent, relating_messages
+        FROM assignments WHERE {} ORDER BY created_at DESC LIMIT 5"#,
         conditions.join(" OR ")
     );
     
