@@ -234,7 +234,7 @@ pub async fn extract_with_ai(
             }
             Err(e) => {
                 eprintln!("│ ⚠️  Gemini failed: {}", e);
-                eprintln!("\n│ 🔄 Falling back to Groq...");
+                eprintln!("│\n│ 🔄 Falling back to Groq...");
             }
         }
     }
@@ -728,7 +728,8 @@ async fn try_gemini_duplicate_check(prompt: &str) -> Result<Option<Uuid>, String
             if result.is_duplicate && result.confidence == "high" {
                 if let Some(ref id_str) = result.matched_assignment_id {
                     if let Ok(uuid) = Uuid::parse_str(id_str) {
-                        println!("🔍 Duplicate detected: {} - Reason: {}", id_str, result.reason);
+                        // Simplified log - just the essentials
+                        println!("🔍 \x1b[36mDuplicate found\x1b[0m → \x1b[33mupdating existing\x1b[0m");
                         return Ok(Some(uuid));
                     }
                 }
@@ -799,7 +800,8 @@ async fn try_groq_reasoning_duplicate_check(prompt: &str) -> Result<Option<Uuid>
             if result.is_duplicate && result.confidence == "high" {
                 if let Some(ref id_str) = result.matched_assignment_id {
                     if let Ok(uuid) = Uuid::parse_str(id_str) {
-                        println!("🔍 Duplicate detected: {} - Reason: {}", id_str, result.reason);
+                        // Simplified log - just the essentials
+                        println!("🔍 \x1b[36mDuplicate found\x1b[0m → \x1b[33mupdating existing\x1b[0m");
                         return Ok(Some(uuid));
                     }
                 }
@@ -869,7 +871,8 @@ async fn try_groq_standard_duplicate_check(prompt: &str) -> Result<Option<Uuid>,
             if result.is_duplicate && result.confidence == "high" {
                 if let Some(ref id_str) = result.matched_assignment_id {
                     if let Ok(uuid) = Uuid::parse_str(id_str) {
-                        println!("🔍 Duplicate detected: {} - Reason: {}", id_str, result.reason);
+                        // Simplified log - just the essentials
+                        println!("🔍 \x1b[36mDuplicate found\x1b[0m → \x1b[33mupdating existing\x1b[0m");
                         return Ok(Some(uuid));
                     }
                 }
@@ -914,7 +917,7 @@ pub async fn match_update_to_assignment(
         }
         Err(e) => {
             eprintln!("│ ⚠️  Gemini failed: {}", e);
-            eprintln!("│ 🔄 Falling back to Groq...");
+            eprintln!("│\n│ 🔄 Falling back to Groq...");
         }
     }
     

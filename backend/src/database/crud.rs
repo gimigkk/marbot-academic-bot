@@ -560,11 +560,7 @@ pub async fn update_assignment_fields(
     incoming_message_id: Option<String>,
     incoming_message_content: Option<String>,
 ) -> Result<Assignment> {
-    println!("🔄 Updating assignment {}", id);
-    println!("   Deadline: {:?}", new_deadline);
-    println!("   Title: {:?}", new_title);
-    println!("   Description: {:?}", new_description);
-    println!("   Parallels: {:?}", new_parallel_codes);
+    // Removed verbose logging - main.rs already prints "🔄 Updating: Title"
     
     let mut tx = pool.begin().await?;
     
@@ -622,7 +618,8 @@ pub async fn update_assignment_fields(
     
     tx.commit().await?;
     
-    println!("✅ Successfully updated assignment: {}\n", assignment.title);
+    // Clean success log - just confirmation
+    println!("   \x1b[32m✅ Updated\x1b[0m\n");
     
     Ok(assignment)
 }

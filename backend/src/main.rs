@@ -794,7 +794,7 @@ async fn handle_ai_classification(
                     .await
                     .unwrap_or_default();
                 
-                // ===== SMART UPDATE: Check for re-announcement =====
+                // SMART UPDATE: Check for re-announcement
                 if let Some(ref title) = new_title {
                     if let (Some(_course_id), Some(cname)) = (course_id, &course_name) {
                         let dup_check = check_duplicate_assignment(
@@ -807,7 +807,7 @@ async fn handle_ai_classification(
                         ).await;
                         
                         if let Ok(Some(id)) = dup_check {
-                            println!("🔄 RE-ANNOUNCEMENT: {} → Updating existing", title);
+                            println!("🔄 \x1b[33mRe-announcement\x1b[0m: \x1b[1m{}\x1b[0m", title);
                             
                             let deadline_parsed = new_deadline.as_ref()
                                 .and_then(|d| crud::parse_deadline(d).ok());
@@ -826,7 +826,7 @@ async fn handle_ai_classification(
                             if let Some(debug_id) = debug_clone {
                                 let _ = send_reply(
                                     &debug_id,
-                                    &format!("*UPDATED*: {}\n_it was a re-announcement._", title)
+                                    &format!("🔄 *UPDATED*: {}\n_{}_", title, changes)
                                 ).await;
                             }
                             return;
@@ -834,7 +834,7 @@ async fn handle_ai_classification(
                     }
                 }
                 
-                // ===== REGULAR UPDATE MATCHING =====
+                // REGULAR UPDATE MATCHING
                 match parser::ai_extractor::match_update_to_assignment(
                     &changes,
                     &reference_keywords,
@@ -843,10 +843,17 @@ async fn handle_ai_classification(
                     &parallel_codes,
                 ).await {
                     Ok(Some(assignment_id)) => {
+                        let current_title = active_assignments.iter()
+                            .find(|a| a.id == assignment_id)
+                            .map(|a| a.title.clone())
+                            .unwrap_or_else(|| "Unknown".to_string());
+                        
+                        println!("🔄 \x1b[33mUpdating\x1b[0m: \x1b[1m{}\x1b[0m", current_title);
+                        
                         let deadline_parsed = new_deadline.as_ref()
                             .and_then(|d| crud::parse_deadline(d).ok());
                         
-                        if let Ok(updated) = crud::update_assignment_fields(
+                        if let Ok(_) = crud::update_assignment_fields(
                             &pool_clone,
                             assignment_id,
                             deadline_parsed,
@@ -856,18 +863,16 @@ async fn handle_ai_classification(
                             Some(msg_id),
                             None,
                         ).await {
-                            println!("🔄 UPDATED: {} ({})", updated.title, changes);
-                            
                             if let Some(debug_id) = debug_clone {
                                 let _ = send_reply(
                                     &debug_id,
-                                    &format!("*UPDATED*: {}\n_{}_", updated.title, changes)
+                                    &format!("🔄 *UPDATED*: {}\n_{}_", current_title, changes)
                                 ).await;
                             }
                         }
                     }
                     Ok(None) => {
-                        println!("⚠️  No match found for update: {:?}", reference_keywords);
+                        println!("⚠️  \x1b[33mNo match found\x1b[0m for update: {:?}", reference_keywords);
                         
                         if let Some(debug_id) = debug_clone {
                             let _ = send_reply(
@@ -950,7 +955,8 @@ async fn handle_single_assignment(
                 
                 match &match_result {
                     Ok(Some(id)) => {
-                        println!("🔄 DUPLICATE: {} → Updating existing ({})", title_clone, id);
+                        // CLEAN LOG: Just show what's being updated
+                        println!("🔄 \x1b[33mUpdating\x1b[0m: \x1b[1m{}\x1b[0m", title_clone);
                         
                         let update_result = crud::update_assignment_fields(
                             &pool, 
@@ -972,15 +978,15 @@ async fn handle_single_assignment(
                                 };
                                 let _ = send_reply(
                                     debug_id, 
-                                    &format!("{} *UPDATED*: {}\n_found the duplicate._", prefix, title_clone)
+                                    &format!("{}🔄 *UPDATED*: {}", prefix, title_clone)
                                 ).await;
                             }
                         }
                         return;
                     }
                     Ok(None) => {}
-                    Err(e) => {
-                        println!("⚠️  Duplicate check failed: {} - creating new", e);
+                    Err(_) => {
+                        // Silent fallback - no need to spam logs
                     }
                 }
             }
@@ -1004,74 +1010,60 @@ async fn handle_single_assignment(
         Ok(_) => {
             println!("✅ Assignment created: {}", title_clone);
             
-            // ============ DEBUG CLARIFICATION ============
-            println!("🔍 Starting clarification check...");
-            println!("   course_id: {:?}", course_id);
-            
+            // ============ CLARIFICATION CHECK ============
             if let Some(cid) = course_id {
-                println!("   ✅ Has course_id: {}", cid);
-                
-                // Step 1: Try to get assignment by title and course
-                match crud::get_assignment_by_title_and_course(&pool, &title_clone, cid).await {
-                    Ok(Some(assignment)) => {
-                        println!("   ✅ Found assignment by title: {}", assignment.id);
+                if let Ok(Some(assignment)) = crud::get_assignment_by_title_and_course(&pool, &title_clone, cid).await {
+                    if let Ok(Some(full_assign)) = crud::get_assignment_with_course_by_id(&pool, assignment.id).await {
                         
-                        // Step 2: Try to get full assignment with course
-                        match crud::get_assignment_with_course_by_id(&pool, assignment.id).await {
-                            Ok(Some(full_assign)) => {
-                                println!("   ✅ Got full assignment data");
-                                println!("      - Course: {}", full_assign.course_name);
-                                println!("      - Title: {}", full_assign.title);
-                                println!("      - Deadline: {:?}", full_assign.deadline);
-                                println!("      - Description: {:?}", full_assign.description);
-                                println!("      - Parallels: {:?}", full_assign.parallel_codes);
-                                
-                                // Step 3: Identify missing fields
-                                let missing = clarification::identify_missing_fields(&full_assign);
-                                println!("   🔍 Missing fields: {:?}", missing);
-                                
-                                if !missing.is_empty() {
-                                    println!("   🔔 Clarification needed!");
-                                    
-                                    if let Some(debug_id) = &debug_group_id {
-                                        println!("   📤 Sending to debug group: {}", debug_id);
-                                        
-                                        let (info_msg, template_msg) = clarification::generate_clarification_messages(&full_assign, &missing);
-                                        let combined_msg = format!("{}\n{}", info_msg, template_msg);
+                        // Compact assignment info display
+                        println!("🔍 Starting clarification check...");
+                        println!("   \x1b[36m📚 {}\x1b[0m", full_assign.course_name);
+                        println!("   \x1b[1m📝 {}\x1b[0m", full_assign.title);
+                        
+                        if let Some(ref desc) = full_assign.description {
+                            let desc_display = desc.chars().take(60).collect::<String>();
+                            let desc_final = if desc.len() > 60 {
+                                format!("{}...", desc_display)
+                            } else {
+                                desc_display
+                            };
+                            println!("   \x1b[90m📄 {}\x1b[0m", desc_final);
+                        }
+                        
+                        if let Some(deadline) = full_assign.deadline {
+                            let indonesia_time = deadline + ChronoDuration::hours(7);
+                            println!("   \x1b[32m⏰ {}\x1b[0m", indonesia_time.format("%Y-%m-%d %H:%M WIB"));
+                        } else {
+                            println!("   \x1b[33m⏰ (no deadline)\x1b[0m");
+                        }
+                        
+                        if !full_assign.parallel_codes.is_empty() {
+                            println!("   \x1b[35m🧩 {}\x1b[0m", full_assign.parallel_codes.join(", ").to_uppercase());
+                        }
+                        
+                        // Check for missing fields
+                        let missing = clarification::identify_missing_fields(&full_assign);
+                        
+                        if !missing.is_empty() {
+                            println!("   \x1b[33m🔔 Missing: {}\x1b[0m", missing.join(", "));
+                            
+                            if let Some(debug_id) = &debug_group_id {
+                                let (info_msg, template_msg) = clarification::generate_clarification_messages(&full_assign, &missing);
+                                let combined_msg = format!("{}\n{}", info_msg, template_msg);
 
-                                        match send_reply(debug_id, &combined_msg).await {
-                                            Ok(_) => println!("   ✅ Clarification sent successfully!"),
-                                            Err(e) => eprintln!("   ❌ Failed to send clarification: {}", e),
-                                        }
-                                    } else {
-                                        println!("   ⚠️ No debug_group_id set!");
-                                    }
-                                    return; // Don't send success message
-                                } else {
-                                    println!("   ℹ️ No clarification needed - all fields present");
+                                match send_reply(debug_id, &combined_msg).await {
+                                    Ok(_) => println!("   \x1b[32m✅ Clarification sent\x1b[0m\n"),
+                                    Err(e) => eprintln!("   \x1b[31m❌ Send failed: {}\x1b[0m\n", e),
                                 }
                             }
-                            Ok(None) => {
-                                eprintln!("   ❌ get_assignment_with_course_by_id returned None");
-                            }
-                            Err(e) => {
-                                eprintln!("   ❌ get_assignment_with_course_by_id failed: {}", e);
-                            }
+                            return; // Don't send success message
+                        } else {
+                            println!("   \x1b[32m✅ Complete (no clarification needed)\x1b[0m\n");
                         }
                     }
-                    Ok(None) => {
-                        eprintln!("   ❌ get_assignment_by_title_and_course returned None");
-                    }
-                    Err(e) => {
-                        eprintln!("   ❌ get_assignment_by_title_and_course failed: {}", e);
-                    }
                 }
-            } else {
-                println!("   ⚠️ No course_id - skipping clarification");
             }
-            
-            println!("🔍 Clarification check complete\n");
-            // ============ END DEBUG ============
+            // ============ END CLARIFICATION ============
 
             // Success message (only if NO clarification needed)
             if let Some(debug_id) = &debug_group_id {
