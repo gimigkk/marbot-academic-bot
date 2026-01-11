@@ -1,201 +1,392 @@
 [
   {
-    "name": "Category 1.1 - Basic reminder with emoji",
-    "message": "📢 REMINDER RPL K1 📢\nHalooo teman-teman!!!!\nmau ngingetin nih, Jangan lupa kerjain Tugas 1 di Class yaa guyss✨🙌🏻\n\nDeadline:\n📅 Senin, 20 Januari 2026 pukul 23.59\n\nJangan sampai kelewatan yaa!!🤩👋🏻",
+    "name": "Real-01: Asynchronous with drive link and video requirement",
+    "message": "INFO PEMROG K1 📣\n\nhttps://drive.google.com/file/d/1Cpo8EmcyJDTB0tktWFdBhwEMptvPBJqE/view?usp=sharing\n\nUntuk PEMROG K1 hari Kamis jam 08:00 sampai 09:40 pembelajaran dilakukan dengan cara Asynchronous.\nBatas akhir unggah file jawaban + video jawaban: Minggu, 26 Januari 2026, pukul 23.59",
     "expected_type": "assignment_info",
-    "category": "standard_reminders"
+    "category": "real_async_pattern"
   },
   {
-    "name": "Category 1.2 - All caps urgent",
-    "message": "🚨🚨🚨 REMINDER STRUKDAT P2 🚨🚨🚨\n\nJANGAN LUPA KERJAIN LKP 5 YAA\n\nDEADLINE MALAM INI JAM 23:59!!!",
-    "expected_type": "assignment_info",
-    "category": "standard_reminders"
-  },
-  {
-    "name": "Category 1.3 - Mixed case with typos",
-    "message": "reminder MeTkUn k3\nbesok ada kuis yaa jangan lupa belajar\nmateri bab 4-6",
-    "expected_type": "assignment_info",
-    "category": "standard_reminders"
-  },
-  {
-    "name": "Category 1.9 - Jaksel style informal",
-    "message": "guys literally jangan lupa PEMROG assignment yaa\ndeadline nya tonight jam 12\nkalau telat bakal kena penalti",
-    "expected_type": "assignment_info",
-    "category": "standard_reminders"
-  },
-  {
-    "name": "Category 2.1 - Full date format",
-    "message": "Reminder RPL K1\n\nDeadline tugas: Senin, 20 Januari 2026\nJangan lupa dikerjakan ya",
-    "expected_type": "assignment_info",
-    "category": "date_variations"
-  },
-  {
-    "name": "Category 2.2 - Numeric date slash",
-    "message": "STRUKDAT P2\n\nLKP 5 deadline 20/01/2026 jam 23:59",
-    "expected_type": "assignment_info",
-    "category": "date_variations"
-  },
-  {
-    "name": "Category 2.6 - Besok (tomorrow)",
-    "message": "INFO RPL K2\n\nKuliah besok jam 8 pagi ya guys\nJangan telat",
-    "expected_type": "unrecognized",
-    "category": "date_variations"
-  },
-  {
-    "name": "Category 2.10 - Malam ini (tonight)",
-    "message": "REMINDER METCUAN P2\n\nDeadline tugas malam ini jam 23:59\n3 JAM LAGI GES 😮",
-    "expected_type": "assignment_info",
-    "category": "date_variations"
-  },
-  {
-    "name": "Category 3.1 - Online with Zoom link",
-    "message": "INFO RPL K1\n\nKuliah besok ONLINE jam 10.00\n\nLink Zoom:\nhttps://ipb-university.zoom.us/j/12345678901?pwd=abc123def456\n\nMeeting ID: 123 4567 8901\nPasscode: 123456",
-    "expected_type": "unrecognized",
-    "category": "online_offline_mode"
-  },
-  {
-    "name": "Category 3.2 - Clear offline with room",
-    "message": "Reminder STRUKDAT P2\n\nBesok praktikum OFFLINE\nRuangan: Lab Komputer 1\nJam: 13.00-15.30",
-    "expected_type": "unrecognized",
-    "category": "online_offline_mode"
-  },
-  {
-    "name": "Category 3.5 - Asynchronous mode",
-    "message": "📣 INFO PEMROG K1 📣\n\nUntuk pertemuan minggu ini dilakukan secara ASYNCHRONOUS\n\nVideo pembelajaran sudah diupload di Class\nBatas akhir tonton + kerjain tugas: Minggu, 26 Jan 2026, 23:59",
-    "expected_type": "assignment_info",
-    "category": "online_offline_mode"
-  },
-  {
-    "name": "Category 4.2 - All classes announcement",
-    "message": "📢 REMINDER RPL SEMUA KELAS 📢\n\nJangan lupa isi EPBM sebelum deadline\nDeadline: Jumat, 24 Jan 2026, 16:00",
-    "expected_type": "assignment_info",
-    "category": "multiple_classes"
-  },
-  {
-    "name": "Category 5.1 - Simple assignment",
-    "message": "📢 Tugas RPL K1 📢\n\nKerjakan Latihan #5 di Class\nDeadline: Senin, 20 Jan 17:00",
-    "expected_type": "assignment_info",
-    "category": "assignments_tasks"
-  },
-  {
-    "name": "Category 5.2 - Multiple tasks",
-    "message": "REMINDER STRUKDAT K2:\n\n1. LKP 5 - Deadline Rabu 23:59\n2. Tugas Proyek Fase 2 - Deadline Jumat 23:59\n3. Quiz di Class - Deadline Minggu 14:20\n\nJangan sampai ada yang kelewat yaa😆🤩",
+    "name": "Real-02: Quiz announcement with specific time window",
+    "message": "📢 REMINDER GRAFKOM 📢\nHalooo teman-teman!!!!\nmau ngingetin nih, Jangan lupa kerjain Kuis 3 & Kuis 4 di Class yaa guyss✨🙌🏻\n\nDeadline:\nKuis 3 Grafkom\n📅 Minggu, 26 Januari 02:20 PM\n\nKuis 4 Grafkom\n📅 Minggu, 26 Januari 11:59 PM\n\nJangan sampai kelewatan yaa!!🤩👋🏻",
     "expected_type": "multiple_assignments",
-    "category": "assignments_tasks"
+    "category": "real_quiz_pattern"
   },
   {
-    "name": "Category 5.11 - Late submission warning",
-    "message": "🚨 GRAFKOM K2 🚨\n\nDeadline tugas MALAM INI pukul 23:59\nYang terlambat tidak akan dinilai!!",
+    "name": "Real-03: H-x countdown format",
+    "message": "GAIS jangan lupa RPL latihan 5\n\n(H-28 menit) BISAIN",
     "expected_type": "assignment_info",
-    "category": "assignments_tasks"
+    "category": "real_countdown"
   },
   {
-    "name": "Category 5.12 - Extension announcement",
-    "message": "Info PEMROG K3\n\nDeadline tugas diperpanjang sampai Rabu\n(dari yang sebelumnya Senin)\n\nManfaatkan waktu tambahan dengan baik ya",
+    "name": "Real-04: Video correction with koreksi keyword",
+    "message": "🚨 Reminder PEMROG K1 🚨\nJangan lupa kerjakan tugas Asynchronous, baca dan tonton video materi, kemudian buat video.\n\nhttps://drive.google.com/file/d/1Cpo8EmcyJDTB0tktWFdBhwEMptvPBJqE/view\n\nkoreksi : video maksimal 40 menit dan minimal tidak ada",
     "expected_type": "assignment_update",
-    "category": "assignments_tasks"
+    "category": "real_correction"
   },
   {
-    "name": "Category 6.1 - Quiz announcement",
-    "message": "📢 REMINDER RPL K1 📢\n\nBESOK AKAN DIADAKAN KUIS DI KULIAH!!!\nMateri: Chapter 1-4\nDurasi: 20 menit di awal kelas\n\nMohon persiapkan diri dengan baik 😋",
-    "expected_type": "assignment_info",
-    "category": "quiz_exam"
-  },
-  {
-    "name": "Category 6.11 - Surprise quiz",
-    "message": "GRAFKOM K1\n\nMaaf info mendadak\nHari ini ada kuis di akhir kelas\nMateri pertemuan kemarin",
-    "expected_type": "assignment_info",
-    "category": "quiz_exam"
-  },
-  {
-    "name": "Category 7.1 - Simple correction",
-    "message": "koreksi RPL K1\n\nKuliah besok jam 10, bukan jam 9",
-    "expected_type": "unrecognized",
-    "category": "corrections_updates"
-  },
-  {
-    "name": "Category 7.9 - Deadline extension",
-    "message": "GOOD NEWS STRUKDAT K1\n\nDeadline tugas diperpanjang sampai Minggu\n(dari Jumat)\n\nManfaatkan waktu tambahan dgn baik",
-    "expected_type": "assignment_update",
-    "category": "corrections_updates"
-  },
-  {
-    "name": "Category 9.1 - No course mentioned",
-    "message": "Guys jangan lupa besok ada kuis ya\nBelajar materi minggu lalu\n\nJam 10 di kelas biasa",
-    "expected_type": "unrecognized",
-    "category": "edge_cases"
-  },
-  {
-    "name": "Category 9.5 - Personal chat",
-    "message": "guys ada yang punya catatan metcuan chapter 3?\nboleh minta foto?\nmakasih",
-    "expected_type": "unrecognized",
-    "category": "edge_cases"
-  },
-  {
-    "name": "Category 9.7 - Greeting only",
-    "message": "Assalamualaikum teman-teman\nSelamat pagi",
-    "expected_type": "unrecognized",
-    "category": "edge_cases"
-  },
-  {
-    "name": "Category 10.5 - Asynchronous with video requirement",
-    "message": "INFO PEMROG K1 📣\n\nUntuk PEMROG K1 hari Kamis jam 08:00 sampai 09:40 pembelajaran dilakukan dengan cara Asynchronous.\n\nKetentuan:\n1. Format video bebas, boleh papan tulis, ada muka/gak ada muka\n2. Gak ada minimal durasi video, tapi maksimal 40 menit\n\nBatas akhir unggah file jawaban + video jawaban: Minggu, 26 Januari 2026, pukul 23.59",
-    "expected_type": "assignment_info",
-    "category": "real_patterns"
-  },
-  {
-    "name": "Category 10.10 - Shared spreadsheet",
-    "message": "📢 *METCUAN K1* 📢\nHalooo sobat Metcuan K1👋🏻\n\nBerikut google sheet daftar kelompok tugas Metcuan K1 ya: https://docs.google.com/spreadsheets/d/1kFkFitdI-FyhiOsi5qkEwdFhV60hHqg6nbvsRAnHT5M/edit?usp=sharing\n\nCek kelompok kalian dan mulai koordinasi yaa",
-    "expected_type": "assignment_info",
-    "category": "real_patterns"
-  },
-  {
-    "name": "Multiple assignments same parallel",
-    "message": "Ada 2 tugas:\n1. Pemrog LKP 15 deadline besok\n2. Grafkom Quiz 3 deadline lusa",
+    "name": "Real-05: Multiple tasks with different deadlines",
+    "message": "📈 REMINDER STRUKDAT K2 📉\nHalloo sobat strukdat k2 mau ngingetin nih, Jangan lupa kerjain LKP 5 & Tugas Proyek Fase 1 yaa\n\nDeadline:\nLKP 5\n📅 Rabu, 24 Januari pukul 23.59\n\nTugas Proyek Fase 1\n📅 Rabu, 24 Januari pukul 23.59\n\nUntuk pengumpulan kedua tugas tersebut di Class, jangan lupa dikerjakan yaa😆🤩🙌🏻",
     "expected_type": "multiple_assignments",
-    "category": "complex"
+    "category": "real_multiple_tasks"
   },
   {
-    "name": "Assignment update - postponed",
-    "message": "LKP 14 Pemrograman diundur jadi minggu depan",
-    "expected_type": "assignment_update",
-    "category": "complex"
+    "name": "Real-06: Group spreadsheet link for assignment",
+    "message": "📢 GRAFKOM K1 📢\nHalooo sobat Grafkom K1👋🏻\n\nBerikut google sheet daftar kelompok tugas Grafkom K1 ya: https://docs.google.com/spreadsheets/d/1kFkFitdI-FyhiOsi5qkEwdFhV60hHqg6nbvsRAnHT5M/edit?usp=sharing\n\nCek kelompok kalian dan mulai koordinasi yaa\nDeadline: Minggu, 26 Januari 23:59",
+    "expected_type": "assignment_info",
+    "category": "real_group_spreadsheet"
   },
   {
-    "name": "Quoted message update",
-    "message": "Deadline berubah jadi Jumat jam 14:00",
-    "quoted_message": "Tugas Pemrograman LKP 14 deadline hari ini",
-    "expected_type": "assignment_update",
-    "category": "complex"
-  },
-  {
-    "name": "Not assignment - greeting",
-    "message": "Halo guys, ada yang bisa bantu?",
+    "name": "Real-07: WhatsApp group invite (not assignment)",
+    "message": "‎Buka tautan ini untuk bergabung ke Grup WhatsApp saya: https://chat.whatsapp.com/Ft1NYyQxrIm1OOjtWzlgxO\n\nPEMROG K1 ya ges",
     "expected_type": "unrecognized",
-    "category": "edge_cases"
+    "category": "real_group_invite"
   },
   {
-    "name": "Not assignment - class schedule",
-    "message": "Praktikum besok jam 8 pagi ya jangan lupa",
+    "name": "Real-08: PJ reminder with emoji style",
+    "message": "🙏🏿Info🙏🏿\n\nSelamat malam semua, izin info. Besok untuk kelas K1 ORKOM dengan pak aziz pukul 10.00 - 11.40 offline ya",
     "expected_type": "unrecognized",
-    "category": "edge_cases"
+    "category": "real_pj_style"
   },
   {
-    "name": "Assignment with relative deadline",
-    "message": "Tugas Struktur Data dikumpulkan besok sebelum kelas",
-    "expected_type": "assignment_info",
-    "category": "date_variations"
+    "name": "Real-09: Power outage mode change",
+    "message": "🙏🏿Info update ORKOM K1 pak aziz🙏🏿\n\nSelamat pagi semua, izin update info. karena ada info listrik di FAPET padam maka kuliah orkom hari ini online pukul 10.15-11.55\nTerima kasih.\n\n#PakAzizBintang",
+    "expected_type": "unrecognized",
+    "category": "real_emergency_update"
   },
   {
-    "name": "Assignment for multiple parallels",
-    "message": "Tugas Grafkom untuk K1, K2, dan K3 deadline Jumat",
+    "name": "Real-10: Handwritten paper submission",
+    "message": "📢 Info Penugasan PEMROG K1 📢\n\nPenugasan ditulis di kertas dan dikumpulkan ketika praktikum pukul 13.00.",
     "expected_type": "assignment_info",
-    "category": "multiple_classes"
+    "category": "real_physical_submission"
   },
   {
-    "name": "Assignment with 'all' parallel",
-    "message": "Tugas RPL untuk semua kelas deadline minggu depan",
+    "name": "Real-11: Deadline with 3 JAM LAGI urgency",
+    "message": "🚨 Reminder PEMROG K1 🚨\nJangan lupa kerjakan tugas Asynchronous\n\nDeadline: Minggu, 26 Januari 2026, pukul 23.59\n\n3 JAM LAGI GES 😮",
     "expected_type": "assignment_info",
-    "category": "multiple_classes"
+    "category": "real_urgent_reminder"
+  },
+  {
+    "name": "Real-12: Lecturer surgery info",
+    "message": "😫RPL K3 RABU PAGI BERSAMA PAK SONY😫\n\nKelas besok online karena pak Sony mau operasi\n\nBerikut link untuk pagi ini ya. Terima kasih\n\nTopic: Kuliah S1 KOM - RPL\nTime: Jan 22, 2026 08:00 Jakarta\nJoin Zoom Meeting\nhttps://ipb-university.zoom.us/j/93004738595?pwd=qdY37sPtA5C8xSUVUeQvCKdbtctrUs.1\n\nMeeting ID: 930 0473 8595\nPasscode: kom",
+    "expected_type": "unrecognized",
+    "category": "real_lecturer_info"
+  },
+  {
+    "name": "Real-13: Group task with specific format NIM1_NIM2_NIM3",
+    "message": "😫STRUKDAT K3 RABU PAGI BERSAMA PAK SONY😫\n\nPembagian kelompok untuk tugas minggu ke 10\nhttps://docs.google.com/spreadsheets/d/1jygOta_DOTfUjxoYE-eBCnaAvehvkGz7tO4fdyJae94/edit?usp=sharing\n\nTugasnya adalah latihan 2 di PPT materi Pointer dan Fungsi\n\nPengumpulan seperti biasa:\nAlgoritma lalu dibawahnya Code C\n\nFormat nama file: NIM1_NIM2_NIM3.c (diurutkan dari NIM terkecil)\n\nDeadline minggu depan sebelum kelas\nPengumpulan di class",
+    "expected_type": "assignment_info",
+    "category": "real_group_format"
+  },
+  {
+    "name": "Real-14: Lecturer strict rules warning",
+    "message": "📢 INFO METKUN K1 📢\nHalohalo sobat Metkun K1!!\n\nBesok kita di ajar sama ibu sri wahjuni, dan tentunya ada aturan yang berlaku nih gess:\n- Tidak boleh terlambat\n- Tidak ada toleransi keterlambatan ☠️💥\n- Yang telat disuruh masuk lewat belakang\n\njadi usahain untuk pertemuan berikutnya jangan sampai terlambat yaa ges yaaa!!!!\n\nTerimakaih n semangatt all!!🤩",
+    "expected_type": "unrecognized",
+    "category": "real_lecturer_rules"
+  },
+  {
+    "name": "Real-15: Recording link with passcode",
+    "message": "Rekaman kuliah ORKOM Pertemuan 8:\n\nRecording\nDuration: 01:35:50\nShare link: https://ipb-university.zoom.us/rec/share/7N2DRrrRQCm-W6Vb0LXi5GAm-kwkU9MfMSOluya72-Aws0g1_nBOsn68vjW6ptEI.CTL9d0etUtuprR6r\nPasscode: 4?%bbJ1.\n\nAvailable sampai akhir bulan ya\nYang ga bisa hadir kemarin silakan tonton",
+    "expected_type": "unrecognized",
+    "category": "real_recording"
+  },
+  {
+    "name": "Real-16: Exam schedule compilation all courses",
+    "message": "Jadwal UTS Ilkom:\nRabu RPL 10.30-12.30\nKamis Strukdat 13.00-15.00\nJumat Pemrog 13.00-15.00\nSabtu Praktikum 13.30-15.30\n\nSenin Orkom 08.00-10.00\nSelasa Metkun 08.00-10.00\nRabu UX 10.00-12.00\nKamis Grafkom 13.30-15.30\n\nSemangat UTS! 💪",
+    "expected_type": "unrecognized",
+    "category": "real_exam_schedule"
+  },
+  {
+    "name": "Real-17: IPBM attendance reminder",
+    "message": "Halo Halo Ilkomerz 61👋\nberhubungan udah deket waktu UTS, jangan lupa untuk :\n1. Isi IPBM yang masih kosong, jangan lupa buat cek setiap habis kelas\n2. Lengkapin surat-surat izin, kayak surat sakit, lomba dll. Kasih ke Sekret/TU Ilkom di Lantai 2 FMIPA\n3. Pastiin Absen Basah kalian lengkap\n\nKarena kalau udah Sesi UAS udah susah buat urus persuratan",
+    "expected_type": "unrecognized",
+    "category": "real_admin_reminder"
+  },
+  {
+    "name": "Real-18: Detailed UTS rules PMK style",
+    "message": "PENGUMUMAN UTS PEMROG📌📌\n\nUntuk ketentuan UTSnya berikut :\n1. Boleh membawa cheatsheet 1 lembar ukuran F4 dan tulis tangan\n2. Boleh menggunakan kalkulator tapi non scientific\n3. HP/Tablet dilarang digunakan atau dipegang/simpan dalam saku\n4. Mengerjakan setiap soal di 1 lembar terpisah dan diberi kode soal\n5. Tidak ada ujian perbaikan\n6. Untuk susulan hanya diperkenankan bagi yg sakit dengan surat dokter\n7. Semua bentuk pelanggaran aturan diberi sanksi nilai 0 di UTS\n\nJANGAN TERLAMBAT!!!",
+    "expected_type": "unrecognized",
+    "category": "real_exam_rules"
+  },
+  {
+    "name": "Real-19: LIUYM system announcement (not assignment)",
+    "message": "HALOW PARA PEJUANG IPK 4 👊\n\nDemi kelancaran ujian kita, maka bakal ada :\n\"LIUYM : lapor ijin ujian ya mas\"\n\nProsedur:\n1. Chat rehan (wa.me/628123456789)\n2. Format:\n   - Nama :\n   - Nim :\n   - Izin ujian apa :\n   - Kenapa :\n\nSukses terus best! 👊",
+    "expected_type": "unrecognized",
+    "category": "real_admin_system"
+  },
+  {
+    "name": "Real-20: Berkah resource sharing (not assignment)",
+    "message": "Berkah dari Sir Walid\n\nyo gaiss, gw kasih rangkuman materi dan pembahasan soal untuk semester 3 yaah\n\nhttps://github.com/walidan-nadilaw/latihan-ujian-ilkomerz-ipb-2023-2027/tree/main/semester%203\n\nSemoga membantu!",
+    "expected_type": "unrecognized",
+    "category": "real_resource_sharing"
+  },
+  {
+    "name": "Real-21: Vote for class time (not assignment)",
+    "message": "yang K2 GRAFKOM vote yaa\n\nPoll di grup untuk jam kuliah pengganti:\n❤️ Sabtu pagi\n👍 Sabtu siang\n🔥 Minggu pagi\n\nVote sebelum Kamis ya",
+    "expected_type": "unrecognized",
+    "category": "real_poll"
+  },
+  {
+    "name": "Real-22: Last minute multiple updates",
+    "message": "[10:20] UPDATE: RPL K1 jadi online\n[10:25] Link zoom: https://zoom.us/j/77777777777\n[10:30] Mulainya jam 10.15 ya, bukan 10.00\n[10:35] Passcode: 246810",
+    "expected_type": "unrecognized",
+    "category": "real_chaotic_updates"
+  },
+  {
+    "name": "Real-23: Asynchronous replacement announcement",
+    "message": "REVISI PEMROG P2\nBesok praktikum jadinya asinkron",
+    "expected_type": "unrecognized",
+    "category": "real_mode_change"
+  },
+  {
+    "name": "Real-24: Pengganti class on weekend",
+    "message": "🏍️ KULIAH PENGGANTI STRUKDAT K1 🏍️\n\nMinggu, 26 Januari 2026\nJam: 07:00 pagi\n\nTopic: Kuliah Pengganti Pertemuan 8\nhttps://zoom.us/j/66666666666\n\nPasscode: 654321",
+    "expected_type": "unrecognized",
+    "category": "real_replacement_class"
+  },
+  {
+    "name": "Real-25: Correction with punten keyword",
+    "message": "📢 GRAFKOM K1 📢\npunten, ada kesalahan\n\nDEADLINE TUGAS RADIG MALAM INIIII!!!\nTugas Kuliah Pertemuan 7 Grafkom, soal ada di PPT pertemuan 7 bagian Contoh soal 2, halaman 16\n\nDeadline:\n📅 Minggu, 26 Januari 00.00 WIB\nMALAM INII!!\n\nJan sampe kelewatan yaa\nTerima kasih n semangat all!!🤩",
+    "expected_type": "assignment_update",
+    "category": "real_urgent_correction"
+  },
+  {
+    "name": "Real-26: Exam with closed book NO CHEATSHEET",
+    "message": "🚨 INFO UTS RPL K2 🚨\n\nCLOSED BOOK - NO CHEATSHEET\nHanya boleh alat tulis dan kalkulator\n\nPelanggaran = nilai 0",
+    "expected_type": "unrecognized",
+    "category": "real_exam_strict"
+  },
+  {
+    "name": "Real-27: LinkedIn certification as async replacement",
+    "message": "[PENGUMUMAN]\nKepada peserta MK PEMROG - Ganjil 2025/2026\nPertemuan Kuliah Minggu ke-14 dilaksanakan secara asynchronous dengan melakukan sertifikasi course di platform LinkedIn Learning.\n\nPetunjuk dapat dilihat pada class.ipb.ac.id - Pemrog - Kuliah 14\nBatas penugasan Minggu, 30 Januari 2026 pukul 23:59 WIB.\n\n[Reminder] Minggu Kuliah 15 akan dilakukan presentasi proyek, mohon dapat dipersiapkan.",
+    "expected_type": "assignment_info",
+    "category": "real_certification_async"
+  },
+  {
+    "name": "Real-28: Dosen message relay",
+    "message": "Selamat malam Julius, sy Bu Imas.. InsyaAllah bsk sy menggantikan Pa Toto di kelas PEMROG K3\n\nBaik InsyaAllah.. tlg disampaikan ke peserta jk sy telat mhn ditunggu saja.. sy sblmnya ada kelas di FPIK..\n\n---\n\nReminder PEMROG K3\n\nKelas Offline\n🗓️ Selasa, 21 Januari 2026\n🕐 10.00-11.40\n📚 Materi: Recursion Basics\n\nDosennya ganti Bu Imas, kalau telat ditunggu aja ya",
+    "expected_type": "unrecognized",
+    "category": "real_lecturer_relay"
+  },
+  {
+    "name": "Real-29: Kuliah umum WAJIB HADIR",
+    "message": "📢 [WAJIB HADIR – KULIAH UMUM RPL]\n\nSelamat siang,\nDiberitahukan bahwa pertemuan ke-11 digantikan dengan kegiatan Kuliah Umum berikut. Seluruh mahasiswa WAJIB HADIR tanpa kecuali. Ketidakhadiran akan dihitung sebagai tidak hadir kuliah.\n\n🎓 Kuliah Umum: \"WHY DATA WAREHOUSES MATTER\"\n🗓️ Rabu, 22 Januari 2026\n🕙 Pukul 10.00 WIB (tepat waktu!)\n💻 Online via Zoom\n👨‍💻 Narasumber: Fakhri Akmal (Data Engineer – Tech Company)\n\n🔗 Link kegiatan: https://ipb.link/rpl-lecture\n\nMateri & Evaluasi:\n- Materi sudah diunggah di class.ipb.ac.id (harap dibaca sebelum acara).\n- Akan ada kuis terkait materi di akhir pekan.\n\nAbsensi akan diambil selama kegiatan berlangsung.",
+    "expected_type": "assignment_info",
+    "category": "real_mandatory_webinar"
+  },
+  {
+    "name": "Real-30: EPBM deadline extension",
+    "message": "Bapak/Ibu, bersama ini disampaikan informasi dari KMM mengenai perpanjangan pengisian EPBM periode UTS sd 21 Januari 2026 pukul 16.00 WIB. Mohon dapat diinformasikan ke mahasiswa yang belum mengisi EPBM. Tks",
+    "expected_type": "unrecognized",
+    "category": "real_epbm_extension"
+  },
+  {
+    "name": "Real-31: Conditional online offline",
+    "message": "INFO GRAFKOM K1\n\nKalau ga ada kabar berarti offline seperti biasa\nKalau online link dikirim jam 7.30",
+    "expected_type": "unrecognized",
+    "category": "real_conditional"
+  },
+  {
+    "name": "Real-32: ups dah telat conversation",
+    "message": "GAIS jang lupa pemrog latihan 5\n[17:00] ups dah telat\n[17:01] 🤓👆",
+    "expected_type": "unrecognized",
+    "category": "real_casual_chat"
+  },
+  {
+    "name": "Real-33: Multiple projects same deadline",
+    "message": "📈 REMINDER STRUKDAT K2 📉\nHalloo sobat strukdat k2 mau ngingetin nih, Jangan lupa kerjain LKP 11, Tugas Proyek 3, dan Tugas Individu.\n\nDeadline:\nLKP 12\n📅 Rabu, 22 Januari 2026 pukul 23.59\n\nTugas Proyek 3\n📅 Rabu, 22 Januari 2026 pukul 23.59\n\nUntuk pengumpulan tugas tersebut di Class, jangan lupa dikerjakan yaa😆🤩",
+    "expected_type": "multiple_assignments",
+    "category": "real_complex_deadline"
+  },
+  {
+    "name": "Real-34: MALAM INI urgency capital",
+    "message": "K1/R1 STRUKDAT📊\n\nLKP-7 (POSTGRESQL) :\n- Deadline : MALAM INI JAM 00.00\n- Kalau udah selesai langsung kumpulin ya gess jgn lupa buat ngerjain!!!\n\nSEMANGAT DAN SEMOGA SUKSES UTS NYA BESOK!! 🤩",
+    "expected_type": "assignment_info",
+    "category": "real_midnight_deadline"
+  },
+  {
+    "name": "Real-35: Exam info from dosen via PJ",
+    "message": "Info UTS Strukdat (dr Pak Endang)\n1. Menggunakan exam, isian singkat dan pilihan ganda\n2. Close book dan boleh menggunakan kalkulator",
+    "expected_type": "unrecognized",
+    "category": "real_exam_format"
+  },
+  {
+    "name": "Real-36: Group coordination not assignment",
+    "message": "📢 Info Strukdat K1 📢\n\nTemen² boleh join grup ini yaa untuk mempermudah koordinasi\n\nhttps://chat.whatsapp.com/HphZO8b1oQRJSYk4zgEKvn",
+    "expected_type": "unrecognized",
+    "category": "real_group_coordination"
+  },
+  {
+    "name": "Real-37: Whiteboard notes sharing",
+    "message": "📝 Catatan Papan Tulis Kelas Pemrog K2 (Pak Julio)\n\nhttps://drive.google.com/file/d/1NotesWhiteboard123/view\n\nUntuk yang ga sempet nyatet kemarin\nSilakan di download",
+    "expected_type": "unrecognized",
+    "category": "real_notes_sharing"
+  },
+  {
+    "name": "Real-38: Async with YouTube pre-recorded",
+    "message": "😫PEMROG K3 RABU PAGI BERSAMA PAK SONY😫\n\nBerikut materi kuliah pertemuan 14 ya. Mohon bantuannya utk di share ke rekan-rekan. Terima kasih.\n\nPPT:\nhttps://drive.google.com/file/d/1zPLloyXWRavv_-gsv1IsooqsF9W77XDw/view?usp=sharing\n\nPre-recorded:\nhttps://youtu.be/pfuo5FLmF1E?si=S9Dhzxnoae6zvJWq",
+    "expected_type": "unrecognized",
+    "category": "real_prerecorded"
+  },
+  {
+    "name": "Real-39: Latihan bukan tugas (not collected)",
+    "message": "📢INFO GRAFKOM K1📢\n\nhalo sobat grafkom k1🙌🏻\n\nini soal latihan buat materi kemarin yaa, jan lupa di kerjain.\n\nini bukan tugas yaa!!, cuman latihan doang, jadi GA DIKUMPULIN, tapi kerjain aja buat jaga² kalo ditunjuk buat ngerjain di papan tulis",
+    "expected_type": "unrecognized",
+    "category": "real_practice_not_assignment"
+  },
+  {
+    "name": "Real-40: Reminder with love signature",
+    "message": "halo gusy bengkak\n\njgn lupa besok pemrog K2 quiz kyk biasa ya\n\nmateri quiznya array kyknya\n\nlove pj tercinta,\niljam edgar 🥵",
+    "expected_type": "assignment_info",
+    "category": "real_informal_reminder"
+  },
+  {
+    "name": "Real-41: TERKECOH deadline warning",
+    "message": "K1/R1 STRUKDAT📊\n\nPROJEK 2 :\n- Deadline : Selasa, 21 Januari, 23:59\n\nTEMEN-TEMEN MAAF LUPA REMIND, JGN TERKECOH DEADLINE RABUNYA YAA, ITU RABU 00:00, SELASA MALEM INI INTINYA",
+    "expected_type": "assignment_info",
+    "category": "real_clarification"
+  },
+  {
+    "name": "Real-42: Gabung grup pattern with mode=ems",
+    "message": "https://chat.whatsapp.com/K31aUKjLnmSE3651Cr1GXs?mode=ems_copy_t halo temen2 yang strukdat k1 boleh join ini ya",
+    "expected_type": "unrecognized",
+    "category": "real_group_invite_inline"
+  },
+  {
+    "name": "Real-43: Kuis with specific material chapters",
+    "message": "Reminder PMK K3\n\nKelas Offline\n🗓️ Selasa, 21 Januari 2026\n🕐 10.00-11.40\n📚 Kuliah 9: Solusi Numerik\n\nAda kuis 15-20 menit awal\nMateri minggu sebelumnya\n\nJANGAN TERLAMBAT JIKA INGIN IKUT KUIS ‼️",
+    "expected_type": "assignment_info",
+    "category": "real_quiz_with_material"
+  },
+  {
+    "name": "Real-44: Offline confirmation after uncertain",
+    "message": "INFO GRAFKOM K2\n\nHalo guys karena Ibunya gada kabar kalau Online/Asynch berarti offline seperti biasa ya jam 8. Dan jangan sampai telat ya, patokan telat itu kalau ibunya udah dateng.",
+    "expected_type": "unrecognized",
+    "category": "real_offline_default"
+  },
+  {
+    "name": "Real-45: Makalah fisik + video YouTube",
+    "message": "📢INFO STRUKDAT K3 R3📢\n\nPAGI GESSS 🙌🏻\n\nTUGAS STRUKDAT\n1. Tugas kuliah basdat DL 24 Januari 08.00\n- Makalah tulis tangan maksimal 4 lembar\n- bikin video presentasi 3-5 menit di upload ke YouTube\n2. LKP 12 Praktikum DL 24 Januari 00.00\n3. Proyek 3 DL 24 Januari 00.00\n\nKarena tugas banyak banget, jadi jangan lupa di cicil dari sekarang ya gaiss\n\nSEMANGAT MENGERJAKAN 🥶",
+    "expected_type": "multiple_assignments",
+    "category": "real_complex_requirements"
+  },
+  {
+    "name": "Real-46: Salam Capslock signature",
+    "message": "Salam Capslock ✊🏻\n\n🌠 INFO GRAFKOM K3🌠\nHalo guyss 🙌🏻\n\nBesok GRAFKOM K3 bersama bu karlisa bakal ada kuis yaa materinya rangkaian kombinasional 3. Jadi jangan lupa belajar dulu sebelum kelas besok ya\n\nSalam Coding n Semangat all 🔥",
+    "expected_type": "assignment_info",
+    "category": "real_custom_signature"
+  },
+  {
+    "name": "Real-47: Zoom will be sent pattern",
+    "message": "Siang gess praktikum hari ini online yaa\n\nUntuk link zoom nya nanti akan kami kirim\n\nPemrog P1 online ygy",
+    "expected_type": "unrecognized",
+    "category": "real_link_pending"
+  },
+  {
+    "name": "Real-48: Check IPBM after class",
+    "message": "😫PEMROG K3 RABU PAGI BERSAMA PAK SONY😫\n\nMinta tolong direminder rekan-rekan untuk cek-ricek presensi kehadiran kuliah dan praktikum ya, selambatnya besok tanggal 22 Jan. Beberapa bagian masih saya buka. Nuhun\n\nTemen temen yang pemrog K3 boleh diisi presensi ipbmnya ya sesuai kehadiran msg msg",
+    "expected_type": "unrecognized",
+    "category": "real_attendance_check"
+  },
+  {
+    "name": "Real-49: izin share inpo casual",
+    "message": "izin share inpo soalnya di grup tp ada ibunya, buat yang blum tau (padahal kemaren dikasi tau) buat kuis GRAFKOM besok P2 materi 8 9 10 dah ya tengs",
+    "expected_type": "assignment_info",
+    "category": "real_casual_reminder"
+  },
+  {
+    "name": "Real-50: JANGAN LUPA HARI INI all caps",
+    "message": "STRUKDAT P4\n\nGUYSSS JANGAN LUPA YAA PROYEKNYAAA DEADLINENYA MALAM INII",
+    "expected_type": "assignment_info",
+    "category": "real_urgent_caps"
+  },
+  {
+    "name": "Edge-51: Only numbers timestamp-like",
+    "message": "081234567890\n123456789\n20012026\n23:59",
+    "expected_type": "unrecognized",
+    "category": "edge_numbers_only"
+  },
+  {
+    "name": "Edge-52: HTML injection attempt",
+    "message": "<script>alert('RPL K1 besok')</script>\n<h1>STRUKDAT K2 deadline</h1>",
+    "expected_type": "unrecognized",
+    "category": "edge_security"
+  },
+  {
+    "name": "Edge-53: SQL injection attempt",
+    "message": "RPL K1'); DROP TABLE assignments;--\nBesok ada quiz ya",
+    "expected_type": "unrecognized",
+    "category": "edge_security"
+  },
+  {
+    "name": "Edge-54: Extremely long repetitive message",
+    "message": "PEMROG K1 BESOK KULIAH PEMROGRAMAN PEMROGRAMAN PEMROGRAMAN PEMROGRAMAN PEMROGRAMAN PEMROGRAMAN PEMROGRAMAN PEMROGRAMAN PEMROGRAMAN PEMROGRAMAN PEMROGRAMAN PEMROGRAMAN PEMROGRAMAN PEMROGRAMAN PEMROGRAMAN PEMROGRAMAN PEMROGRAMAN PEMROGRAMAN PEMROGRAMAN PEMROGRAMAN PEMROGRAMAN PEMROGRAMAN PEMROGRAMAN PEMROGRAMAN PEMROGRAMAN PEMROGRAMAN PEMROGRAMAN PEMROGRAMAN PEMROGRAMAN PEMROGRAMAN PEMROGRAMAN PEMROGRAMAN PEMROGRAMAN PEMROGRAMAN PEMROGRAMAN PEMROGRAMAN PEMROGRAMAN PEMROGRAMAN PEMROGRAMAN PEMROGRAMAN PEMROGRAMAN PEMROGRAMAN PEMROGRAMAN PEMROGRAMAN PEMROGRAMAN PEMROGRAMAN PEMROGRAMAN PEMROGRAMAN PEMROGRAMAN PEMROGRAMAN PEMROGRAMAN PEMROGRAMAN PEMROGRAMAN PEMROGRAMAN PEMROGRAMAN PEMROGRAMAN PEMROGRAMAN PEMROGRAMAN PEMROGRAMAN PEMROGRAMAN PEMROGRAMAN PEMROGRAMAN PEMROGRAMAN PEMROGRAMAN PEMROGRAMAN PEMROGRAMAN PEMROGRAMAN PEMROGRAMAN PEMROGRAMAN PEMROGRAMAN PEMROGRAMAN PEMROGRAMAN PEMROGRAMAN PEMROGRAMAN PEMROGRAMAN PEMROGRAMAN PEMROGRAMAN PEMROGRAMAN PEMROGRAMAN PEMROGRAMAN PEMROGRAMAN PEMROGRAMAN PEMROGRAMAN PEMROGRAMAN PEMROGRAMAN PEMROGRAMAN PEMROGRAMAN PEMROGRAMAN PEMROGRAMAN PEMROGRAMAN PEMROGRAMAN PEMROGRAMAN PEMROGRAMAN PEMROGRAMAN PEMROGRAMAN PEMROGRAMAN PEMROGRAMAN PEMROGRAMAN PEMROGRAMAN PEMROGRAMAN deadline Senin 23:59",
+    "expected_type": "assignment_info",
+    "category": "edge_boundary"
+  },
+  {
+    "name": "Edge-55: Zero-width characters",
+    "message": "RPL​​​​ K1 ​​​besok ada​​​ tugas deadline jam 23:59",
+    "expected_type": "assignment_info",
+    "category": "edge_encoding"
+  },
+  {
+    "name": "Edge-56: RTL mixed with LTR",
+    "message": "RPL K1 deadline مهم جداً hari ini jam 23:59\nJangan sampai telat",
+    "expected_type": "assignment_info",
+    "category": "edge_encoding"
+  },
+  {
+    "name": "Edge-57: Emoji between every word",
+    "message": "RPL🔥K1🔥besok🔥ada🔥quiz🔥jam🔥8🔥pagi",
+    "expected_type": "assignment_info",
+    "category": "edge_emoji"
+  },
+  {
+    "name": "Edge-58: Malformed URLs",
+    "message": "RPL K1 besok\n\nLink zoom: htp://zoom.us/j/broken\natau www.zoom.us/meeting",
+    "expected_type": "unrecognized",
+    "category": "edge_malformed"
+  },
+  {
+    "name": "Edge-59: Conflicting deadline times",
+    "message": "STRUKDAT K1\nDeadline besok jam 8 pagi\nAtau mungkin jam 10\nAtau jam 23:59\nYang mana ya?",
+    "expected_type": "assignment_info",
+    "category": "edge_ambiguous"
+  },
+  {
+    "name": "Edge-60: Course without class identifier",
+    "message": "Reminder STRUKDAT\n\nBesok ada kuis\nJangan lupa belajar",
+    "expected_type": "unrecognized",
+    "category": "edge_missing_info"
+  },
+  {
+    "name": "Edge-61: Date without time",
+    "message": "PEMROG K1\n\nDeadline tugas: Senin, 20 Januari 2026\nJangan lupa",
+    "expected_type": "assignment_info",
+    "category": "edge_incomplete_datetime"
+  },
+  {
+    "name": "Edge-62: Time without date",
+    "message": "RPL K2\n\nKuis jam 10:00\nBelajar ya",
+    "expected_type": "assignment_info",
+    "category": "edge_incomplete_datetime"
+  },
+  {
+    "name": "Edge-63: Invalid date format",
+    "message": "RPL K1\n\nDeadline: 32 Januari 2026 jam 25:99",
+    "expected_type": "unrecognized",
+    "category": "edge_invalid_datetime"
+  },
+  {
+    "name": "Edge-64: Only URL no context",
+    "message": "https://zoom.us/j/99999999999",
+    "expected_type": "unrecognized",
+    "category": "edge_missing_context"
+  },
+  {
+    "name": "Edge-65: Image reference",
+    "message": "RPL K1\n\nLiat gambar di atas ya\nItu jadwal deadline bulan ini",
+    "expected_type": "unrecognized",
+    "category": "edge_media_reference"
   }
 ]
