@@ -97,7 +97,7 @@ pub fn generate_clarification_messages(
         ⏰ Deadline: {}\n\
         🧩 Parallel: {}\n\
         \n\
-        *[INFO KURANG:]*\n\
+        *[INFO KURANG]:*\n\
         {}",
         assignment.id, 
         assignment.course_name,
