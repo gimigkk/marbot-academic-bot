@@ -225,9 +225,6 @@ docker compose up -d --no-deps backend
 log "🔍 Ensuring waha and dozzle are running..."
 docker compose up -d --no-recreate waha dozzle
 
-log "⏳ Waiting for backend to start..."
-sleep 3
-
 log "🏥 Checking backend health..."
 HEALTH_CHECK_SUCCESS=false
 for i in {1..10}; do
