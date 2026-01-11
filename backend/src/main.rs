@@ -772,6 +772,7 @@ async fn handle_ai_classification(
         } => {
             let pool_clone = pool.clone();
             let msg_id = message_id.clone();
+            let msg_body = message_body.clone();
             let debug_clone = debug_group_id.clone();
 
             tokio::spawn(async move {
@@ -820,7 +821,7 @@ async fn handle_ai_classification(
                                 new_description.clone(),
                                 if parallel_codes.is_empty() { None } else { Some(parallel_codes.clone()) },
                                 Some(msg_id.clone()),
-                                None,
+                                Some(msg_body.clone()),
                             ).await;
                             
                             if let Some(debug_id) = debug_clone {
@@ -861,7 +862,7 @@ async fn handle_ai_classification(
                             new_description.clone(),
                             if parallel_codes.is_empty() { None } else { Some(parallel_codes.clone()) },
                             Some(msg_id),
-                            None,
+                            Some(msg_body),
                         ).await {
                             if let Some(debug_id) = debug_clone {
                                 let _ = send_reply(
