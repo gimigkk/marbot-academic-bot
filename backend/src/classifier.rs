@@ -61,7 +61,8 @@ fn parse_command(text: &str) -> Option<BotCommand> {
                 let id = parts[1].parse().ok()?;
                 Some(BotCommand::Done(id))
             } else {
-                None
+                // Missing argument - return special error variant
+                Some(BotCommand::MissingArgument("done".to_string()))
             }
         }
         "delete" | "hapus" => {
@@ -69,7 +70,8 @@ fn parse_command(text: &str) -> Option<BotCommand> {
                 let id = parts[1].parse().ok()?;
                 Some(BotCommand::Delete(id))
             } else {
-                None
+                // Missing argument - return special error variant
+                Some(BotCommand::MissingArgument("delete".to_string()))
             }
         }
         "expand" => {
@@ -77,7 +79,8 @@ fn parse_command(text: &str) -> Option<BotCommand> {
                 let id = parts[1].parse().ok()?;
                 Some(BotCommand::Expand(id))
             } else {
-                None
+                // Missing argument - return special error variant
+                Some(BotCommand::MissingArgument("expand".to_string()))
             }
         }
         // Handle numeric-only commands like "# 123" or "#123"

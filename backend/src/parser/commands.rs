@@ -404,6 +404,45 @@ github.com/gimigkk/marbot-academic-bot"
             )
         }
 
+        BotCommand::MissingArgument(cmd) => {
+            println!("⚠️  Missing argument for command '{}' from {}\n", cmd, user_phone);
+            
+            let usage_msg = match cmd.as_str() {
+                "expand" => {
+                    "⚠️ *Cara pakai yang benar:*\n\n\
+                    #expand <nomor>\n\
+                    atau cukup: #<nomor>\n\n\
+                    *Contoh:*\n\
+                    • #expand 1\n\
+                    • #1\n\n\
+                    💡 _Gunakan #todo untuk lihat daftar tugas dengan nomornya._"
+                }
+                "done" => {
+                    "⚠️ *Cara pakai yang benar:*\n\n\
+                    #done <nomor>\n\n\
+                    *Contoh:*\n\
+                    • #done 1\n\
+                    • #done 3\n\n\
+                    💡 _Gunakan #todo untuk lihat daftar tugas dengan nomornya._"
+                }
+                "delete" | "hapus" => {
+                    "⚠️ *Cara pakai yang benar:*\n\n\
+                    #delete <nomor>\n\n\
+                    *Contoh:*\n\
+                    • #delete 1\n\
+                    • #hapus 2\n\n\
+                    💡 _Gunakan #tugas untuk lihat daftar dengan nomornya._\n\
+                    ⚠️ _Command ini hanya bisa dijalankan di grup akademik._"
+                }
+                _ => {
+                    "⚠️ Command ini membutuhkan argumen.\n\n\
+                    Ketik *#help* untuk bantuan."
+                }
+            };
+            
+            CommandResponse::Text(usage_msg.to_string())
+        }
+
         BotCommand::UnknownCommand(cmd) => {
             println!("❓ Unknown command '{}' from {}\n", cmd, user_phone);
             CommandResponse::Text(format!(

@@ -142,6 +142,7 @@ pub enum BotCommand {
     Help,
     Delete(u32),
     UnknownCommand(String),
+    MissingArgument(String), // New variant for commands with missing arguments
 }
 
 // ===== AI EXTRACTION RESULTS =====
