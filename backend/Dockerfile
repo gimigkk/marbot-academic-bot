@@ -19,7 +19,7 @@ ARG DATABASE_URL
 ENV DATABASE_URL=$DATABASE_URL
 
 # Set SQLx to offline mode false
-ENV SQLX_OFFLINE=false
+ENV SQLX_OFFLINE=true
 
 # Build in release mode
 RUN cargo build --release
