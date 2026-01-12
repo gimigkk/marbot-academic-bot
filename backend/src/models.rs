@@ -110,6 +110,8 @@ pub struct SendTextRequest {
     pub chat_id: String,
     pub text: String,
     pub session: String,
+    #[serde(rename = "replyTo", skip_serializing_if = "Option::is_none")]
+    pub reply_to: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
