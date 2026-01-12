@@ -14,7 +14,6 @@ use super::{GROQ_REASONING_MODELS, GROQ_VISION_MODELS, GROQ_TEXT_MODELS, GEMINI_
 use super::context_builder::build_context;
 
 use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
-use std::thread;
 use std::time::Duration;
 
 pub static SCHEDULE_ORACLE: Lazy<ScheduleOracle> = Lazy::new(|| {
@@ -282,24 +281,24 @@ async fn retry_with_countdown(attempt: u32) {
     // Print a blank separator line so the countdown occupies its own line area.
     println!("│");
 
-    // Shared flag used to stop the display thread early if needed.
+    // Shared flag used to stop the display task early if needed.
     let stop = Arc::new(AtomicBool::new(false));
-    let stop_thread = stop.clone();
+    let stop_for_task = stop.clone();
 
-    // Spawn a dedicated thread that will render the countdown line each second,
-    // replacing itself (clears and writes the same line).
-    let handle = thread::spawn(move || {
+    // Spawn a tokio task that will render the countdown each second.
+    // Using a tokio task ensures it gets scheduled immediately in async contexts.
+    let handle = tokio::spawn(async move {
         for remaining in (1..=delay).rev() {
-            if stop_thread.load(Ordering::Relaxed) {
+            if stop_for_task.load(Ordering::Relaxed) {
                 break;
             }
 
-            // Clear the current line and print the retry message in-place.
-            // \r moves to start, \x1b[2K clears the entire line.
+            // Print the retry line and flush immediately. Use carriage return + clear to replace the line.
             print!("\r\x1b[2K│ {}⏳ RETRY #{}{} - Waiting {} seconds...", YELLOW, attempt, RESET, remaining);
             stdout().flush().ok();
 
-            thread::sleep(Duration::from_secs(1));
+            // Sleep with tokio so the runtime schedules other tasks.
+            tokio::time::sleep(Duration::from_secs(1)).await;
         }
 
         // Clear the countdown line on exit so subsequent logs are clean.
@@ -307,19 +306,16 @@ async fn retry_with_countdown(attempt: u32) {
         stdout().flush().ok();
     });
 
-    // Meanwhile, asynchronously wait the same duration.
+    // Meanwhile, asynchronously wait the same duration in this function.
     tokio::time::sleep(Duration::from_secs(delay)).await;
 
-    // Signal the display thread to stop (in case it's still running) and join it.
+    // Signal the display task to stop and await its finish.
     stop.store(true, Ordering::Relaxed);
 
-    // Join the thread without blocking the async runtime thread: use spawn_blocking.
-    let _ = tokio::task::spawn_blocking(move || {
-        let _ = handle.join();
-    })
-    .await;
+    // Await the tokio task so we join cleanly.
+    let _ = handle.await;
 
-    // Print a separator line afterwards to match previous layout.
+    // Print a trailing separator line afterwards to match previous layout.
     println!("│");
 }
 
