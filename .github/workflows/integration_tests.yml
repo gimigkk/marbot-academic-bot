@@ -1,30 +1,106 @@
-name: Integration Tests
+name: 🧪 Integration Tests
 
 on:
   workflow_dispatch:
     inputs:
       test_limit:
-        description: 'Number of tests to run (default: all)'
+        description: 'Number of tests to run (leave empty for all)'
         required: false
+        type: string
+      concurrency:
+        description: 'Test concurrency (1=sequential, higher=parallel)'
+        required: false
+        default: '1'
         type: string
 
 env:
   GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
   GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
-  WAHA_API_KEY: ${{ secrets.WAHA_API_KEY }}
-  WAHA_URL: "http://localhost:3000"
   DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres
   RUST_LOG: info
   TEST_LIMIT: ${{ github.event.inputs.test_limit || '' }}
-  TEST_CONCURRENCY: "1"
-  TEST_DELAY_SECS: "6"  # 6 second delay = max 10 requests/min (safe for all free tiers)
-  TEST_MAX_RETRIES: "5"  # Retry up to 5 times on rate limit
-  TEST_RETRY_DELAY_SECS: "30"  # Wait 30 seconds before retrying on rate limit
+  TEST_CONCURRENCY: ${{ github.event.inputs.concurrency || '1' }}
+  TEST_DELAY_SECS: "6"
+  TEST_MAX_RETRIES: "5"
+  TEST_RETRY_DELAY_SECS: "30"
 
 jobs:
-  integration-test:
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  # JOB 1: Setup & Validation
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  setup:
+    name: 🔧 Setup & Validation
     runs-on: ubuntu-latest
-    timeout-minutes: 90  # Generous timeout for retries (max: 33 tests × 5 retries × 30s)
+    outputs:
+      test_count: ${{ steps.count_tests.outputs.count }}
+    
+    steps:
+      - name: 📥 Checkout Code
+        uses: actions/checkout@v4
+      
+      - name: 🔍 Validate Environment
+        id: validate
+        run: |
+          echo "## 🔐 Environment Validation" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Check API keys
+          if [ -n "${{ secrets.GEMINI_API_KEY }}" ]; then
+            echo "✅ GEMINI_API_KEY is set" >> $GITHUB_STEP_SUMMARY
+            echo "::notice::GEMINI_API_KEY is configured"
+          else
+            echo "⚠️ GEMINI_API_KEY is not set" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          if [ -n "${{ secrets.GROQ_API_KEY }}" ]; then
+            echo "✅ GROQ_API_KEY is set" >> $GITHUB_STEP_SUMMARY
+            echo "::notice::GROQ_API_KEY is configured"
+          else
+            echo "⚠️ GROQ_API_KEY is not set" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          # At least one must be set
+          if [ -z "${{ secrets.GEMINI_API_KEY }}" ] && [ -z "${{ secrets.GROQ_API_KEY }}" ]; then
+            echo "❌ ERROR: At least one API key must be configured" >> $GITHUB_STEP_SUMMARY
+            echo "::error::No API keys available"
+            exit 1
+          fi
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "✅ Environment validation passed" >> $GITHUB_STEP_SUMMARY
+      
+      - name: 📊 Count Test Cases
+        id: count_tests
+        run: |
+          if [ -f backend/tests/test_cases.json ]; then
+            count=$(cat backend/tests/test_cases.json | jq 'length')
+            echo "count=$count" >> $GITHUB_OUTPUT
+            
+            echo "## 📋 Test Configuration" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "| Setting | Value |" >> $GITHUB_STEP_SUMMARY
+            echo "|---------|-------|" >> $GITHUB_STEP_SUMMARY
+            echo "| Total Test Cases | $count |" >> $GITHUB_STEP_SUMMARY
+            echo "| Tests to Run | ${{ github.event.inputs.test_limit || 'All' }} |" >> $GITHUB_STEP_SUMMARY
+            echo "| Concurrency | ${{ github.event.inputs.concurrency || '1' }} |" >> $GITHUB_STEP_SUMMARY
+            echo "| Delay Between Tests | 6 seconds |" >> $GITHUB_STEP_SUMMARY
+            echo "| Max Retries | 5 |" >> $GITHUB_STEP_SUMMARY
+            echo "| Retry Delay | 30 seconds |" >> $GITHUB_STEP_SUMMARY
+            echo "| **Deep Validation** | **✅ Enabled** |" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "count=0" >> $GITHUB_OUTPUT
+            echo "::error::test_cases.json not found"
+            exit 1
+          fi
+
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  # JOB 2: Run Tests
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  test:
+    name: 🧪 Run Integration Tests
+    runs-on: ubuntu-latest
+    needs: setup
+    timeout-minutes: 90
     
     services:
       postgres:
@@ -41,13 +117,13 @@ jobs:
           - 5432:5432
     
     steps:
-      - name: Checkout
+      - name: 📥 Checkout Code
         uses: actions/checkout@v4
       
-      - name: Setup Rust
+      - name: 🦀 Setup Rust Toolchain
         uses: dtolnay/rust-toolchain@stable
       
-      - name: Cache Cargo
+      - name: 💾 Cache Cargo Dependencies
         uses: actions/cache@v4
         with:
           path: |
@@ -60,48 +136,51 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-
       
-      - name: Install sqlx-cli
+      - name: 🔧 Install sqlx-cli
         run: |
           if ! command -v sqlx &> /dev/null; then
+            echo "::group::Installing sqlx-cli"
             cargo install sqlx-cli --no-default-features --features postgres
+            echo "::endgroup::"
           else
-            echo "sqlx-cli already installed"
+            echo "✅ sqlx-cli already installed"
           fi
       
-      - name: Run migrations
+      - name: 🗄️ Run Database Migrations
         run: |
           cd backend
+          echo "::group::Running migrations"
           sqlx migrate run
+          echo "::endgroup::"
+          echo "✅ Database migrations completed"
       
-      - name: Verify test setup
+      - name: 🧪 Execute Tests
+        id: run_tests
         run: |
           cd backend
-          echo "=== Checking for test files ==="
-          ls -la tests/ || echo "No tests directory"
+          
+          echo "╔═══════════════════════════════════════════════════════════════╗"
+          echo "║              🧪 COMPREHENSIVE TEST EXECUTION                   ║"
+          echo "╠═══════════════════════════════════════════════════════════════╣"
+          echo "║  Features Being Tested:                                        ║"
+          echo "║    • Multi-tier AI fallback (Gemini → Groq)                    ║"
+          echo "║    • Context builder & schedule oracle                         ║"
+          echo "║    • Parallel code extraction                                  ║"
+          echo "║    • AI-powered duplicate detection                            ║"
+          echo "║    • Quoted message handling                                   ║"
+          echo "║                                                                ║"
+          echo "║  Configuration:                                                ║"
+          echo "║    • Delay: 6 seconds between tests                            ║"
+          echo "║    • Retries: Up to 5 attempts on rate limit                   ║"
+          echo "║    • Retry delay: 30 seconds                                   ║"
+          echo "║    • Deep validation: ENABLED                                  ║"
+          echo "╚═══════════════════════════════════════════════════════════════╝"
           echo ""
-          echo "=== Test cases count ==="
-          if [ -f tests/test_cases.json ]; then
-            cat tests/test_cases.json | jq 'length' || echo "Unable to parse test_cases.json"
-          else
-            echo "No test_cases.json found"
-          fi
-      
-      - name: Run tests
-        run: |
-          cd backend
-          echo "⚙️  Test Configuration:"
-          echo "   - 6 second delay between tests"
-          echo "   - Up to 5 retries per test on rate limit"
-          echo "   - 30 second wait before each retry"
-          echo ""
-          echo "⏱️  Expected runtime:"
-          echo "   - Best case: ~4-6 minutes (no rate limits)"
-          echo "   - Worst case: ~15-20 minutes (with retries)"
+          
           cargo test --test integration_tests -- --test-threads=1 --nocapture
         continue-on-error: true
-        id: test_run
       
-      - name: Upload results
+      - name: 📤 Upload Test Artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -109,39 +188,208 @@ jobs:
           path: |
             backend/test-results.json
             backend/test-summary.json
+          retention-days: 30
           if-no-files-found: warn
+
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  # JOB 3: Generate Summary
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  summary:
+    name: 📊 Generate Summary
+    runs-on: ubuntu-latest
+    needs: test
+    if: always()
+    
+    steps:
+      - name: 📥 Download Test Results
+        uses: actions/download-artifact@v4
+        with:
+          name: test-results
+          path: results/
       
-      - name: Display summary
-        if: always()
+      - name: 📊 Generate Beautiful Summary
         run: |
-          if [ -f backend/test-summary.json ]; then
-            echo "📊 Test Summary"
-            cat backend/test-summary.json | jq -r '
-              "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
-              "Total: \(.total)",
-              "✅ Passed: \(.passed)",
-              "❌ Failed: \(.failed)",
-              "📈 Success Rate: \(.success_rate)%",
-              "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
-              "",
-              "📂 By Category:",
-              (.by_category | to_entries[] | "  \(.key): \(.value.passed)/\(.value.total) (\(.value.success_rate)%)"),
-              "",
-              (if .failures | length > 0 then
-                "❌ Failed Tests (with errors):",
-                (.failures[] | "  • \(.name) [\(.category)]", "    Expected: \(.expected), Got: \(.actual)", (if .error then "    Error: \(.error)" else "" end))
-              else
-                "✅ All tests passed!"
-              end)
-            '
-          else
-            echo "⚠️  No test summary found"
-          fi
-      
-      - name: Check test result
-        if: always()
-        run: |
-          if [ "${{ steps.test_run.outcome }}" != "success" ]; then
-            echo "❌ Tests failed - check logs above"
+          if [ ! -f results/test-summary.json ]; then
+            echo "## ⚠️ Test Results Not Found" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "Test execution may have failed before generating results." >> $GITHUB_STEP_SUMMARY
             exit 1
+          fi
+          
+          # Parse summary
+          TOTAL=$(cat results/test-summary.json | jq -r '.total')
+          PASSED=$(cat results/test-summary.json | jq -r '.passed')
+          FAILED=$(cat results/test-summary.json | jq -r '.failed')
+          SUCCESS_RATE=$(cat results/test-summary.json | jq -r '.success_rate')
+          
+          # Determine status emoji
+          if [ "$FAILED" -eq 0 ]; then
+            STATUS_EMOJI="✅"
+            STATUS_TEXT="All Tests Passed!"
+            STATUS_COLOR="🟢"
+          elif [ "$FAILED" -lt 5 ]; then
+            STATUS_EMOJI="⚠️"
+            STATUS_TEXT="Some Tests Failed"
+            STATUS_COLOR="🟡"
+          else
+            STATUS_EMOJI="❌"
+            STATUS_TEXT="Multiple Failures"
+            STATUS_COLOR="🔴"
+          fi
+          
+          # Start summary
+          echo "# $STATUS_EMOJI Test Results: $STATUS_TEXT" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Overall stats box
+          echo "## 📈 Overall Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Metric | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|--------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| $STATUS_COLOR **Status** | **$STATUS_TEXT** |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🎯 **Success Rate** | **${SUCCESS_RATE}%** |" >> $GITHUB_STEP_SUMMARY
+          echo "| ✅ **Passed** | $PASSED / $TOTAL |" >> $GITHUB_STEP_SUMMARY
+          echo "| ❌ **Failed** | $FAILED / $TOTAL |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # AI Tier Usage
+          echo "## 🤖 AI Tier Usage (Your Overengineered Fallback System)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Tier | Tests | Percentage |" >> $GITHUB_STEP_SUMMARY
+          echo "|------|-------|------------|" >> $GITHUB_STEP_SUMMARY
+          
+          cat results/test-summary.json | jq -r '
+            .by_ai_tier | to_entries[] | 
+            "| " + .key + " | " + (.value | tostring) + " | " + 
+            ((.value / ($total | tonumber) * 100) | tostring | .[0:5]) + "% |"
+          ' --arg total "$TOTAL" >> $GITHUB_STEP_SUMMARY || echo "| No AI tier data | - | - |" >> $GITHUB_STEP_SUMMARY
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Context Builder Stats
+          CONTEXT_USED=$(cat results/test-summary.json | jq -r '.context_usage_stats.total_with_context')
+          SCHEDULE_USED=$(cat results/test-summary.json | jq -r '.context_usage_stats.total_with_schedule')
+          QUOTED_USED=$(cat results/test-summary.json | jq -r '.context_usage_stats.total_with_quoted')
+          
+          echo "## 🧠 Context Builder Usage" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Feature | Tests |" >> $GITHUB_STEP_SUMMARY
+          echo "|---------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Context Used | $CONTEXT_USED |" >> $GITHUB_STEP_SUMMARY
+          echo "| Schedule Hints | $SCHEDULE_USED |" >> $GITHUB_STEP_SUMMARY
+          echo "| Quoted Messages | $QUOTED_USED |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Category breakdown
+          echo "## 📂 Results by Category" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Category | Passed | Failed | Total | Success Rate |" >> $GITHUB_STEP_SUMMARY
+          echo "|----------|--------|--------|-------|--------------|" >> $GITHUB_STEP_SUMMARY
+          
+          cat results/test-summary.json | jq -r '
+            .by_category | to_entries[] | 
+            "| " + .key + " | " + (.value.passed | tostring) + " | " + 
+            (.value.failed | tostring) + " | " + (.value.total | tostring) + 
+            " | " + (.value.success_rate | tostring) + "% |"
+          ' >> $GITHUB_STEP_SUMMARY
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Failed tests details
+          if [ "$FAILED" -gt 0 ]; then
+            echo "## ❌ Failed Tests ($FAILED)" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            
+            cat results/test-summary.json | jq -r '.failures[] | 
+              "### 🔴 " + .name + "\n\n" +
+              "**Category:** `" + .category + "`\n\n" +
+              "**Expected:** `" + .expected + "`\n\n" +
+              "**Got:** `" + .actual + "`\n\n" +
+              (if .validation_issues | length > 0 then
+                "**Validation Issues:**\n" + 
+                (.validation_issues | map("- " + .) | join("\n")) + "\n\n"
+              else "" end) +
+              "**Message Preview:**\n```\n" + .message_preview + "\n```\n\n" +
+              (if .error then "**Error:**\n```\n" + .error + "\n```\n\n" else "" end) +
+              "---\n"
+            ' >> $GITHUB_STEP_SUMMARY
+          else
+            echo "## ✅ Perfect Score!" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "🎉 **All tests passed successfully!**" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "Your overengineered system works perfectly! The multi-tier AI fallback, context builder, schedule oracle, and duplicate detection are all functioning as designed." >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          # Add quick stats footer
+          echo "---" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "📅 **Run Date:** $(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_STEP_SUMMARY
+          echo "🔗 **Workflow:** [${{ github.workflow }}](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "🏗️ **Testing:** Multi-tier AI, Context Building, Parallel Extraction, Duplicate Detection, Quoted Messages" >> $GITHUB_STEP_SUMMARY
+      
+      - name: 🎨 Display Console Summary
+        run: |
+          echo ""
+          echo "╔═══════════════════════════════════════════════════════════════╗"
+          echo "║                   📊 COMPREHENSIVE SUMMARY                     ║"
+          echo "╚═══════════════════════════════════════════════════════════════╝"
+          echo ""
+          
+          if [ -f results/test-summary.json ]; then
+            cat results/test-summary.json | jq -r '
+              "  Total Tests:     \(.total)",
+              "  ✅ Passed:       \(.passed)",
+              "  ❌ Failed:       \(.failed)",
+              "  📈 Success Rate: \(.success_rate)%",
+              "",
+              "  🤖 AI Tier Usage:",
+              (.by_ai_tier | to_entries | map("     \(.key): \(.value) tests") | join("\n")),
+              "",
+              "  🧠 Context Features:",
+              "     Context Used:    \(.context_usage_stats.total_with_context)",
+              "     Schedule Hints:  \(.context_usage_stats.total_with_schedule)",
+              "     Quoted Messages: \(.context_usage_stats.total_with_quoted)",
+              "",
+              if .failed > 0 then
+                "╔═══════════════════════════════════════════════════════════════╗\n" +
+                "║                       ❌ FAILED TESTS                          ║\n" +
+                "╚═══════════════════════════════════════════════════════════════╝\n\n" +
+                (.failures | to_entries | map(
+                  "  " + ((.key + 1) | tostring) + ". " + .value.name + " [" + .value.category + "]\n" +
+                  "     Expected: " + .value.expected + "\n" +
+                  "     Got:      " + .value.actual + "\n" +
+                  (if .value.validation_issues | length > 0 then
+                    "     Issues:   " + (.value.validation_issues | join(", ")) + "\n"
+                  else "" end) +
+                  (if .value.error then "     Error:    " + .value.error + "\n" else "" end)
+                ) | join("\n"))
+              else
+                "🎉 All tests passed! Your overengineered system is working perfectly!\n" +
+                "   ✓ Multi-tier AI fallback\n" +
+                "   ✓ Context builder & schedule oracle\n" +
+                "   ✓ Parallel code extraction\n" +
+                "   ✓ Duplicate detection\n" +
+                "   ✓ Quoted message handling\n"
+              end
+            '
+          fi
+          
+          echo ""
+          echo "╔═══════════════════════════════════════════════════════════════╗"
+          echo "║           📄 Full results saved to test-results.json           ║"
+          echo "╚═══════════════════════════════════════════════════════════════╝"
+          echo ""
+      
+      - name: ✅ Check Final Status
+        run: |
+          FAILED=$(cat results/test-summary.json | jq -r '.failed')
+          
+          if [ "$FAILED" -gt 0 ]; then
+            echo "::error::$FAILED test(s) failed"
+            exit 1
+          else
+            echo "::notice::All tests passed! Your overengineered system is validated! 🎉"
           fi

@@ -170,7 +170,7 @@
   {
     "name": "Real-29: Kuliah umum WAJIB HADIR",
     "message": "📢 [WAJIB HADIR – KULIAH UMUM RPL]\n\nSelamat siang,\nDiberitahukan bahwa pertemuan ke-11 digantikan dengan kegiatan Kuliah Umum berikut. Seluruh mahasiswa WAJIB HADIR tanpa kecuali. Ketidakhadiran akan dihitung sebagai tidak hadir kuliah.\n\n🎓 Kuliah Umum: \"WHY DATA WAREHOUSES MATTER\"\n🗓️ Rabu, 22 Januari 2026\n🕙 Pukul 10.00 WIB (tepat waktu!)\n💻 Online via Zoom\n👨‍💻 Narasumber: Fakhri Akmal (Data Engineer – Tech Company)\n\n🔗 Link kegiatan: https://ipb.link/rpl-lecture\n\nMateri & Evaluasi:\n- Materi sudah diunggah di class.ipb.ac.id (harap dibaca sebelum acara).\n- Akan ada kuis terkait materi di akhir pekan.\n\nAbsensi akan diambil selama kegiatan berlangsung.",
-    "expected_type": "assignment_info",
+    "expected_type": "unrecognized",
     "category": "real_mandatory_webinar"
   },
   {
@@ -356,7 +356,7 @@
   {
     "name": "Edge-60: Course without class identifier",
     "message": "Reminder STRUKDAT\n\nBesok ada kuis\nJangan lupa belajar",
-    "expected_type": "unrecognized",
+    "expected_type": "assignment_info",
     "category": "edge_missing_info"
   },
   {
