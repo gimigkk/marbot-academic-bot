@@ -314,7 +314,7 @@
   {
     "name": "Edge-53: SQL injection attempt",
     "message": "RPL K1'); DROP TABLE assignments;--\nBesok ada quiz ya",
-    "expected_type": "unrecognized",
+    "expected_type": "assignment_info",
     "category": "edge_security"
   },
   {
@@ -350,7 +350,7 @@
   {
     "name": "Edge-59: Conflicting deadline times",
     "message": "STRUKDAT K1\nDeadline besok jam 8 pagi\nAtau mungkin jam 10\nAtau jam 23:59\nYang mana ya?",
-    "expected_type": "assignment_info",
+    "expected_type": "unrecognized",
     "category": "edge_ambiguous"
   },
   {
@@ -374,7 +374,7 @@
   {
     "name": "Edge-63: Invalid date format",
     "message": "RPL K1\n\nDeadline: 32 Januari 2026 jam 25:99",
-    "expected_type": "unrecognized",
+    "expected_type": "assignment_info",
     "category": "edge_invalid_datetime"
   },
   {

@@ -8,11 +8,10 @@ mod context_builder;
 // ===== MODEL CONFIGURATION =====
 
 // Groq reasoning models (PRIORITY - best for complex logic)
-pub const GROQ_REASONING_MODELS: &[&str; 4] = &[
+pub const GROQ_REASONING_MODELS: &[&str; 3] = &[
     "openai/gpt-oss-120b",            // Rank 1: Flagship reasoning (Replace DeepSeek R1)
     "llama-3.3-70b-versatile",        // Rank 2: The most reliable 70B (300k TPM limit)
     "qwen/qwen3-32b",                 // Rank 3: Dense logic model, punches above weight
-    "openai/gpt-oss-20b",             // Rank 4: Efficient fallback
 ];
 
 // Groq vision models (multimodal - for image processing)
@@ -23,7 +22,7 @@ pub const GROQ_VISION_MODELS: &[&str; 2] = &[
 
 // Groq standard text models (fallback - non-reasoning)
 pub const GROQ_TEXT_MODELS: &[&str; 2] = &[
-    "llama-3.3-70b-versatile",  // Primary text cruncher
+    "openai/gpt-oss-20b",       // Primary text cruncher
     "llama-3.1-8b-instant",     // Ultimate fallback (Fastest/Cheapest)
 ];
 
