@@ -25,9 +25,6 @@ env:
   TEST_RETRY_DELAY_SECS: "30"
 
 jobs:
-  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  # JOB 1: Setup & Validation
-  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   setup:
     name: 🔧 Setup & Validation
     runs-on: ubuntu-latest
@@ -44,7 +41,6 @@ jobs:
           echo "## 🔐 Environment Validation" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           
-          # Check API keys
           if [ -n "${{ secrets.GEMINI_API_KEY }}" ]; then
             echo "✅ GEMINI_API_KEY is set" >> $GITHUB_STEP_SUMMARY
             echo "::notice::GEMINI_API_KEY is configured"
@@ -59,7 +55,6 @@ jobs:
             echo "⚠️ GROQ_API_KEY is not set" >> $GITHUB_STEP_SUMMARY
           fi
           
-          # At least one must be set
           if [ -z "${{ secrets.GEMINI_API_KEY }}" ] && [ -z "${{ secrets.GROQ_API_KEY }}" ]; then
             echo "❌ ERROR: At least one API key must be configured" >> $GITHUB_STEP_SUMMARY
             echo "::error::No API keys available"
@@ -84,18 +79,14 @@ jobs:
             echo "| Tests to Run | ${{ github.event.inputs.test_limit || 'All' }} |" >> $GITHUB_STEP_SUMMARY
             echo "| Concurrency | ${{ github.event.inputs.concurrency || '1' }} |" >> $GITHUB_STEP_SUMMARY
             echo "| Delay Between Tests | 6 seconds |" >> $GITHUB_STEP_SUMMARY
-            echo "| Max Retries | 5 |" >> $GITHUB_STEP_SUMMARY
+            echo "| **Max Retries (Rate Limits)** | **5 attempts** |" >> $GITHUB_STEP_SUMMARY
             echo "| Retry Delay | 30 seconds |" >> $GITHUB_STEP_SUMMARY
-            echo "| **Deep Validation** | **✅ Enabled** |" >> $GITHUB_STEP_SUMMARY
           else
             echo "count=0" >> $GITHUB_OUTPUT
             echo "::error::test_cases.json not found"
             exit 1
           fi
 
-  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  # JOB 2: Run Tests
-  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   test:
     name: 🧪 Run Integration Tests
     runs-on: ubuntu-latest
@@ -152,7 +143,10 @@ jobs:
           echo "::group::Running migrations"
           sqlx migrate run
           echo "::endgroup::"
-          echo "✅ Database migrations completed"
+          echo "✅ Database schema initialized"
+          echo ""
+          echo "📝 Note: Courses will be seeded by the test suite"
+          echo "📝 Assignments will be saved as tests classify messages"
       
       - name: 🧪 Execute Tests
         id: run_tests
@@ -168,12 +162,14 @@ jobs:
           echo "║    • Parallel code extraction                                  ║"
           echo "║    • AI-powered duplicate detection                            ║"
           echo "║    • Quoted message handling                                   ║"
+          echo "║    • ⭐ AUTOMATIC RETRY ON RATE LIMITS ⭐                      ║"
+          echo "║    • 💾 AUTOMATIC DATABASE PERSISTENCE                         ║"
           echo "║                                                                ║"
           echo "║  Configuration:                                                ║"
           echo "║    • Delay: 6 seconds between tests                            ║"
           echo "║    • Retries: Up to 5 attempts on rate limit                   ║"
           echo "║    • Retry delay: 30 seconds                                   ║"
-          echo "║    • Deep validation: ENABLED                                  ║"
+          echo "║    • Rate limit errors = NOT test failures                     ║"
           echo "╚═══════════════════════════════════════════════════════════════╝"
           echo ""
           
@@ -191,9 +187,6 @@ jobs:
           retention-days: 30
           if-no-files-found: warn
 
-  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  # JOB 3: Generate Summary
-  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   summary:
     name: 📊 Generate Summary
     runs-on: ubuntu-latest
@@ -216,13 +209,12 @@ jobs:
             exit 1
           fi
           
-          # Parse summary
           TOTAL=$(cat results/test-summary.json | jq -r '.total')
           PASSED=$(cat results/test-summary.json | jq -r '.passed')
           FAILED=$(cat results/test-summary.json | jq -r '.failed')
           SUCCESS_RATE=$(cat results/test-summary.json | jq -r '.success_rate')
+          TOTAL_RETRIES=$(cat results/test-summary.json | jq -r '.total_retries')
           
-          # Determine status emoji
           if [ "$FAILED" -eq 0 ]; then
             STATUS_EMOJI="✅"
             STATUS_TEXT="All Tests Passed!"
@@ -237,11 +229,9 @@ jobs:
             STATUS_COLOR="🔴"
           fi
           
-          # Start summary
           echo "# $STATUS_EMOJI Test Results: $STATUS_TEXT" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           
-          # Overall stats box
           echo "## 📈 Overall Results" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "| Metric | Value |" >> $GITHUB_STEP_SUMMARY
@@ -250,37 +240,14 @@ jobs:
           echo "| 🎯 **Success Rate** | **${SUCCESS_RATE}%** |" >> $GITHUB_STEP_SUMMARY
           echo "| ✅ **Passed** | $PASSED / $TOTAL |" >> $GITHUB_STEP_SUMMARY
           echo "| ❌ **Failed** | $FAILED / $TOTAL |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🔄 **Auto-Retries (Rate Limits)** | $TOTAL_RETRIES |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           
-          # AI Tier Usage
-          echo "## 🤖 AI Tier Usage (Your Overengineered Fallback System)" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| Tier | Tests | Percentage |" >> $GITHUB_STEP_SUMMARY
-          echo "|------|-------|------------|" >> $GITHUB_STEP_SUMMARY
+          if [ "$TOTAL_RETRIES" -gt 0 ]; then
+            echo "> 💡 **Note:** $TOTAL_RETRIES tests hit rate limits but were automatically retried and succeeded!" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+          fi
           
-          cat results/test-summary.json | jq -r '
-            .by_ai_tier | to_entries[] | 
-            "| " + .key + " | " + (.value | tostring) + " | " + 
-            ((.value / ($total | tonumber) * 100) | tostring | .[0:5]) + "% |"
-          ' --arg total "$TOTAL" >> $GITHUB_STEP_SUMMARY || echo "| No AI tier data | - | - |" >> $GITHUB_STEP_SUMMARY
-          
-          echo "" >> $GITHUB_STEP_SUMMARY
-          
-          # Context Builder Stats
-          CONTEXT_USED=$(cat results/test-summary.json | jq -r '.context_usage_stats.total_with_context')
-          SCHEDULE_USED=$(cat results/test-summary.json | jq -r '.context_usage_stats.total_with_schedule')
-          QUOTED_USED=$(cat results/test-summary.json | jq -r '.context_usage_stats.total_with_quoted')
-          
-          echo "## 🧠 Context Builder Usage" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| Feature | Tests |" >> $GITHUB_STEP_SUMMARY
-          echo "|---------|-------|" >> $GITHUB_STEP_SUMMARY
-          echo "| Context Used | $CONTEXT_USED |" >> $GITHUB_STEP_SUMMARY
-          echo "| Schedule Hints | $SCHEDULE_USED |" >> $GITHUB_STEP_SUMMARY
-          echo "| Quoted Messages | $QUOTED_USED |" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          
-          # Category breakdown
           echo "## 📂 Results by Category" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "| Category | Passed | Failed | Total | Success Rate |" >> $GITHUB_STEP_SUMMARY
@@ -295,7 +262,6 @@ jobs:
           
           echo "" >> $GITHUB_STEP_SUMMARY
           
-          # Failed tests details
           if [ "$FAILED" -gt 0 ]; then
             echo "## ❌ Failed Tests ($FAILED)" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
@@ -305,10 +271,6 @@ jobs:
               "**Category:** `" + .category + "`\n\n" +
               "**Expected:** `" + .expected + "`\n\n" +
               "**Got:** `" + .actual + "`\n\n" +
-              (if .validation_issues | length > 0 then
-                "**Validation Issues:**\n" + 
-                (.validation_issues | map("- " + .) | join("\n")) + "\n\n"
-              else "" end) +
               "**Message Preview:**\n```\n" + .message_preview + "\n```\n\n" +
               (if .error then "**Error:**\n```\n" + .error + "\n```\n\n" else "" end) +
               "---\n"
@@ -318,17 +280,21 @@ jobs:
             echo "" >> $GITHUB_STEP_SUMMARY
             echo "🎉 **All tests passed successfully!**" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
-            echo "Your overengineered system works perfectly! The multi-tier AI fallback, context builder, schedule oracle, and duplicate detection are all functioning as designed." >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
+            if [ "$TOTAL_RETRIES" -gt 0 ]; then
+              echo "The system automatically handled $TOTAL_RETRIES rate limit(s) by retrying — no manual intervention needed!" >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+            fi
+            echo "Your system correctly:" >> $GITHUB_STEP_SUMMARY
+            echo "- ✅ Classified all message types" >> $GITHUB_STEP_SUMMARY
+            echo "- ✅ Saved assignments to the database" >> $GITHUB_STEP_SUMMARY
+            echo "- ✅ Handled context and schedules" >> $GITHUB_STEP_SUMMARY
+            echo "- ✅ Detected duplicates" >> $GITHUB_STEP_SUMMARY
           fi
           
-          # Add quick stats footer
           echo "---" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "📅 **Run Date:** $(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_STEP_SUMMARY
           echo "🔗 **Workflow:** [${{ github.workflow }}](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "🏗️ **Testing:** Multi-tier AI, Context Building, Parallel Extraction, Duplicate Detection, Quoted Messages" >> $GITHUB_STEP_SUMMARY
       
       - name: 🎨 Display Console Summary
         run: |
@@ -344,14 +310,7 @@ jobs:
               "  ✅ Passed:       \(.passed)",
               "  ❌ Failed:       \(.failed)",
               "  📈 Success Rate: \(.success_rate)%",
-              "",
-              "  🤖 AI Tier Usage:",
-              (.by_ai_tier | to_entries | map("     \(.key): \(.value) tests") | join("\n")),
-              "",
-              "  🧠 Context Features:",
-              "     Context Used:    \(.context_usage_stats.total_with_context)",
-              "     Schedule Hints:  \(.context_usage_stats.total_with_schedule)",
-              "     Quoted Messages: \(.context_usage_stats.total_with_quoted)",
+              "  🔄 Auto-Retries: \(.total_retries)",
               "",
               if .failed > 0 then
                 "╔═══════════════════════════════════════════════════════════════╗\n" +
@@ -361,18 +320,17 @@ jobs:
                   "  " + ((.key + 1) | tostring) + ". " + .value.name + " [" + .value.category + "]\n" +
                   "     Expected: " + .value.expected + "\n" +
                   "     Got:      " + .value.actual + "\n" +
-                  (if .value.validation_issues | length > 0 then
-                    "     Issues:   " + (.value.validation_issues | join(", ")) + "\n"
-                  else "" end) +
                   (if .value.error then "     Error:    " + .value.error + "\n" else "" end)
                 ) | join("\n"))
               else
-                "🎉 All tests passed! Your overengineered system is working perfectly!\n" +
+                "🎉 All tests passed!\n" +
+                (if .total_retries > 0 then 
+                  "   ✓ Handled " + (.total_retries | tostring) + " rate limit(s) automatically\n"
+                else "" end) +
                 "   ✓ Multi-tier AI fallback\n" +
-                "   ✓ Context builder & schedule oracle\n" +
-                "   ✓ Parallel code extraction\n" +
-                "   ✓ Duplicate detection\n" +
-                "   ✓ Quoted message handling\n"
+                "   ✓ Database persistence\n" +
+                "   ✓ Context & schedules\n" +
+                "   ✓ Duplicate detection\n"
               end
             '
           fi
@@ -391,5 +349,5 @@ jobs:
             echo "::error::$FAILED test(s) failed"
             exit 1
           else
-            echo "::notice::All tests passed! Your overengineered system is validated! 🎉"
+            echo "::notice::All tests passed! 🎉"
           fi

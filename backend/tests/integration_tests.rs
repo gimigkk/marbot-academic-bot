@@ -45,6 +45,7 @@ struct TestResult {
     error: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     message_preview: Option<String>,
+    retry_count: u32,
 }
 
 #[derive(Debug, Serialize)]
@@ -53,6 +54,7 @@ struct TestSummary {
     passed: usize,
     failed: usize,
     success_rate: f64,
+    total_retries: u32,
     by_category: HashMap<String, CategoryStats>,
     failures: Vec<FailureDetail>,
 }
@@ -105,6 +107,9 @@ async fn run_all_test_cases() {
         .await
         .expect("Failed to connect to database");
     
+    // Verify courses exist (from production migration)
+    verify_database_setup(&pool).await;
+    
     // Load test cases
     let test_data = fs::read_to_string("tests/test_cases.json")
         .expect("Failed to read test_cases.json");
@@ -143,7 +148,7 @@ async fn run_all_test_cases() {
     println!("  {}⚙️  Configuration:{}", BOLD, RESET);
     println!("     • Concurrency: {}{}{}", YELLOW, concurrency, RESET);
     println!("     • Delay between tests: {}{}s{}", YELLOW, delay_secs, RESET);
-    println!("     • Max retries: {}{}{}", YELLOW, max_retries, RESET);
+    println!("     • Max retries on rate limit: {}{}{}", YELLOW, max_retries, RESET);
     println!("     • Retry delay: {}{}s{}", YELLOW, retry_delay, RESET);
     println!();
     
@@ -183,15 +188,20 @@ async fn run_all_test_cases() {
                 GRAY, RESET, BLUE, progress, RESET, test_case.name, category_tag);
             
             let start = std::time::Instant::now();
-            let result = run_single_test(&pool, &test_case).await;
+            let result = run_single_test_with_retry(&pool, &test_case, max_retries, retry_delay).await;
             let duration = start.elapsed().as_millis() as u64;
             
             let mut test_result = result;
             test_result.duration_ms = duration;
             
             if test_result.passed {
-                println!("{}└─{}─ {}✅ PASS{} {}({}ms){}", 
-                    GRAY, RESET, GREEN, RESET, DIM, duration, RESET);
+                let retry_info = if test_result.retry_count > 0 {
+                    format!(" {}(retried {} times){}", DIM, test_result.retry_count, RESET)
+                } else {
+                    String::new()
+                };
+                println!("{}└─{}─ {}✅ PASS{} {}({}ms){}{}", 
+                    GRAY, RESET, GREEN, RESET, DIM, duration, RESET, retry_info);
             } else {
                 println!("{}└─{}─ {}❌ FAIL{}", GRAY, RESET, RED, RESET);
                 println!("   {}Expected:{} {}{}{}", 
@@ -252,6 +262,79 @@ async fn run_all_test_cases() {
     }
 }
 
+async fn verify_database_setup(pool: &PgPool) {
+    println!("{}🔍 Verifying database setup (production migration)...{}", CYAN, RESET);
+    
+    let course_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM courses")
+        .fetch_one(pool)
+        .await
+        .expect("Failed to count courses");
+    
+    if course_count == 0 {
+        println!("{}❌ FATAL: No courses found in database!{}", RED, RESET);
+        println!("{}   Your production migration should have inserted courses.{}", RED, RESET);
+        panic!("Database not properly initialized - run migrations first!");
+    }
+    
+    println!("  {}✅ Found {} courses (seeded by production migration){}", GREEN, course_count, RESET);
+    
+    // Show which courses exist for debugging
+    let courses: Vec<(String, Option<Vec<String>>)> = sqlx::query_as(
+        "SELECT name, aliases FROM courses ORDER BY name"
+    )
+    .fetch_all(pool)
+    .await
+    .expect("Failed to fetch courses");
+    
+    println!("  {}📚 Available courses:{}", DIM, RESET);
+    for (name, aliases) in courses {
+        let alias_str = aliases
+            .map(|a| format!(" (aliases: {})", a.join(", ")))
+            .unwrap_or_default();
+        println!("     • {}{}{}", DIM, name, alias_str);
+    }
+    println!("{}  {}", RESET, DIM);
+    println!();
+}
+
+async fn run_single_test_with_retry(
+    pool: &PgPool, 
+    test_case: &TestCase,
+    max_retries: u32,
+    retry_delay: u64,
+) -> TestResult {
+    let mut retry_count = 0;
+    
+    loop {
+        let result = run_single_test(pool, test_case).await;
+        
+        // Check if it's a rate limit error
+        let is_rate_limit = result.error.as_ref()
+            .map(|e| {
+                e.contains("rate limit") || 
+                e.contains("429") || 
+                e.contains("R-LIMIT") ||
+                e.contains("rate_limit") ||
+                e.contains("All models failed") ||
+                e.contains("All Gemini models rate limited") ||
+                e.contains("All Groq") && e.contains("rate limited")
+            })
+            .unwrap_or(false);
+        
+        if !is_rate_limit || retry_count >= max_retries {
+            let mut final_result = result;
+            final_result.retry_count = retry_count;
+            return final_result;
+        }
+        
+        // Rate limited - wait and retry
+        retry_count += 1;
+        println!("   {}⏳ Rate limit detected, retrying in {}s... (attempt {}/{}){}", 
+            YELLOW, retry_delay, retry_count, max_retries, RESET);
+        tokio::time::sleep(tokio::time::Duration::from_secs(retry_delay)).await;
+    }
+}
+
 fn print_header(title: &str) {
     println!("\n{}╔══════════════════════════════════════════════════════════════════╗{}", 
         CYAN, RESET);
@@ -261,7 +344,6 @@ fn print_header(title: &str) {
         CYAN, RESET);
 }
 
-#[allow(non_snake_case)]
 fn format_key_status(key: &Option<String>) -> String {
     match key {
         Some(k) => {
@@ -281,6 +363,8 @@ fn generate_summary(results: &[TestResult]) -> TestSummary {
     } else {
         0.0
     };
+    
+    let total_retries: u32 = results.iter().map(|r| r.retry_count).sum();
     
     let mut by_category: HashMap<String, CategoryStats> = HashMap::new();
     for result in results {
@@ -328,6 +412,7 @@ fn generate_summary(results: &[TestResult]) -> TestSummary {
         passed,
         failed,
         success_rate,
+        total_retries,
         by_category,
         failures,
     }
@@ -362,6 +447,12 @@ fn print_summary(summary: &TestSummary) {
         CYAN, RESET, BOLD, RESET, summary.passed, CYAN, RESET);
     println!("{}║{} {}❌ Failed:{} {:<52} {}║{}", 
         CYAN, RESET, BOLD, RESET, summary.failed, CYAN, RESET);
+    
+    if summary.total_retries > 0 {
+        println!("{}║{} {}🔄 Total Retries:{} {:<46} {}║{}", 
+            CYAN, RESET, BOLD, RESET, summary.total_retries, CYAN, RESET);
+    }
+    
     println!("{}╚══════════════════════════════════════════════════════════════════╝{}", 
         CYAN, RESET);
     
@@ -443,6 +534,12 @@ fn print_summary(summary: &TestSummary) {
             GREEN, RESET, "🎉 PERFECT SCORE!", GREEN, RESET);
         println!("{}║{} {:^64} {}║{}", 
             GREEN, RESET, "All tests passed successfully!", GREEN, RESET);
+        if summary.total_retries > 0 {
+            println!("{}║{} {:^64} {}║{}", 
+                GREEN, RESET, 
+                format!("(with {} automatic retries on rate limits)", summary.total_retries), 
+                GREEN, RESET);
+        }
         println!("{}╚══════════════════════════════════════════════════════════════════╝{}", 
             GREEN, RESET);
     }
@@ -464,6 +561,7 @@ async fn run_single_test(pool: &PgPool, test_case: &TestCase) -> TestResult {
             category: test_case.category.clone(),
             error: Some("No API keys available".to_string()),
             message_preview: Some(test_case.message.chars().take(100).collect()),
+            retry_count: 0,
         };
     }
     
@@ -506,6 +604,7 @@ async fn run_single_test(pool: &PgPool, test_case: &TestCase) -> TestResult {
                 category: test_case.category.clone(),
                 error: None,
                 message_preview: Some(test_case.message.chars().take(100).collect()),
+                retry_count: 0,
             }
         }
         Err(e) => {
@@ -518,6 +617,7 @@ async fn run_single_test(pool: &PgPool, test_case: &TestCase) -> TestResult {
                 category: test_case.category.clone(),
                 error: Some(e),
                 message_preview: Some(test_case.message.chars().take(100).collect()),
+                retry_count: 0,
             }
         }
     }
