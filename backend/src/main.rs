@@ -765,7 +765,7 @@ async fn handle_ai_classification(
             });
         }
         
-        // ============ FITUR BARU: NOTIFIKASI AKADEMIK PADA UPDATE ============
+        // ============ FITUR: NOTIFIKASI AKADEMIK PADA UPDATE ============
         AIClassification::AssignmentUpdate { 
             reference_keywords, 
             changes, 
@@ -806,7 +806,8 @@ async fn handle_ai_classification(
                     title: &str, 
                     _course: &str, // Course tidak dipakai di format singkat, jadi beri underscore prefix
                     deadline_utc: Option<chrono::DateTime<chrono::Utc>>,
-                    source_chat: &str
+                    source_chat: &str,
+                    original_msg_id: Option<String> // <--- PARAMETER BARU
                 ) {
                     // Hanya kirim notifikasi jika ada deadline baru
                     if let Some(deadline) = deadline_utc {
@@ -832,15 +833,14 @@ async fn handle_ai_classification(
                                     title, deadline_str
                                 );
                                 
-                                // Kirim notifikasi ke channel akademik
-                                let _ = send_reply(channel_id, &msg).await;
+                                let _ = send_reply_with_id(channel_id, &msg, original_msg_id.clone()).await;
                             }
                         }
                     }
                 }
                 // ============ END HELPER FUNCTION ============
 
-                // SMART UPDATE: Check for re-announcement
+                // LOGIC 1: RE-ANNOUNCEMENT CHECK
                 if let Some(ref title) = new_title {
                     if let (Some(_course_id), Some(cname)) = (course_id, &course_name) {
                         let dup_check = check_duplicate_assignment(
@@ -858,7 +858,8 @@ async fn handle_ai_classification(
                             let deadline_parsed = new_deadline.as_ref()
                                 .and_then(|d| crud::parse_deadline(d).ok());
                             
-                            let _ = crud::update_assignment_fields(
+                            // Update Database
+                            let updated_res = crud::update_assignment_fields(
                                 &pool_clone,
                                 id,
                                 deadline_parsed,
@@ -869,13 +870,22 @@ async fn handle_ai_classification(
                                 Some(msg_body.clone()),
                             ).await;
                             
-                            // ============ FITUR: KIRIM NOTIFIKASI AKADEMIK ============
-                            // Hanya kirim jika deadline berubah
-                            if deadline_parsed.is_some() {
-                                send_academic_alert(title, cname, deadline_parsed, &source_chat_clone).await;
+                            // KIRIM NOTIFIKASI
+                            if let Ok(updated_assign) = updated_res {
+                                if deadline_parsed.is_some() {
+                                    // Ambil ID pesan terakhir yang tersimpan di database untuk tugas ini
+                                    // Kita ambil index 0 (pesan pertama/original) atau last (pesan terbaru)
+                                    // Di sini kita ambil yang terakhir (updated_assign.message_ids.last()) atau previous
+                                    // Tapi amannya ambil pesan pertama kali tugas dibuat jika ingin konteks "Original"
+                                    // Atau ambil pesan terakhir jika ingin konteks "Thread terbaru"
+                                    
+                                    // Strategy: Coba reply ke pesan ID terakhir yang ada di database
+                                    let reply_target_id = updated_assign.message_ids.last().cloned();
+
+                                    send_academic_alert(title, cname, deadline_parsed, &source_chat_clone, reply_target_id).await;
+                                }
                             }
-                            // ============ END ============
-                            
+
                             if let Some(debug_id) = debug_clone {
                                 let _ = send_reply(
                                     &debug_id,
@@ -887,7 +897,7 @@ async fn handle_ai_classification(
                     }
                 }
                 
-                // REGULAR UPDATE MATCHING
+                // LOGIC 2: REGULAR UPDATE MATCHING
                 match parser::ai_extractor::match_update_to_assignment(
                     &changes,
                     &reference_keywords,
@@ -918,10 +928,8 @@ async fn handle_ai_classification(
                             Some(msg_body),
                         ).await {
 
-                            // ============ FITUR : KIRIM NOTIFIKASI AKADEMIK ============
-                            // Hanya kirim jika deadline berubah
+                            // KIRIM NOTIFIKASI
                             if deadline_parsed.is_some() {
-                                // Ambil nama matkul untuk notifikasi
                                 let course_name_for_alert = if let Some(cid) = updated_assign.course_id {
                                     course_map.get(&cid)
                                         .cloned()
@@ -930,15 +938,18 @@ async fn handle_ai_classification(
                                     course_name.unwrap_or_else(|| "General".to_string())
                                 };
                                 
-                                // Kirim notifikasi ke channel akademik
+                                // AMBIL ID PESAN UNTUK REPLY
+                                // Kita ambil yang terakhir (termasuk pesan update barusan) atau sebelumnya.
+                                let reply_target_id = updated_assign.message_ids.last().cloned();
+
                                 send_academic_alert(
                                     &updated_assign.title, 
                                     &course_name_for_alert, 
                                     deadline_parsed, 
-                                    &source_chat_clone
+                                    &source_chat_clone,
+                                    reply_target_id // Pass ID pesan
                                 ).await;
                             }
-                            // ============ END ============
                             
                             if let Some(debug_id) = debug_clone {
                                 let _ = send_reply(
@@ -1200,14 +1211,37 @@ async fn handle_single_assignment(
 }
 
 
-async fn send_reply(chat_id: &str, text: &str) -> Result<(), String> {
+// FITUR BARU: FUNGSI HELPER DENGAN KIRIM REPLY DENGAN ID PESAN
+
+// Fungsi Helper Baru: Bisa Kirim Reply ke ID tertentu
+async fn send_reply_with_id(chat_id: &str, text: &str, reply_to: Option<String>) -> Result<(), String> {
     let waha_url = format!("{}/api/sendText", std::env::var("WAHA_URL").unwrap_or_else(|_| "http://waha:3000".to_string()));
     let api_key = std::env::var("WAHA_API_KEY").unwrap_or_else(|_| "devkey123".to_string());
-    let payload = SendTextRequest { chat_id: chat_id.to_string(), text: text.to_string(), session: "default".to_string() };
+    
+    // Gunakan struct yang sudah diupdate dengan field reply_to
+    let payload = SendTextRequest { 
+        chat_id: chat_id.to_string(), 
+        text: text.to_string(), 
+        session: "default".to_string(),
+        reply_to: reply_to // Masukkan ID pesan disini
+    };
+    
     let client = reqwest::Client::new();
-    let res = client.post(waha_url).header("X-Api-Key", api_key).json(&payload).send().await.map_err(|e| e.to_string())?;
+    let res = client.post(waha_url)
+        .header("X-Api-Key", api_key)
+        .json(&payload)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+        
     if res.status().is_success() { Ok(()) } else { Err(format!("API Error")) }
 }
+
+// Wrapper agar kode lama yang memanggil send_reply("chat", "text") tetap jalan
+async fn send_reply(chat_id: &str, text: &str) -> Result<(), String> {
+    send_reply_with_id(chat_id, text, None).await
+}
+// END FITUR
 
 fn extract_parallel_code(title: &str) -> Option<String> {
     let u = title.to_uppercase();

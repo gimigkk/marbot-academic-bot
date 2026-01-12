@@ -179,6 +179,7 @@ async fn send_to_channels(message: String) -> Result<(), Box<dyn std::error::Err
             chat_id: chat_id.to_string(),
             text: message.clone(),
             session: "default".to_string(),
+            reply_to: None,
         };
 
         let _ = client
