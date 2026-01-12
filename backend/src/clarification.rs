@@ -1,22 +1,24 @@
 use crate::models::AssignmentWithCourse;
 use crate::parser::ai_extractor::schedule_oracle::ScheduleOracle;
+// Import the model constants
+use crate::parser::ai_extractor::{GROQ_REASONING_MODELS, GROQ_TEXT_MODELS, GEMINI_MODELS};
 use uuid::Uuid;
 use std::collections::HashMap;
 use chrono::{Local, NaiveDateTime, NaiveDate, NaiveTime, Duration, Datelike, Weekday};
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use regex::Regex;
-use once_cell::sync::Lazy; 
+use once_cell::sync::Lazy;
 
-/// Check which fields are missing from an assignment
+// ===== YOUR EXISTING HELPER FUNCTIONS (unchanged) =====
+
 pub fn identify_missing_fields(assignment: &AssignmentWithCourse) -> Vec<String> {
     let mut missing = Vec::new();
     
-    // Check course name
     if assignment.course_name.is_empty() || assignment.course_name == "Unknown Course" {
         missing.push("course_name".to_string());
     }
     
-    // Check title
     let title_lower = assignment.title.to_lowercase();
     let is_generic_title = assignment.title.is_empty() || 
         title_lower.contains("tugas baru") ||
@@ -29,17 +31,14 @@ pub fn identify_missing_fields(assignment: &AssignmentWithCourse) -> Vec<String>
         missing.push("title".to_string());
     }
     
-    // Check deadline
     if assignment.deadline_is_missing() {
         missing.push("deadline".to_string());
     }
     
-    // Check parallel codes
     if assignment.parallel_codes.is_empty() {
         missing.push("parallel_codes".to_string());
     }
     
-    // Check description
     if let Some(ref desc) = assignment.description {
         if desc.trim().is_empty() || desc.len() < 5 {
              missing.push("description".to_string());
@@ -55,7 +54,6 @@ pub fn generate_clarification_messages(
     assignment: &AssignmentWithCourse,
     missing_fields: &[String]
 ) -> (String, String) {
-    // 1. Generate List 
     let field_list = missing_fields.iter().map(|f| match f.as_str() {
         "course_name" => "📚 Nama Mata Kuliah",
         "title" => "📝 Judul Tugas",
@@ -65,29 +63,24 @@ pub fn generate_clarification_messages(
         _ => "❓ Unknown"
     }).collect::<Vec<_>>().join("\n");
     
-    // 2. Format Deskripsi
     let desc_preview = assignment.description
         .as_ref()
         .map(|d| format!("📄 {}", d))
         .unwrap_or_else(|| "📄 (belum ada deskripsi)".to_string());
     
-    // 3. Format Deadline (Tampilkan "N/A" jika kosong)
     let deadline_display = if let Some(d) = assignment.deadline {
-        // Tambah 7 jam untuk WIB
         let wib = d + Duration::hours(7);
         wib.format("%Y-%m-%d %H:%M").to_string()
     } else {
         "N/A".to_string()
     };
 
-    // 4. Format Parallel (Tampilkan "N/A" jika kosong)
     let parallel_display = if assignment.parallel_codes.is_empty() {
         "N/A".to_string()
     } else {
         assignment.format_parallel_display()
     };
     
-    // 5. Susun Pesan Utama
     let info_message = format!(
         "*[PERLU KLARIFIKASI]*\n\
         `ID: {}`\n\
@@ -144,50 +137,40 @@ pub fn generate_no_date_message() -> String {
     "⚠️ *TANGGAL TIDAK DITEMUKAN*\nKamu menyebutkan jam, tapi aku tidak tahu untuk tanggal berapa.".to_string()
 }
 
+// ===== AI & NATURAL LANGUAGE PARSING =====
 
-// AI & NATURAL LANGUAGE PARSING
-
-/// Main Entry Point: Try AI first, fallback to regex
 pub async fn parse_clarification_response(
     text: &str, 
-    assignment: &AssignmentWithCourse, // CHANGED: Accept full assignment object
+    assignment: &AssignmentWithCourse,
     missing_fields: &[String]
 ) -> Result<HashMap<String, String>, String> {
     
     let current_deadline = assignment.deadline.map(|d| d.naive_utc());
-
     let next_meeting_hint = resolve_next_meeting(assignment);
 
-    // 1. Try AI Parsing
     println!("🤖 Attempting AI Clarification parsing...");
-    match parse_clarification_with_ai(text, missing_fields, current_deadline, next_meeting_hint).await {
+    match parse_clarification_with_ai_fallback(text, missing_fields, current_deadline, next_meeting_hint).await {
         Ok(result) => {
              println!("✅ AI Parsing Success");
              Ok(result)
         },
         Err(e) => {
-            eprintln!("⚠️ AI Parsing failed/skipped: {}. Falling back to Regex.", e);
-            // 2. Fallback to Natural Language Regex
+            eprintln!("⚠️ All AI models failed: {}. Falling back to Regex.", e);
             parse_natural_language_fallback(text, current_deadline, next_meeting_hint)
         }
     }
 }
 
-/// Helper to find next meeting from schedule.json
 fn resolve_next_meeting(assignment: &AssignmentWithCourse) -> Option<NaiveDateTime> {
-    // Try to load oracle (fail silently if missing)
     let oracle = ScheduleOracle::load_from_file("schedule.json").ok()?;
     let today = Local::now().naive_local().date();
     let mut earliest: Option<NaiveDateTime> = None;
 
-    // Check next meeting for ALL parallel codes in assignment
-    // Pick the earliest one as the candidate
     for p in &assignment.parallel_codes {
         if let Some((date, time_str)) = oracle.get_next_meeting_with_time(&assignment.course_name, p, today) {
              if let Ok(time) = NaiveTime::parse_from_str(&time_str, "%H:%M") {
                  let dt = date.and_time(time);
                  
-                 // Pick earliest if multiple parallels exist
                  if earliest.is_none() || dt < earliest.unwrap() {
                      earliest = Some(dt);
                  }
@@ -208,12 +191,15 @@ pub struct AIClarificationResult {
     pub is_cancellation: bool,
 }
 
-pub async fn parse_clarification_with_ai(
+// ===== AI FALLBACK SYSTEM (using imported constants) =====
+
+async fn parse_clarification_with_ai_fallback(
     user_message: &str,
     missing_fields: &[String],
     current_deadline: Option<NaiveDateTime>,
-    schedule_hint: Option<NaiveDateTime>, // NEW: Hint from schedule
+    schedule_hint: Option<NaiveDateTime>,
 ) -> Result<HashMap<String, String>, String> {
+    
     let text_lower = user_message.trim().to_lowercase();
     if is_cancellation(&text_lower) {
         return Err("cancelled".to_string());
@@ -234,8 +220,292 @@ pub async fn parse_clarification_with_ai(
         schedule_hint,
     );
 
-    let ai_response = call_gemini_for_clarification(&prompt).await?;
-    parse_ai_response(&ai_response, current_deadline)
+    println!("\x1b[1;30m┌── 🤖 CLARIFICATION PARSING ──────────────────\x1b[0m");
+    
+    // TIER 1: Gemini
+    match try_gemini_clarification(&prompt, current_deadline).await {
+        Ok(result) => {
+            println!("\x1b[1;30m└──────────────────────────────────────────────\x1b[0m");
+            return Ok(result);
+        }
+        Err(e) => {
+            eprintln!("│ ⚠️  Gemini failed: {}", e);
+            eprintln!("│\n│ 🔄 Falling back to Groq...");
+        }
+    }
+    
+    // TIER 2: Groq reasoning
+    match try_groq_reasoning_clarification(&prompt, current_deadline).await {
+        Ok(result) => {
+            println!("\x1b[1;30m└──────────────────────────────────────────────\x1b[0m");
+            return Ok(result);
+        }
+        Err(e) => {
+            eprintln!("│ ⚠️  Groq Reasoning failed: {}", e);
+        }
+    }
+    
+    // TIER 3: Groq standard
+    match try_groq_standard_clarification(&prompt, current_deadline).await {
+        Ok(result) => {
+            println!("\x1b[1;30m└──────────────────────────────────────────────\x1b[0m");
+            return Ok(result);
+        }
+        Err(e) => {
+            eprintln!("│ ⚠️  Groq Standard failed: {}", e);
+        }
+    }
+    
+    println!("\x1b[1;30m└──────────────────────────────────────────────\x1b[0m");
+    Err("All AI models failed".to_string())
+}
+
+// ===== GEMINI CLARIFICATION =====
+
+async fn try_gemini_clarification(
+    prompt: &str,
+    current_deadline: Option<NaiveDateTime>,
+) -> Result<HashMap<String, String>, String> {
+    let api_key = std::env::var("GEMINI_API_KEY")
+        .map_err(|_| "GEMINI_API_KEY not set".to_string())?;
+    
+    for (index, model) in GEMINI_MODELS.iter().enumerate() {
+        let url = format!(
+            "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent",
+            model
+        );
+        
+        let request_body = json!({
+            "contents": [{"parts": [{"text": prompt}]}],
+            "generationConfig": {
+                "temperature": 0.1,
+                "maxOutputTokens": 1024,
+                "responseMimeType": "application/json"
+            }
+        });
+        
+        let client = reqwest::Client::new();
+        let response = match client
+            .post(&url)
+            .header("X-Goog-Api-Key", &api_key)
+            .json(&request_body)
+            .send()
+            .await
+        {
+            Ok(r) => r,
+            Err(e) => {
+                eprintln!("│ \x1b[31m❌ REQUEST FAILED\x1b[0m : {} (Gemini {}/{})", 
+                    model, index + 1, GEMINI_MODELS.len());
+                eprintln!("│    Error: {}", e);
+                continue;
+            }
+        };
+        
+        let status = response.status();
+        
+        if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
+            eprintln!("│ ⚠️  R-LIMIT  : {} (Gemini {}/{})", 
+                model, index + 1, GEMINI_MODELS.len());
+            if index < GEMINI_MODELS.len() - 1 {
+                continue;
+            } else {
+                return Err("All Gemini models rate limited".to_string());
+            }
+        }
+        
+        if status.is_success() {
+            println!("│ \x1b[32m✅ SUCCESS\x1b[0m  : {} (Gemini {}/{})", 
+                model, index + 1, GEMINI_MODELS.len());
+            
+            let json: serde_json::Value = response.json().await
+                .map_err(|e| format!("Failed to deserialize: {}", e))?;
+            
+            let ai_text = json["candidates"][0]["content"]["parts"][0]["text"]
+                .as_str()
+                .ok_or("Failed to extract text from Gemini response")?;
+            
+            return parse_ai_response(ai_text, current_deadline);
+        }
+        
+        let error_text = response.text().await
+            .unwrap_or_else(|_| "Unknown error".to_string());
+        eprintln!("│ ❌ ERROR    : {} (Gemini {}/{}) - {}", 
+            model, index + 1, GEMINI_MODELS.len(), status);
+        eprintln!("│    {}", truncate_for_log(&error_text));
+        
+        if index < GEMINI_MODELS.len() - 1 {
+            continue;
+        }
+    }
+    
+    Err("All Gemini models failed".to_string())
+}
+
+// ===== GROQ REASONING CLARIFICATION =====
+
+async fn try_groq_reasoning_clarification(
+    prompt: &str,
+    current_deadline: Option<NaiveDateTime>,
+) -> Result<HashMap<String, String>, String> {
+    let api_key = std::env::var("GROQ_API_KEY")
+        .map_err(|_| "GROQ_API_KEY not set".to_string())?;
+    
+    for (index, model) in GROQ_REASONING_MODELS.iter().enumerate() {
+        let url = "https://api.groq.com/openai/v1/chat/completions";
+        
+        let request_body = json!({
+            "model": model,
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.1,
+            "top_p": 0.95,
+            "max_completion_tokens": 2048,
+            "response_format": { "type": "json_object" }
+        });
+        
+        let client = reqwest::Client::new();
+        let response = match client
+            .post(url)
+            .header("Authorization", format!("Bearer {}", api_key))
+            .header("Content-Type", "application/json")
+            .json(&request_body)
+            .send()
+            .await
+        {
+            Ok(r) => r,
+            Err(e) => {
+                eprintln!("│ \x1b[31m❌ REQUEST FAILED\x1b[0m : {} (Groq Reasoning {}/{})", 
+                    model, index + 1, GROQ_REASONING_MODELS.len());
+                eprintln!("│    Error: {}", e);
+                continue;
+            }
+        };
+        
+        let status = response.status();
+        
+        if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
+            eprintln!("│ ⚠️  R-LIMIT  : {} (Groq Reasoning {}/{})", 
+                model, index + 1, GROQ_REASONING_MODELS.len());
+            if index < GROQ_REASONING_MODELS.len() - 1 {
+                continue;
+            } else {
+                return Err("All Groq reasoning models rate limited".to_string());
+            }
+        }
+        
+        if status.is_success() {
+            println!("│ \x1b[32m✅ SUCCESS\x1b[0m  : {} (Groq Reasoning {}/{})", 
+                model, index + 1, GROQ_REASONING_MODELS.len());
+            
+            let json: serde_json::Value = response.json().await
+                .map_err(|e| format!("Failed to deserialize: {}", e))?;
+            
+            let ai_text = json["choices"][0]["message"]["content"]
+                .as_str()
+                .ok_or("Failed to extract text from Groq response")?;
+            
+            return parse_ai_response(ai_text, current_deadline);
+        }
+        
+        let error_text = response.text().await
+            .unwrap_or_else(|_| "Unknown error".to_string());
+        eprintln!("│ ❌ ERROR    : {} (Groq Reasoning {}/{}) - {}", 
+            model, index + 1, GROQ_REASONING_MODELS.len(), status);
+        eprintln!("│    {}", truncate_for_log(&error_text));
+        
+        if index < GROQ_REASONING_MODELS.len() - 1 {
+            continue;
+        }
+    }
+    
+    Err("All Groq reasoning models failed".to_string())
+}
+
+// ===== GROQ STANDARD CLARIFICATION =====
+
+async fn try_groq_standard_clarification(
+    prompt: &str,
+    current_deadline: Option<NaiveDateTime>,
+) -> Result<HashMap<String, String>, String> {
+    let api_key = std::env::var("GROQ_API_KEY")
+        .map_err(|_| "GROQ_API_KEY not set".to_string())?;
+    
+    for (index, model) in GROQ_TEXT_MODELS.iter().enumerate() {
+        let url = "https://api.groq.com/openai/v1/chat/completions";
+        
+        let request_body = json!({
+            "model": model,
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.1,
+            "top_p": 0.95,
+            "max_tokens": 2048,
+            "response_format": { "type": "json_object" }
+        });
+        
+        let client = reqwest::Client::new();
+        let response = match client.post(url)
+            .header("Authorization", format!("Bearer {}", api_key))
+            .header("Content-Type", "application/json")
+            .json(&request_body)
+            .send()
+            .await
+        {
+            Ok(r) => r,
+            Err(e) => {
+                eprintln!("│ \x1b[31m❌ REQUEST FAILED\x1b[0m : {} (Groq Standard {}/{})", 
+                    model, index + 1, GROQ_TEXT_MODELS.len());
+                eprintln!("│    Error: {}", e);
+                continue;
+            }
+        };
+        
+        let status = response.status();
+        
+        if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
+            eprintln!("│ ⚠️  R-LIMIT  : {} (Groq Standard {}/{})", 
+                model, index + 1, GROQ_TEXT_MODELS.len());
+            if index < GROQ_TEXT_MODELS.len() - 1 {
+                continue;
+            } else {
+                return Err("All Groq standard models rate limited".to_string());
+            }
+        }
+        
+        if status.is_success() {
+            println!("│ \x1b[33m⚠️  STANDARD\x1b[0m : {} (Groq Standard {}/{})", 
+                model, index + 1, GROQ_TEXT_MODELS.len());
+            
+            let json: serde_json::Value = response.json().await
+                .map_err(|e| format!("Failed to deserialize: {}", e))?;
+            
+            let ai_text = json["choices"][0]["message"]["content"]
+                .as_str()
+                .ok_or("Failed to extract text from Groq response")?;
+            
+            return parse_ai_response(ai_text, current_deadline);
+        }
+        
+        let error_text = response.text().await
+            .unwrap_or_else(|_| "Unknown error".to_string());
+        eprintln!("│ ❌ ERROR    : {} (Groq Standard {}/{}) - {}", 
+            model, index + 1, GROQ_TEXT_MODELS.len(), status);
+        eprintln!("│    {}", truncate_for_log(&error_text));
+        
+        if index < GROQ_TEXT_MODELS.len() - 1 {
+            continue;
+        }
+    }
+    
+    Err("All Groq standard models failed".to_string())
+}
+
+// ===== HELPER FUNCTIONS =====
+
+fn truncate_for_log(text: &str) -> String {
+    if text.len() > 60 {
+        format!("{}...", &text[..60])
+    } else {
+        text.to_string()
+    }
 }
 
 fn is_cancellation(text: &str) -> bool {
@@ -264,7 +534,6 @@ fn build_clarification_prompt(
         "No existing deadline yet".to_string()
     };
     
-    // Add schedule hint to prompt
     let schedule_info = if let Some(sched) = schedule_hint {
         format!("NEXT CLASS MEETING: {} (Use this if user says 'pertemuan berikutnya', 'sesuai jadwal', 'pas kelas', 'during class')", 
             sched.format("%Y-%m-%d %H:%M"))
@@ -317,57 +586,6 @@ Respond with ONLY the JSON."#,
     )
 }
 
-async fn call_gemini_for_clarification(prompt: &str) -> Result<String, String> {
-    let api_key = std::env::var("GEMINI_API_KEY")
-        .map_err(|_| "GEMINI_API_KEY not set".to_string())?;
-
-    let models = [
-        "gemini-2.0-flash-exp",
-        "gemini-2.0-flash",
-        "gemini-1.5-flash",
-    ];
-
-    let client = reqwest::Client::new();
-
-    for model in &models {
-        let url = format!(
-            "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent",
-            model
-        );
-
-        let request_body = serde_json::json!({
-            "contents": [{
-                "parts": [{ "text": prompt }]
-            }],
-            "generationConfig": {
-                "temperature": 0.1,
-                "maxOutputTokens": 1024,
-            }
-        });
-
-        match client
-            .post(&url)
-            .header("X-Goog-Api-Key", &api_key)
-            .json(&request_body)
-            .send()
-            .await
-        {
-            Ok(response) => {
-                if response.status().is_success() {
-                    if let Ok(json) = response.json::<serde_json::Value>().await {
-                        if let Some(text) = json["candidates"][0]["content"]["parts"][0]["text"].as_str() {
-                            return Ok(text.to_string());
-                        }
-                    }
-                }
-            }
-            Err(_) => continue,
-        }
-    }
-
-    Err("All Gemini models failed".to_string())
-}
-
 fn parse_ai_response(
     ai_response: &str,
     current_deadline: Option<NaiveDateTime>,
@@ -388,7 +606,6 @@ fn parse_ai_response(
 
     let mut updates = HashMap::new();
 
-    // Handle deadline
     if let Some(date_str) = &parsed.deadline {
         if !date_str.is_empty() {
             let time_str = parsed.deadline_time.as_deref().unwrap_or("23:59");
@@ -429,12 +646,12 @@ fn parse_ai_response(
     Ok(updates)
 }
 
-// FALLBACK REGEX PARSER (MISAL AI GAGAL CUIHHH)
+// ===== FALLBACK REGEX PARSER (keep your existing implementation) =====
 
 pub fn parse_natural_language_fallback(
     text: &str,
     current_deadline: Option<NaiveDateTime>,
-    schedule_hint: Option<NaiveDateTime>, // NEW
+    schedule_hint: Option<NaiveDateTime>,
 ) -> Result<HashMap<String, String>, String> {
     let text_lower = text.trim().to_lowercase();
     
@@ -447,14 +664,12 @@ pub fn parse_natural_language_fallback(
     
     let mut updates = HashMap::new();
 
-    // 1. Check for schedule keywords "pertemuan berikutnya", etc.
     if let Some(sched) = schedule_hint {
         if check_schedule_keywords(&text_lower) {
             updates.insert("deadline".to_string(), sched.format("%Y-%m-%d %H:%M").to_string());
         }
     }
 
-    // 2. Try regex date (if not already found via schedule)
     if !updates.contains_key("deadline") {
         let parsed_date = parse_relative_date(&text_lower, today);
         let parsed_time = parse_natural_time(&text_lower);
@@ -471,14 +686,12 @@ pub fn parse_natural_language_fallback(
         }
     }
 
-    // 3. Try description
     if let Some(desc) = extract_description_part(&text_lower) {
         if !desc.is_empty() {
             updates.insert("description".to_string(), desc);
         }
     }
 
-    // 4. Try parallel codes
     let parallel_codes = detect_parallel_codes(&text_lower);
     if !parallel_codes.is_empty() {
         updates.insert("parallel_codes".to_string(), parallel_codes.join(","));
@@ -549,7 +762,11 @@ fn parse_day_name(text: &str) -> Option<Weekday> {
 fn next_weekday(from: NaiveDate, target: Weekday, force_next_week: bool) -> NaiveDate {
     let current_num = from.weekday().num_days_from_monday();
     let target_num = target.num_days_from_monday();
-    let mut days_ahead = if target_num > current_num { target_num - current_num } else { 7 - current_num + target_num };
+    let mut days_ahead = if target_num > current_num { 
+        target_num - current_num 
+    } else { 
+        7 - current_num + target_num 
+    };
     
     if days_ahead == 0 { days_ahead = 7; }
     if days_ahead < 7 && force_next_week { days_ahead += 7; }
@@ -558,7 +775,6 @@ fn next_weekday(from: NaiveDate, target: Weekday, force_next_week: bool) -> Naiv
 }
 
 fn parse_natural_time(text: &str) -> Option<NaiveTime> {
-    // 1. Keywords
     let keywords = [
         ("tengah malam", 23, 59), ("pagi", 8, 0), ("siang", 12, 0), 
         ("sore", 15, 0), ("malam", 20, 0), ("subuh", 5, 0)
@@ -567,7 +783,6 @@ fn parse_natural_time(text: &str) -> Option<NaiveTime> {
         if text.contains(k) { return NaiveTime::from_hms_opt(h, m, 0); }
     }
 
-    // 2. Format "Jam X" or "X:XX"
     static RE_TIME: Lazy<Regex> = Lazy::new(|| Regex::new(r"(?:jam\s*)?(\d{1,2})[:.](\d{2})").unwrap());
     if let Some(caps) = RE_TIME.captures(text) {
         if let (Ok(h), Ok(m)) = (caps[1].parse::<u32>(), caps[2].parse::<u32>()) {
@@ -575,7 +790,6 @@ fn parse_natural_time(text: &str) -> Option<NaiveTime> {
         }
     }
     
-    // 3. Format "Jam X" (only hour)
     static RE_HOUR: Lazy<Regex> = Lazy::new(|| Regex::new(r"jam\s*(\d{1,2})").unwrap());
     if let Some(caps) = RE_HOUR.captures(text) {
         if let Ok(h) = caps[1].parse::<u32>() {
