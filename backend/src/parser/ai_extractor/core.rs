@@ -2,7 +2,7 @@ use crate::models::{AIClassification, Assignment};
 use uuid::Uuid;
 use serde_json::json;
 use std::collections::HashMap;
-use std::io::{Write, stdout};
+use std::io::{Write, stdout, stderr};
 use sqlx::PgPool;
 
 use super::schedule_oracle::ScheduleOracle;
@@ -13,8 +13,11 @@ use super::parsing::*;
 use super::{GROQ_REASONING_MODELS, GROQ_VISION_MODELS, GROQ_TEXT_MODELS, GEMINI_MODELS};
 use super::context_builder::build_context;
 
-use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
-use std::time::Duration;
+use tokio::sync::Mutex as TokioMutex;
+
+// A small global lock to serialize overwrite-style prints so concurrent println! calls
+// from other tasks don't stomp the countdown/TRYING line.
+static PRINT_LOCK: Lazy<TokioMutex<()>> = Lazy::new(|| TokioMutex::new(()));
 
 pub static SCHEDULE_ORACLE: Lazy<ScheduleOracle> = Lazy::new(|| {
     ScheduleOracle::load_from_file("schedule.json")
@@ -278,44 +281,36 @@ pub async fn extract_with_ai(
 async fn retry_with_countdown(attempt: u32) {
     let delay = RETRY_DELAY_SECS * attempt as u64;
 
-    // Print a blank separator line so the countdown occupies its own line area.
+    // Keep spacing consistent with other logs
     println!("│");
 
-    // Shared flag used to stop the display task early if needed.
-    let stop = Arc::new(AtomicBool::new(false));
-    let stop_for_task = stop.clone();
+    // Acquire & release a small lock around each print so other concurrent prints
+    // don't interleave while we're trying to overwrite the same line.
+    for remaining in (1..=delay).rev() {
+        // Lock to serialize the clear+print sequence.
+        let _guard = PRINT_LOCK.lock().await;
 
-    // Spawn a tokio task that will render the countdown each second.
-    // Using a tokio task ensures it gets scheduled immediately in async contexts.
-    let handle = tokio::spawn(async move {
-        for remaining in (1..=delay).rev() {
-            if stop_for_task.load(Ordering::Relaxed) {
-                break;
-            }
+        // Clear the current line and print the retry message in-place to stderr.
+        // Using stderr avoids stdout buffering/logger interference in many setups.
+        let msg = format!("\r\x1b[2K│ {}⏳ RETRY #{}{} - Waiting {} seconds...", YELLOW, attempt, RESET, remaining);
+        let _ = stderr().write_all(msg.as_bytes());
+        let _ = stderr().flush();
 
-            // Print the retry line and flush immediately. Use carriage return + clear to replace the line.
-            print!("\r\x1b[2K│ {}⏳ RETRY #{}{} - Waiting {} seconds...", YELLOW, attempt, RESET, remaining);
-            stdout().flush().ok();
+        // Drop guard so other prints can run between ticks (keeps countdown responsive)
+        drop(_guard);
 
-            // Sleep with tokio so the runtime schedules other tasks.
-            tokio::time::sleep(Duration::from_secs(1)).await;
-        }
+        // Sleep with tokio so runtime schedules other async work.
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+    }
 
-        // Clear the countdown line on exit so subsequent logs are clean.
-        print!("\r\x1b[2K");
-        stdout().flush().ok();
-    });
+    // Clear the countdown line on exit so subsequent logs are clean.
+    {
+        let _guard = PRINT_LOCK.lock().await;
+        let _ = stderr().write_all(b"\r\x1b[2K");
+        let _ = stderr().flush();
+    }
 
-    // Meanwhile, asynchronously wait the same duration in this function.
-    tokio::time::sleep(Duration::from_secs(delay)).await;
-
-    // Signal the display task to stop and await its finish.
-    stop.store(true, Ordering::Relaxed);
-
-    // Await the tokio task so we join cleanly.
-    let _ = handle.await;
-
-    // Print a trailing separator line afterwards to match previous layout.
+    // Print a separator line afterwards to match previous layout.
     println!("│");
 }
 
