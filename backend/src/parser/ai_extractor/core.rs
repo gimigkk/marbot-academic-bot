@@ -275,23 +275,19 @@ pub async fn extract_with_ai(
 async fn retry_with_countdown(attempt: u32) {
     let delay = RETRY_DELAY_SECS * attempt as u64;
     
+    // Keep spacing consistent with other logs
     println!("│");
-    // Header for the countdown. We'll update the seconds on the same line every second.
-    println!("│ {}⏳ RETRY #{}{} - Waiting {} seconds...", YELLOW, attempt, RESET, delay);
-    // Start the animated second countdown on the following line to preserve the header.
-    print!("│ ");
-    stdout().flush().ok();
-    
+    // Update the same RETRY line in-place every second.
+    // Each iteration clears the line first, then prints the updated retry message.
     for remaining in (1..=delay).rev() {
-        // Move cursor to start of this line and clear it, then print updated seconds.
-        // \x1b[2K clears the entire line; \r moves cursor to start; we keep the prefix "│ "
-        print!("\r\x1b[2K│ {}⏱  {}s{}", CYAN, remaining, RESET);
+        // \r moves to start of line, \x1b[2K clears entire line
+        print!("\r\x1b[2K│ {}⏳ RETRY #{}{} - Waiting {} seconds...{}", YELLOW, attempt, RESET, remaining, "");
         stdout().flush().ok();
         tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
     }
-    
-    // Finish the countdown line and add an empty line for separation
-    println!();
+    // Clear the final retry line so subsequent logs appear cleanly, then add a separator line.
+    print!("\r\x1b[2K");
+    stdout().flush().ok();
     println!("│");
 }
 
