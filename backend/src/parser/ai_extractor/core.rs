@@ -286,21 +286,20 @@ async fn retry_with_countdown(attempt: u32) {
     for remaining in (1..=delay).rev() {
         let _guard = PRINT_LOCK.lock().unwrap();
         
-        // Print the countdown, then \r to return cursor to start of line
-        print!("\r│ {}⏳ RETRY #{}{} - Waiting {} seconds...   ", 
-               YELLOW, attempt, RESET, remaining);
-        stdout().flush().ok();
+        let msg = format!("\r│ {}⏳ RETRY #{}{} - Waiting {} seconds...   ", 
+                         YELLOW, attempt, RESET, remaining);
+        let _ = stderr().write_all(msg.as_bytes());
+        let _ = stderr().flush();
         
         drop(_guard);
         
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
     }
 
-    // Clear the countdown line completely
     {
         let _guard = PRINT_LOCK.lock().unwrap();
-        print!("\r\x1b[2K");  // Clear entire line
-        stdout().flush().ok();
+        let _ = stderr().write_all(b"\r\x1b[2K");
+        let _ = stderr().flush();
     }
 
     println!("│");
