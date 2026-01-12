@@ -281,35 +281,28 @@ pub async fn extract_with_ai(
 async fn retry_with_countdown(attempt: u32) {
     let delay = RETRY_DELAY_SECS * attempt as u64;
 
-    // Keep spacing consistent with other logs
     println!("│");
 
-    // Countdown loop: print BEFORE sleeping so tick appears immediately.
     for remaining in (1..=delay).rev() {
-        // Lock to serialize the clear+print sequence.
         let _guard = PRINT_LOCK.lock().unwrap();
-
-        // Clear the current line and print the retry message in-place to stderr.
-        // Using stderr avoids stdout buffering/logger interference in many setups.
-        let msg = format!("\r\x1b[2K│ {}⏳ RETRY #{}{} - Waiting {} seconds...", YELLOW, attempt, RESET, remaining);
-        let _ = stderr().write_all(msg.as_bytes());
-        let _ = stderr().flush();
-
-        // Drop guard so other prints can run between ticks (keeps countdown responsive)
+        
+        // Print the countdown, then \r to return cursor to start of line
+        print!("\r│ {}⏳ RETRY #{}{} - Waiting {} seconds...   ", 
+               YELLOW, attempt, RESET, remaining);
+        stdout().flush().ok();
+        
         drop(_guard);
-
-        // Sleep with tokio so runtime schedules other async work.
+        
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
     }
 
-    // Clear the countdown line on exit so subsequent logs are clean.
+    // Clear the countdown line completely
     {
         let _guard = PRINT_LOCK.lock().unwrap();
-        let _ = stderr().write_all(b"\r\x1b[2K");
-        let _ = stderr().flush();
+        print!("\r\x1b[2K");  // Clear entire line
+        stdout().flush().ok();
     }
 
-    // Print a separator line afterwards to match previous layout.
     println!("│");
 }
 
