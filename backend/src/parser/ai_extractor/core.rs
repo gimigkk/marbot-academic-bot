@@ -2,7 +2,7 @@ use crate::models::{AIClassification, Assignment};
 use uuid::Uuid;
 use serde_json::json;
 use std::collections::HashMap;
-use std::io::{Write, stdout, stderr};
+use std::io::{Write, stdout};
 use sqlx::PgPool;
 
 use super::schedule_oracle::ScheduleOracle;
@@ -36,7 +36,6 @@ const BLUE: &str = "\x1b[34m";
 
 // ===== RETRY CONFIGURATION =====
 const MAX_RETRIES: u32 = 4;
-const RETRY_DELAY_SECS: u64 = 20;
 
 // ===== MAIN AI EXTRACTION FUNCTION =====
 
@@ -266,7 +265,8 @@ pub async fn extract_with_ai(
             Err(_) => {
                 // All models failed this attempt
                 if attempt < MAX_RETRIES - 1 {
-                    println!("│ {}⚠️  All models failed{} - will retry", YELLOW, RESET);
+                    println!("│ {}⚠️ All models failed{} - will retry ({}/{})", 
+                             YELLOW, RESET, attempt + 1, MAX_RETRIES - 1);
                 }
             }
         }
@@ -279,7 +279,7 @@ pub async fn extract_with_ai(
 // ===== RETRY HELPERS =====
 
 async fn retry_with_countdown(attempt: u32) {
-    let delay = RETRY_DELAY_SECS * attempt as u64;
+    let delay = 10 * attempt as u64;
 
     // Print initial separator
     println!("│");
@@ -288,7 +288,7 @@ async fn retry_with_countdown(attempt: u32) {
     println!("│ {}⏳ RETRY #{}{} - Waiting {} seconds...", YELLOW, attempt, RESET, delay);
 
     // Countdown loop
-    for remaining in (1..=delay).rev().skip(1) {  // skip(1) since we already printed `delay`
+    for remaining in (1..=delay).rev().skip(1) {
         // Small sleep first
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
         
@@ -314,12 +314,7 @@ async fn retry_with_countdown(attempt: u32) {
     println!("│");
 }
 
-// ===== small helpers for controlled logging/overwrite =====
-
-/// Print a normal prefixed line (keeps previous lines intact)
-fn log_line(msg: &str) {
-    println!("│ {}", msg);
-}
+// ===== CONTROLLED LOGGING =====
 
 /// Maintain a TRYING-line overwriteable display within a loop.
 /// - If `last_trying` is true we will move the cursor up, clear that line, and print the new TRYING.
@@ -365,8 +360,8 @@ async fn try_gemini_models(prompt: &str) -> Result<AIClassification, String> {
     let api_key = std::env::var("GEMINI_API_KEY")
         .map_err(|_| "GEMINI_API_KEY not set in .env".to_string())?;
     
-    let mut rate_limited_count = 0usize;
     let mut last_trying = false;
+    let mut all_rate_limited = true;
     
     for (idx, model) in GEMINI_MODELS.iter().enumerate() {
         let index = idx + 1;
@@ -396,7 +391,7 @@ async fn try_gemini_models(prompt: &str) -> Result<AIClassification, String> {
         {
             Ok(r) => r,
             Err(e) => {
-                // network error: remove TRYING line and either continue or fail if last model
+                all_rate_limited = false;
                 clear_previous_trying(&mut last_trying);
                 println!("│ {}❌ FAILED{} : {} - Network error", RED, RESET, model);
                 if index < GEMINI_MODELS.len() {
@@ -410,21 +405,16 @@ async fn try_gemini_models(prompt: &str) -> Result<AIClassification, String> {
         let status = response.status();
         
         if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
-            // Instead of printing a rate-limit line per model, we clear the TRYING line
-            // and simply count it; if all models are rate-limited we'll display a single line.
             clear_previous_trying(&mut last_trying);
-            rate_limited_count += 1;
             if index < GEMINI_MODELS.len() {
-                // immediately continue to show the next TRYING line (it will be printed next loop iter)
                 continue;
             } else {
-                // last model was rate-limited; we will fall through after loop to summary
                 continue;
             }
         }
         
         if status.is_success() {
-            // success - clear TRYING (we will print SUCCESS as a fresh line)
+            //all_rate_limited = false;
             clear_previous_trying(&mut last_trying);
             println!("│ {}✅ SUCCESS{} : {} (Gemini {}/{})", GREEN, RESET, model, index, GEMINI_MODELS.len());
             
@@ -437,7 +427,7 @@ async fn try_gemini_models(prompt: &str) -> Result<AIClassification, String> {
             return Ok(classification);
         }
         
-        // non-rate-limit HTTP error
+        all_rate_limited = false;
         clear_previous_trying(&mut last_trying);
         println!("│ {}❌ FAILED{} : {} - HTTP {}", RED, RESET, model, status);
         if index < GEMINI_MODELS.len() {
@@ -445,9 +435,8 @@ async fn try_gemini_models(prompt: &str) -> Result<AIClassification, String> {
         }
     }
     
-    // after loop, if all gemini models were rate-limited print single consolidated R-LIMIT line
-    if rate_limited_count == GEMINI_MODELS.len() {
-        println!("│ {}⚠️  R-LIMIT{} : on all gemini models {}/{}", YELLOW, RESET, rate_limited_count, GEMINI_MODELS.len());
+    if all_rate_limited {
+        println!("│ {}⚠️ R-LIMIT{} : on all gemini models", YELLOW, RESET);
         return Err("rate limit".to_string());
     }
     
@@ -460,8 +449,8 @@ async fn try_groq_reasoning(prompt: &str) -> Result<AIClassification, String> {
     let api_key = std::env::var("GROQ_API_KEY")
         .map_err(|_| "GROQ_API_KEY not set in .env".to_string())?;
     
-    let mut rate_limited_count = 0usize;
     let mut last_trying = false;
+    let mut all_rate_limited = true;
     
     for (idx, model) in GROQ_REASONING_MODELS.iter().enumerate() {
         let index = idx + 1;
@@ -490,6 +479,7 @@ async fn try_groq_reasoning(prompt: &str) -> Result<AIClassification, String> {
         {
             Ok(r) => r,
             Err(_) => {
+                all_rate_limited = false;
                 clear_previous_trying(&mut last_trying);
                 println!("│ {}❌ FAILED{} : {} - Network error", RED, RESET, model);
                 if index < GROQ_REASONING_MODELS.len() {
@@ -506,16 +496,15 @@ async fn try_groq_reasoning(prompt: &str) -> Result<AIClassification, String> {
         
         if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
             clear_previous_trying(&mut last_trying);
-            rate_limited_count += 1;
             if index < GROQ_REASONING_MODELS.len() {
                 continue;
             } else {
-                // fallthrough to check rate-limit summary after loop
                 continue;
             }
         }
         
         if status.is_success() {
+            all_rate_limited = false;
             clear_previous_trying(&mut last_trying);
             println!("│ {}✅ SUCCESS{} : {} (Groq Reasoning {}/{})", GREEN, RESET, model, index, GROQ_REASONING_MODELS.len());
             
@@ -534,6 +523,7 @@ async fn try_groq_reasoning(prompt: &str) -> Result<AIClassification, String> {
             return Ok(classification);
         }
         
+        all_rate_limited = false;
         clear_previous_trying(&mut last_trying);
         println!("│ {}❌ FAILED{} : {} - HTTP {}", RED, RESET, model, status);
         if index < GROQ_REASONING_MODELS.len() {
@@ -541,9 +531,8 @@ async fn try_groq_reasoning(prompt: &str) -> Result<AIClassification, String> {
         }
     }
     
-    // consolidate rate-limit message for reasoning models
-    if rate_limited_count == GROQ_REASONING_MODELS.len() {
-        println!("│ {}⚠️  R-LIMIT{} : on all Groq reasoning models {}/{}", YELLOW, RESET, rate_limited_count, GROQ_REASONING_MODELS.len());
+    if all_rate_limited {
+        println!("│ {}⚠️ R-LIMIT{} : on all Groq reasoning models", YELLOW, RESET);
         println!("│ {}🔄 Falling back{} to standard models...", YELLOW, RESET);
         println!("│");
         return try_groq_standard_text(prompt).await;
@@ -560,7 +549,6 @@ async fn try_groq_standard_text(prompt: &str) -> Result<AIClassification, String
     let api_key = std::env::var("GROQ_API_KEY")
         .map_err(|_| "GROQ_API_KEY not set in .env".to_string())?;
     
-    let mut rate_limited_count = 0usize;
     let mut last_trying = false;
     
     for (idx, model) in GROQ_TEXT_MODELS.iter().enumerate() {
@@ -605,7 +593,6 @@ async fn try_groq_standard_text(prompt: &str) -> Result<AIClassification, String
         
         if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
             clear_previous_trying(&mut last_trying);
-            rate_limited_count += 1;
             if index < GROQ_TEXT_MODELS.len() {
                 continue;
             } else {
@@ -648,7 +635,6 @@ async fn try_groq_vision(prompt: &str, image_base64: &str) -> Result<AIClassific
     let api_key = std::env::var("GROQ_API_KEY")
         .map_err(|_| "GROQ_API_KEY not set in .env".to_string())?;
     
-    let mut rate_limited_count = 0usize;
     let mut last_trying = false;
     
     for (idx, model) in GROQ_VISION_MODELS.iter().enumerate() {
@@ -704,7 +690,6 @@ async fn try_groq_vision(prompt: &str, image_base64: &str) -> Result<AIClassific
         
         if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
             clear_previous_trying(&mut last_trying);
-            rate_limited_count += 1;
             if index < GROQ_VISION_MODELS.len() {
                 continue;
             } else {
@@ -816,8 +801,8 @@ async fn try_gemini_duplicate_check(prompt: &str) -> Result<Option<Uuid>, String
     let api_key = std::env::var("GEMINI_API_KEY")
         .map_err(|_| "GEMINI_API_KEY not set".to_string())?;
     
-    let mut rate_limited_count = 0usize;
     let mut last_trying = false;
+    let mut all_rate_limited = true;
     
     for (idx, model) in GEMINI_MODELS.iter().enumerate() {
         let index = idx + 1;
@@ -848,6 +833,7 @@ async fn try_gemini_duplicate_check(prompt: &str) -> Result<Option<Uuid>, String
         {
             Ok(r) => r,
             Err(_) => {
+                all_rate_limited = false;
                 clear_previous_trying(&mut last_trying);
                 println!("│ {}❌ FAILED{} : {} - Network error", RED, RESET, model);
                 continue;
@@ -858,7 +844,6 @@ async fn try_gemini_duplicate_check(prompt: &str) -> Result<Option<Uuid>, String
         
         if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
             clear_previous_trying(&mut last_trying);
-            rate_limited_count += 1;
             if index < GEMINI_MODELS.len() {
                 continue;
             } else {
@@ -867,6 +852,7 @@ async fn try_gemini_duplicate_check(prompt: &str) -> Result<Option<Uuid>, String
         }
         
         if status.is_success() {
+            //all_rate_limited = false;
             clear_previous_trying(&mut last_trying);
             println!("│ {}✅ SUCCESS{} : {} (Gemini {}/{})", GREEN, RESET, model, index, GEMINI_MODELS.len());
             
@@ -890,6 +876,7 @@ async fn try_gemini_duplicate_check(prompt: &str) -> Result<Option<Uuid>, String
             return Ok(None);
         }
         
+        all_rate_limited = false;
         clear_previous_trying(&mut last_trying);
         println!("│ {}❌ FAILED{} : {} - HTTP {}", RED, RESET, model, status);
         if index < GEMINI_MODELS.len() {
@@ -897,8 +884,8 @@ async fn try_gemini_duplicate_check(prompt: &str) -> Result<Option<Uuid>, String
         }
     }
     
-    if rate_limited_count == GEMINI_MODELS.len() {
-        println!("│ {}⚠️  R-LIMIT{} : on all gemini models {}/{}", YELLOW, RESET, rate_limited_count, GEMINI_MODELS.len());
+    if all_rate_limited {
+        println!("│ {}⚠️ R-LIMIT{} : on all gemini models", YELLOW, RESET);
         return Err("rate limit".to_string());
     }
     
@@ -934,8 +921,8 @@ async fn try_gemini_matching(prompt: &str) -> Result<Option<Uuid>, String> {
     let api_key = std::env::var("GEMINI_API_KEY")
         .map_err(|_| "GEMINI_API_KEY not set in .env".to_string())?;
     
-    let mut rate_limited_count = 0usize;
     let mut last_trying = false;
+    let mut all_rate_limited = true;
     
     for (idx, model) in GEMINI_MODELS.iter().enumerate() {
         let index = idx + 1;
@@ -965,6 +952,7 @@ async fn try_gemini_matching(prompt: &str) -> Result<Option<Uuid>, String> {
         {
             Ok(r) => r,
             Err(_) => {
+                all_rate_limited = false;
                 clear_previous_trying(&mut last_trying);
                 println!("│ {}❌ FAILED{} : {} - Network error", RED, RESET, model);
                 if index < GEMINI_MODELS.len() {
@@ -979,7 +967,6 @@ async fn try_gemini_matching(prompt: &str) -> Result<Option<Uuid>, String> {
         
         if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
             clear_previous_trying(&mut last_trying);
-            rate_limited_count += 1;
             if index < GEMINI_MODELS.len() {
                 continue;
             } else {
@@ -988,6 +975,7 @@ async fn try_gemini_matching(prompt: &str) -> Result<Option<Uuid>, String> {
         }
         
         if status.is_success() {
+            //all_rate_limited = false;
             clear_previous_trying(&mut last_trying);
             println!("│ {}✅ SUCCESS{} : {} (Gemini {}/{})", GREEN, RESET, model, index, GEMINI_MODELS.len());
             
@@ -1000,6 +988,7 @@ async fn try_gemini_matching(prompt: &str) -> Result<Option<Uuid>, String> {
             return Ok(result);
         }
         
+        all_rate_limited = false;
         clear_previous_trying(&mut last_trying);
         println!("│ {}❌ FAILED{} : {} - HTTP {}", RED, RESET, model, status);
         if index < GEMINI_MODELS.len() {
@@ -1007,8 +996,8 @@ async fn try_gemini_matching(prompt: &str) -> Result<Option<Uuid>, String> {
         }
     }
     
-    if rate_limited_count == GEMINI_MODELS.len() {
-        println!("│ {}⚠️  R-LIMIT{} : on all gemini models {}/{}", YELLOW, RESET, rate_limited_count, GEMINI_MODELS.len());
+    if all_rate_limited {
+        println!("│ {}⚠️ R-LIMIT{} : on all gemini models", YELLOW, RESET);
         return Err("rate limit".to_string());
     }
     
