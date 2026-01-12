@@ -344,6 +344,7 @@ fn print_header(title: &str) {
         CYAN, RESET);
 }
 
+#[allow(non_snake_case)]
 fn format_key_status(key: &Option<String>) -> String {
     match key {
         Some(k) => {
@@ -552,7 +553,6 @@ async fn save_classification_to_db(
     pool: &PgPool,
     classification: AIClassification,
     message_body: &str,
-    course_map: &HashMap<uuid::Uuid, String>,
 ) {
     use marbot::models::NewAssignment;
     
@@ -691,7 +691,7 @@ async fn run_single_test(pool: &PgPool, test_case: &TestCase) -> TestResult {
             
             // 🔥 CRITICAL FIX: Save to database after successful classification
             if actual_type != "unrecognized" {
-                save_classification_to_db(pool, classification.clone(), &test_case.message, &course_map).await;
+                save_classification_to_db(pool, classification.clone(), &test_case.message,).await;
             }
             
             TestResult {

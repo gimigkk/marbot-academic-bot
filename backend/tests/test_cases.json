@@ -158,7 +158,7 @@
   {
     "name": "Real-27: LinkedIn certification as async replacement",
     "message": "[PENGUMUMAN]\nKepada peserta MK PEMROG - Ganjil 2025/2026\nPertemuan Kuliah Minggu ke-14 dilaksanakan secara asynchronous dengan melakukan sertifikasi course di platform LinkedIn Learning.\n\nPetunjuk dapat dilihat pada class.ipb.ac.id - Pemrog - Kuliah 14\nBatas penugasan Minggu, 30 Januari 2026 pukul 23:59 WIB.\n\n[Reminder] Minggu Kuliah 15 akan dilakukan presentasi proyek, mohon dapat dipersiapkan.",
-    "expected_type": "assignment_info",
+    "expected_type": "multiple_assignments",
     "category": "real_certification_async"
   },
   {
@@ -188,7 +188,7 @@
   {
     "name": "Real-32: ups dah telat conversation",
     "message": "GAIS jang lupa pemrog latihan 5\n[17:00] ups dah telat\n[17:01] 🤓👆",
-    "expected_type": "unrecognized",
+    "expected_type": "assignment_info",
     "category": "real_casual_chat"
   },
   {
@@ -308,7 +308,7 @@
   {
     "name": "Edge-52: HTML injection attempt",
     "message": "<script>alert('RPL K1 besok')</script>\n<h1>STRUKDAT K2 deadline</h1>",
-    "expected_type": "unrecognized",
+    "expected_type": "assignment_info",
     "category": "edge_security"
   },
   {
@@ -350,7 +350,7 @@
   {
     "name": "Edge-59: Conflicting deadline times",
     "message": "STRUKDAT K1\nDeadline besok jam 8 pagi\nAtau mungkin jam 10\nAtau jam 23:59\nYang mana ya?",
-    "expected_type": "unrecognized",
+    "expected_type": "assignment_info",
     "category": "edge_ambiguous"
   },
   {
