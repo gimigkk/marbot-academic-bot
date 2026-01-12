@@ -9,22 +9,22 @@ mod context_builder;
 
 // Groq reasoning models (PRIORITY - best for complex logic)
 pub const GROQ_REASONING_MODELS: &[&str; 4] = &[
-    "openai/gpt-oss-120b",            // OpenAI's flagship 120B reasoning model (recommended replacement)
-    "deepseek-r1-distill-llama-70b",  // DeepSeek R1 distilled into Qwen 32B (available, fast)
-    "meta-llama/llama-4-maverick-17b-128e-instruct",
-    "openai/gpt-oss-20b",             // Lighter GPT-OSS variant
+    "openai/gpt-oss-120b",            // Rank 1: Flagship reasoning (Replace DeepSeek R1)
+    "llama-3.3-70b-versatile",        // Rank 2: The most reliable 70B (300k TPM limit)
+    "qwen/qwen3-32b",                 // Rank 3: Dense logic model, punches above weight
+    "openai/gpt-oss-20b",             // Rank 4: Efficient fallback
 ];
 
 // Groq vision models (multimodal - for image processing)
 pub const GROQ_VISION_MODELS: &[&str; 2] = &[
-    "meta-llama/llama-4-scout-17b-16e-instruct",      // 128K context, fast multimodal
-    "meta-llama/llama-4-maverick-17b-128e-instruct",  // 128K context, powerful
+    "meta-llama/llama-4-maverick-17b-128e-instruct",  // Rank 1: High fidelity (New architecture)
+    "meta-llama/llama-4-scout-17b-16e-instruct",      // Rank 2: High speed multimodal
 ];
 
 // Groq standard text models (fallback - non-reasoning)
 pub const GROQ_TEXT_MODELS: &[&str; 2] = &[
-    "llama-3.3-70b-versatile",  // 128K context (recommended by Groq as replacement)
-    "llama-3.1-8b-instant",     // Fast 8B model
+    "llama-3.3-70b-versatile",  // Primary text cruncher
+    "llama-3.1-8b-instant",     // Ultimate fallback (Fastest/Cheapest)
 ];
 
 // Gemini models (final fallback - reliable, 1M context window)
