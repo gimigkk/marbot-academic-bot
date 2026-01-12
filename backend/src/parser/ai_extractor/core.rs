@@ -18,15 +18,6 @@ pub static SCHEDULE_ORACLE: Lazy<ScheduleOracle> = Lazy::new(|| {
         .expect("Failed to load schedule.json")
 });
 
-pub static MODEL_DEBUG: Lazy<()> = Lazy::new(|| {
-    eprintln!("\n=== MODEL CONFIGURATION DEBUG ===");
-    eprintln!("GROQ_REASONING_MODELS: {:?}", GROQ_REASONING_MODELS);
-    eprintln!("GROQ_TEXT_MODELS: {:?}", GROQ_TEXT_MODELS);
-    eprintln!("GROQ_VISION_MODELS: {:?}", GROQ_VISION_MODELS);
-    eprintln!("GEMINI_MODELS: {:?}", GEMINI_MODELS);
-    eprintln!("=================================\n");
-});
-
 
 // ===== MAIN AI EXTRACTION FUNCTION =====
 
@@ -41,7 +32,6 @@ pub async fn extract_with_ai(
     quoted_message: Option<&str>,  
     quoted_message_id: Option<&str>,
 ) -> Result<AIClassification, String> {
-    let _ = &*MODEL_DEBUG;
     let current_datetime = get_current_datetime();
     let current_date = get_current_date();
     
@@ -347,13 +337,6 @@ async fn try_groq_reasoning(prompt: &str) -> Result<AIClassification, String> {
     let api_key = std::env::var("GROQ_API_KEY")
         .map_err(|_| "GROQ_API_KEY not set in .env".to_string())?;
     
-    // RATE LIMIT DEBUGGING
-    eprintln!("│");
-    eprintln!("│ 🔍 DEBUG: Entered try_groq_reasoning()");
-    eprintln!("│ 🔍 DEBUG: Will try {} models: {:?}", 
-        GROQ_REASONING_MODELS.len(), 
-        GROQ_REASONING_MODELS);
-    eprintln!("│");
 
     for (index, model) in GROQ_REASONING_MODELS.iter().enumerate() {
         let url = "https://api.groq.com/openai/v1/chat/completions";
@@ -390,38 +373,8 @@ async fn try_groq_reasoning(prompt: &str) -> Result<AIClassification, String> {
         };
         
         let status = response.status();
-        eprintln!("│ 🔍 DEBUG: {} returned HTTP {}", model, status);
 
-        // DEBUGGIN FOR RATE LIMITING AND NOT TYPO ON MODEL NAME
-        if status == reqwest::StatusCode::NOT_FOUND {
-            let error_text = response.text().await
-                .unwrap_or_else(|_| "Could not read body".to_string());
-            eprintln!("│ ❌ MODEL NOT FOUND: '{}' - Response: {}", model, error_text);
-            if index < GROQ_REASONING_MODELS.len() - 1 {
-                continue;
-            } else {
-                eprintln!("│ 🔄 Reasoning models exhausted, trying standard models...");
-                return try_groq_standard_text(prompt).await;
-            }
-        }
-        
-        if status == reqwest::StatusCode::BAD_REQUEST {
-            let error_text = response.text().await
-                .unwrap_or_else(|_| "Could not read body".to_string());
-            eprintln!("│ ❌ BAD REQUEST: '{}' - Response: {}", model, error_text);
-            if index < GROQ_REASONING_MODELS.len() - 1 {
-                continue;
-            } else {
-                eprintln!("│ 🔄 Reasoning models exhausted, trying standard models...");
-                return try_groq_standard_text(prompt).await;
-            }
-        }
-        
         if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
-            // DEBUGGIN FOR RATE LIMIT AGAIN
-            let error_text = response.text().await
-                .unwrap_or_else(|_| "Could not read body".to_string());
-            eprintln!("│ 🔍 DEBUG: 429 body: {}", error_text);
 
             eprintln!("│ ⚠️  R-LIMIT  : {} (Groq Reasoning {}/{})", model, index + 1, GROQ_REASONING_MODELS.len());
             if index < GROQ_REASONING_MODELS.len() - 1 {
