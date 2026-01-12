@@ -13,11 +13,11 @@ use super::parsing::*;
 use super::{GROQ_REASONING_MODELS, GROQ_VISION_MODELS, GROQ_TEXT_MODELS, GEMINI_MODELS};
 use super::context_builder::build_context;
 
-use tokio::sync::Mutex as TokioMutex;
+use std::sync::Mutex;
 
 // A small global lock to serialize overwrite-style prints so concurrent println! calls
 // from other tasks don't stomp the countdown/TRYING line.
-static PRINT_LOCK: Lazy<TokioMutex<()>> = Lazy::new(|| TokioMutex::new(()));
+static PRINT_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 
 pub static SCHEDULE_ORACLE: Lazy<ScheduleOracle> = Lazy::new(|| {
     ScheduleOracle::load_from_file("schedule.json")
@@ -284,11 +284,10 @@ async fn retry_with_countdown(attempt: u32) {
     // Keep spacing consistent with other logs
     println!("│");
 
-    // Acquire & release a small lock around each print so other concurrent prints
-    // don't interleave while we're trying to overwrite the same line.
+    // Countdown loop: print BEFORE sleeping so tick appears immediately.
     for remaining in (1..=delay).rev() {
         // Lock to serialize the clear+print sequence.
-        let _guard = PRINT_LOCK.lock().await;
+        let _guard = PRINT_LOCK.lock().unwrap();
 
         // Clear the current line and print the retry message in-place to stderr.
         // Using stderr avoids stdout buffering/logger interference in many setups.
@@ -305,7 +304,7 @@ async fn retry_with_countdown(attempt: u32) {
 
     // Clear the countdown line on exit so subsequent logs are clean.
     {
-        let _guard = PRINT_LOCK.lock().await;
+        let _guard = PRINT_LOCK.lock().unwrap();
         let _ = stderr().write_all(b"\r\x1b[2K");
         let _ = stderr().flush();
     }
@@ -326,6 +325,10 @@ fn log_line(msg: &str) {
 /// - Otherwise we just print the TRYING line normally and set last_trying to true.
 fn print_trying_line(model: &str, index: usize, total: usize, last_trying: &mut bool) {
     let formatted = format!("{}🔄 TRYING{} : {} ({} / {})", BLUE, RESET, model, index, total);
+
+    // Acquire lock so we don't stomp a countdown or be stomped while printing.
+    let _guard = PRINT_LOCK.lock().unwrap();
+
     if *last_trying {
         // Move up one line and clear it, then print the new trying line.
         // This preserves your visual "single-line TRYING" behaviour.
@@ -335,16 +338,23 @@ fn print_trying_line(model: &str, index: usize, total: usize, last_trying: &mut 
         *last_trying = true;
     }
     stdout().flush().ok();
+
+    // guard dropped at end of scope
 }
 
 /// Overwrite and remove the previous TRYING line (if any) without printing anything.
 /// Useful when you want to silently move to the next TRYING line.
 fn clear_previous_trying(last_trying: &mut bool) {
     if *last_trying {
+        // Acquire lock so we don't clear a countdown in the middle of its tick
+        let _guard = PRINT_LOCK.lock().unwrap();
+
         // Move up and clear the "│ ..." line
         print!("\x1b[1A\x1b[2K");
         stdout().flush().ok();
         *last_trying = false;
+
+        // guard dropped
     }
 }
 
