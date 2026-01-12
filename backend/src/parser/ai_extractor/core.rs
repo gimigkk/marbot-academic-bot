@@ -13,6 +13,10 @@ use super::parsing::*;
 use super::{GROQ_REASONING_MODELS, GROQ_VISION_MODELS, GROQ_TEXT_MODELS, GEMINI_MODELS};
 use super::context_builder::build_context;
 
+use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
+use std::thread;
+use std::time::Duration;
+
 pub static SCHEDULE_ORACLE: Lazy<ScheduleOracle> = Lazy::new(|| {
     ScheduleOracle::load_from_file("schedule.json")
         .expect("Failed to load schedule.json")
@@ -274,20 +278,48 @@ pub async fn extract_with_ai(
 
 async fn retry_with_countdown(attempt: u32) {
     let delay = RETRY_DELAY_SECS * attempt as u64;
-    
-    // Keep spacing consistent with other logs
+
+    // Print a blank separator line so the countdown occupies its own line area.
     println!("│");
-    // Update the same RETRY line in-place every second.
-    // Each iteration clears the line first, then prints the updated retry message.
-    for remaining in (1..=delay).rev() {
-        // \r moves to start of line, \x1b[2K clears entire line
-        print!("\r\x1b[2K│ {}⏳ RETRY #{}{} - Waiting {} seconds...{}", YELLOW, attempt, RESET, remaining, "");
+
+    // Shared flag used to stop the display thread early if needed.
+    let stop = Arc::new(AtomicBool::new(false));
+    let stop_thread = stop.clone();
+
+    // Spawn a dedicated thread that will render the countdown line each second,
+    // replacing itself (clears and writes the same line).
+    let handle = thread::spawn(move || {
+        for remaining in (1..=delay).rev() {
+            if stop_thread.load(Ordering::Relaxed) {
+                break;
+            }
+
+            // Clear the current line and print the retry message in-place.
+            // \r moves to start, \x1b[2K clears the entire line.
+            print!("\r\x1b[2K│ {}⏳ RETRY #{}{} - Waiting {} seconds...", YELLOW, attempt, RESET, remaining);
+            stdout().flush().ok();
+
+            thread::sleep(Duration::from_secs(1));
+        }
+
+        // Clear the countdown line on exit so subsequent logs are clean.
+        print!("\r\x1b[2K");
         stdout().flush().ok();
-        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-    }
-    // Clear the final retry line so subsequent logs appear cleanly, then add a separator line.
-    print!("\r\x1b[2K");
-    stdout().flush().ok();
+    });
+
+    // Meanwhile, asynchronously wait the same duration.
+    tokio::time::sleep(Duration::from_secs(delay)).await;
+
+    // Signal the display thread to stop (in case it's still running) and join it.
+    stop.store(true, Ordering::Relaxed);
+
+    // Join the thread without blocking the async runtime thread: use spawn_blocking.
+    let _ = tokio::task::spawn_blocking(move || {
+        let _ = handle.join();
+    })
+    .await;
+
+    // Print a separator line afterwards to match previous layout.
     println!("│");
 }
 
