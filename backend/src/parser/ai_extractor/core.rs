@@ -281,25 +281,34 @@ pub async fn extract_with_ai(
 async fn retry_with_countdown(attempt: u32) {
     let delay = RETRY_DELAY_SECS * attempt as u64;
 
+    // Print initial separator
     println!("│");
+    
+    // Print the first countdown line
+    println!("│ {}⏳ RETRY #{}{} - Waiting {} seconds...", YELLOW, attempt, RESET, delay);
 
-    for remaining in (1..=delay).rev() {
-        let _guard = PRINT_LOCK.lock().unwrap();
-        
-        let msg = format!("\r│ {}⏳ RETRY #{}{} - Waiting {} seconds...   ", 
-                         YELLOW, attempt, RESET, remaining);
-        let _ = stderr().write_all(msg.as_bytes());
-        let _ = stderr().flush();
-        
-        drop(_guard);
-        
+    // Countdown loop
+    for remaining in (1..=delay).rev().skip(1) {  // skip(1) since we already printed `delay`
+        // Small sleep first
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        
+        // Lock, move up, clear line, print new countdown
+        {
+            let _guard = PRINT_LOCK.lock().unwrap();
+            print!("\x1b[1A\x1b[2K│ {}⏳ RETRY #{}{} - Waiting {} seconds...\n", 
+                   YELLOW, attempt, RESET, remaining);
+            let _ = stdout().flush();
+        }
     }
 
+    // Wait final second
+    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+
+    // Clear the countdown line
     {
         let _guard = PRINT_LOCK.lock().unwrap();
-        let _ = stderr().write_all(b"\r\x1b[2K");
-        let _ = stderr().flush();
+        print!("\x1b[1A\x1b[2K");
+        let _ = stdout().flush();
     }
 
     println!("│");
