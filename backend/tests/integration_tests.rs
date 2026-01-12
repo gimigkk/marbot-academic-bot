@@ -547,6 +547,100 @@ fn print_summary(summary: &TestSummary) {
     println!();
 }
 
+// 🔥 NEW HELPER FUNCTION: Save classifications to database
+async fn save_classification_to_db(
+    pool: &PgPool,
+    classification: AIClassification,
+    message_body: &str,
+    course_map: &HashMap<uuid::Uuid, String>,
+) {
+    use marbot::models::NewAssignment;
+    
+    match classification {
+        AIClassification::AssignmentInfo { course_name, title, deadline, description, parallel_codes, .. } => {
+            if let Some(ref cname) = course_name {
+                if let Ok(Some(course)) = crud::get_course_by_name(pool, cname).await {
+                    let deadline_parsed = deadline.as_ref()
+                        .and_then(|d| crud::parse_deadline(d).ok());
+                    
+                    let new_assignment = NewAssignment {
+                        course_id: Some(course.id),
+                        title: title.clone(),
+                        description: description.unwrap_or_else(|| "Test assignment".to_string()),
+                        deadline: deadline_parsed,
+                        parallel_codes: parallel_codes.clone(),
+                        sender_id: Some("test_user_github_actions".to_string()),
+                        message_id: format!("test_msg_{}", uuid::Uuid::new_v4()),
+                        relating_messages: vec![message_body.to_string()],
+                    };
+                    
+                    let _ = crud::create_assignment(pool, new_assignment).await;
+                }
+            }
+        }
+        
+        AIClassification::MultipleAssignments { assignments, .. } => {
+            for assignment in assignments {
+                if let Ok(Some(course)) = crud::get_course_by_name(pool, &assignment.course_name).await {
+                    let deadline_parsed = assignment.deadline.as_ref()
+                        .and_then(|d| crud::parse_deadline(d).ok());
+                    
+                    let new_assignment = NewAssignment {
+                        course_id: Some(course.id),
+                        title: assignment.title.clone(),
+                        description: assignment.description.unwrap_or_else(|| "Test assignment".to_string()),
+                        deadline: deadline_parsed,
+                        parallel_codes: assignment.parallel_codes.clone(),
+                        sender_id: Some("test_user_github_actions".to_string()),
+                        message_id: format!("test_msg_{}", uuid::Uuid::new_v4()),
+                        relating_messages: vec![message_body.to_string()],
+                    };
+                    
+                    let _ = crud::create_assignment(pool, new_assignment).await;
+                }
+            }
+        }
+        
+        AIClassification::AssignmentUpdate { reference_keywords, new_deadline, new_title, new_description, parallel_codes, .. } => {
+            // For updates, try to find and update existing assignment
+            if let Some(course_name) = reference_keywords.first() {
+                if let Ok(Some(course)) = crud::get_course_by_name(pool, course_name).await {
+                    let active_assignments = crud::get_recent_assignments_for_update(pool).await.unwrap_or_default();
+                    
+                    // Find matching assignment
+                    let matching = active_assignments.iter()
+                        .find(|a| {
+                            a.course_id == Some(course.id) &&
+                            reference_keywords.iter().any(|kw| 
+                                a.title.to_lowercase().contains(&kw.to_lowercase())
+                            )
+                        });
+                    
+                    if let Some(assignment) = matching {
+                        let deadline_parsed = new_deadline.as_ref()
+                            .and_then(|d| crud::parse_deadline(d).ok());
+                        
+                        let _ = crud::update_assignment_fields(
+                            pool,
+                            assignment.id,
+                            deadline_parsed,
+                            new_title,
+                            new_description,
+                            if parallel_codes.is_empty() { None } else { Some(parallel_codes) },
+                            Some(format!("test_msg_{}", uuid::Uuid::new_v4())),
+                            Some(message_body.to_string()),
+                        ).await;
+                    }
+                }
+            }
+        }
+        
+        AIClassification::Unrecognized { .. } => {
+            // Don't save unrecognized messages
+        }
+    }
+}
+
 async fn run_single_test(pool: &PgPool, test_case: &TestCase) -> TestResult {
     let gemini_available = std::env::var("GEMINI_API_KEY").is_ok();
     let groq_available = std::env::var("GROQ_API_KEY").is_ok();
@@ -588,12 +682,17 @@ async fn run_single_test(pool: &PgPool, test_case: &TestCase) -> TestResult {
         None,
     ).await {
         Ok(classification) => {
-            let actual_type = match classification {
+            let actual_type = match &classification {
                 AIClassification::AssignmentInfo { .. } => "assignment_info",
                 AIClassification::AssignmentUpdate { .. } => "assignment_update",
                 AIClassification::MultipleAssignments { .. } => "multiple_assignments",
                 AIClassification::Unrecognized { .. } => "unrecognized",
             };
+            
+            // 🔥 CRITICAL FIX: Save to database after successful classification
+            if actual_type != "unrecognized" {
+                save_classification_to_db(pool, classification.clone(), &test_case.message, &course_map).await;
+            }
             
             TestResult {
                 name: test_case.name.clone(),
