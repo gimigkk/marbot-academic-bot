@@ -28,24 +28,6 @@ const GREEN: &str = "\x1b[32m";
 const RED: &str = "\x1b[31m";
 const BLUE: &str = "\x1b[34m";
 
-// ===== TERMINAL CONTROL =====
-fn clear_line() {
-    print!("\r\x1b[K");
-    stdout().flush().ok();
-}
-
-fn move_up(lines: usize) {
-    print!("\x1b[{}A", lines);
-    stdout().flush().ok();
-}
-
-fn clear_attempts(count: usize) {
-    for _ in 0..count {
-        move_up(1);
-        clear_line();
-    }
-}
-
 // ===== RETRY CONFIGURATION =====
 const MAX_RETRIES: u32 = 4;
 const RETRY_DELAY_SECS: u64 = 20;
@@ -195,87 +177,92 @@ pub async fn extract_with_ai(
     println!("│ {}📅 Time{} : {}", CYAN, RESET, current_datetime);
     println!("│");
     
-    // TIER 1: If image present, try Groq vision first
-    if let Some(img) = image_base64 {
-        match try_groq_vision_with_retry(&prompt, img).await {
-            Ok(classification) => {
-                match classification {
-                    AIClassification::Unrecognized {reason}=> {
-                        let reason_display = reason.as_deref().unwrap_or("No reason provided");
-                        println!("│ {}ℹ️  Vision Result{}: Unrecognized ({})", BLUE, RESET, reason_display);
-                        println!("│ {}🔄 Retrying{} with Gemini text-only...", YELLOW, RESET);
-                        println!("│");
-                        
-                        match try_gemini_models_with_retry(&prompt).await {
-                            Ok(text_result) => {
-                                match text_result {
-                                    AIClassification::Unrecognized {..} => {
-                                        println!("│ {}⚠️  Gemini{}: Still unrecognized", YELLOW, RESET);
-                                        println!("{}└──────────────────────────────────────────────{}", GRAY, RESET);
-                                        return Ok(AIClassification::Unrecognized{reason});
-                                    }
-                                    _ => {
-                                        log_classification_success(&text_result);
-                                        println!("{}└──────────────────────────────────────────────{}", GRAY, RESET);
-                                        return Ok(text_result);
+    // Try all models with retries
+    for attempt in 0..MAX_RETRIES {
+        if attempt > 0 {
+            retry_with_countdown(attempt).await;
+        }
+        
+        // TIER 1: If image present, try Groq vision first
+        if let Some(img) = image_base64 {
+            match try_groq_vision(&prompt, img).await {
+                Ok(classification) => {
+                    match classification {
+                        AIClassification::Unrecognized {reason}=> {
+                            let reason_display = reason.as_deref().unwrap_or("No reason provided");
+                            println!("│ {}ℹ️  Vision Result{}: Unrecognized ({})", BLUE, RESET, reason_display);
+                            println!("│ {}🔄 Retrying{} with Gemini text-only...", YELLOW, RESET);
+                            println!("│");
+                            
+                            match try_gemini_models(&prompt).await {
+                                Ok(text_result) => {
+                                    match text_result {
+                                        AIClassification::Unrecognized {..} => {
+                                            println!("│ {}⚠️  Gemini{}: Still unrecognized", YELLOW, RESET);
+                                            println!("{}└──────────────────────────────────────────────{}", GRAY, RESET);
+                                            return Ok(AIClassification::Unrecognized{reason});
+                                        }
+                                        _ => {
+                                            log_classification_success(&text_result);
+                                            println!("{}└──────────────────────────────────────────────{}", GRAY, RESET);
+                                            return Ok(text_result);
+                                        }
                                     }
                                 }
-                            }
-                            Err(e) => {
-                                eprintln!("│ {}⚠️  Gemini fallback failed{}: {}", YELLOW, RESET, e);
+                                Err(_) => {
+                                    // Continue to Groq fallback
+                                }
                             }
                         }
+                        _ => {
+                            log_classification_success(&classification);
+                            println!("{}└──────────────────────────────────────────────{}", GRAY, RESET);
+                            return Ok(classification);
+                        }
                     }
-                    _ => {
-                        log_classification_success(&classification);
-                        println!("{}└──────────────────────────────────────────────{}", GRAY, RESET);
-                        return Ok(classification);
+                }
+                Err(_) => {
+                    // Try Gemini text-only
+                    match try_gemini_models(&prompt).await {
+                        Ok(classification) => {
+                            log_classification_success(&classification);
+                            println!("{}└──────────────────────────────────────────────{}", GRAY, RESET);
+                            return Ok(classification);
+                        }
+                        Err(_) => {
+                            // Continue to Groq fallback
+                        }
                     }
                 }
             }
-            Err(e) => {
-                eprintln!("│ {}⚠️  Vision model error{}: {}", YELLOW, RESET, e);
-                println!("│ {}🔄 Trying{} Gemini text-only...", YELLOW, RESET);
-                println!("│");
-                
-                match try_gemini_models_with_retry(&prompt).await {
-                    Ok(classification) => {
-                        log_classification_success(&classification);
-                        println!("{}└──────────────────────────────────────────────{}", GRAY, RESET);
-                        return Ok(classification);
-                    }
-                    Err(e) => {
-                        eprintln!("│ {}⚠️  Gemini fallback failed{}: {}", YELLOW, RESET, e);
-                    }
+        } else {
+            // TIER 1: No image - try Gemini first
+            match try_gemini_models(&prompt).await {
+                Ok(classification) => {
+                    log_classification_success(&classification);
+                    println!("{}└──────────────────────────────────────────────{}", GRAY, RESET);
+                    return Ok(classification);
+                }
+                Err(_) => {
+                    println!("│ {}🔄 Falling back{} to Groq...", YELLOW, RESET);
+                    println!("│");
                 }
             }
         }
-    } else {
-        // TIER 1: No image - try Gemini first
-        match try_gemini_models_with_retry(&prompt).await {
+        
+        // TIER 2: Groq fallback (reasoning models)
+        match try_groq_reasoning(&prompt).await {
             Ok(classification) => {
                 log_classification_success(&classification);
                 println!("{}└──────────────────────────────────────────────{}", GRAY, RESET);
                 return Ok(classification);
             }
-            Err(e) => {
-                eprintln!("│ {}⚠️  Gemini failed{}: {}", YELLOW, RESET, e);
-                println!("│");
-                println!("│ {}🔄 Falling back{} to Groq...", YELLOW, RESET);
-                println!("│");
+            Err(_) => {
+                // All models failed this attempt
+                if attempt < MAX_RETRIES - 1 {
+                    println!("│ {}⚠️  All models failed{} - will retry", YELLOW, RESET);
+                }
             }
-        }
-    }
-    
-    // TIER 2: Groq fallback (reasoning models)
-    match try_groq_reasoning_with_retry(&prompt).await {
-        Ok(classification) => {
-            log_classification_success(&classification);
-            println!("{}└──────────────────────────────────────────────{}", GRAY, RESET);
-            return Ok(classification);
-        }
-        Err(e) => {
-            eprintln!("│ {}⚠️  Groq Reasoning failed{}: {}", YELLOW, RESET, e);
         }
     }
     
@@ -289,19 +276,19 @@ async fn retry_with_countdown(attempt: u32) {
     let delay = RETRY_DELAY_SECS * attempt as u64;
     
     println!("│");
-    println!("│ {}⏳ RETRY{} : (attempt {}/{}) - waiting...", 
-        YELLOW, RESET, attempt + 1, MAX_RETRIES);
-    print!("│ {}⏱️  Time{} : ", CYAN, RESET);
+    println!("│ {}⏳ RETRY #{}{} - Waiting {} seconds...", 
+        YELLOW, attempt, RESET, delay);
+    print!("│ ");
     stdout().flush().ok();
     
     for remaining in (1..=delay).rev() {
-        print!("{}{}s{}", CYAN, remaining, RESET);
+        print!("{}⏱  {}s{}", CYAN, remaining, RESET);
         stdout().flush().ok();
         tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
         
         if remaining > 1 {
-            let num_digits = remaining.to_string().len();
-            print!("\x1b[{}D\x1b[K", num_digits + 1);
+            // Clear the countdown and redraw
+            print!("\r│ ");
             stdout().flush().ok();
         }
     }
@@ -310,46 +297,15 @@ async fn retry_with_countdown(attempt: u32) {
     println!("│");
 }
 
-// ===== GEMINI MODELS WITH RETRY =====
+// ===== GEMINI MODELS =====
 
-async fn try_gemini_models_with_retry(prompt: &str) -> Result<AIClassification, String> {
-    let mut attempt = 1;
-    let mut lines_printed = 0;
-    
-    loop {
-        match try_gemini_models(prompt, &mut lines_printed).await {
-            Ok(result) => return Ok(result),
-            Err(e) if e.contains("rate limit") && attempt < MAX_RETRIES => {
-                if lines_printed > 0 {
-                    clear_attempts(lines_printed);
-                    lines_printed = 0;
-                }
-                retry_with_countdown(attempt).await;
-                attempt += 1;
-            }
-            Err(e) => {
-                if lines_printed > 0 {
-                    clear_attempts(lines_printed);
-                }
-                return Err(e);
-            }
-        }
-    }
-}
-
-async fn try_gemini_models(prompt: &str, lines_printed: &mut usize) -> Result<AIClassification, String> {
+async fn try_gemini_models(prompt: &str) -> Result<AIClassification, String> {
     let api_key = std::env::var("GEMINI_API_KEY")
         .map_err(|_| "GEMINI_API_KEY not set in .env".to_string())?;
     
     for (index, model) in GEMINI_MODELS.iter().enumerate() {
-        if *lines_printed > 0 {
-            clear_attempts(1);
-            *lines_printed -= 1;
-        }
-        
         println!("│ {}🔄 TRYING{} : {} (Gemini {}/{})", BLUE, RESET, model, index + 1, GEMINI_MODELS.len());
         stdout().flush().ok();
-        *lines_printed += 1;
         
         let request_body = json!({
             "contents": [{"parts": [{"text": prompt}]}],
@@ -375,13 +331,7 @@ async fn try_gemini_models(prompt: &str, lines_printed: &mut usize) -> Result<AI
         {
             Ok(r) => r,
             Err(e) => {
-                if *lines_printed > 0 {
-                    clear_attempts(1);
-                    *lines_printed -= 1;
-                }
                 println!("│ {}❌ FAILED{} : {} - Network error", RED, RESET, model);
-                *lines_printed += 1;
-                
                 if index < GEMINI_MODELS.len() - 1 {
                     continue;
                 } else {
@@ -393,27 +343,16 @@ async fn try_gemini_models(prompt: &str, lines_printed: &mut usize) -> Result<AI
         let status = response.status();
         
         if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
-            if *lines_printed > 0 {
-                clear_attempts(1);
-                *lines_printed -= 1;
-            }
             println!("│ {}⚠️  R-LIMIT{} : {} - Rate limited", YELLOW, RESET, model);
-            *lines_printed += 1;
-            
             if index < GEMINI_MODELS.len() - 1 {
                 continue;
             } else {
-                return Err("rate limit: All Gemini models rate limited".to_string());
+                return Err("rate limit".to_string());
             }
         }
         
         if status.is_success() {
-            if *lines_printed > 0 {
-                clear_attempts(1);
-                *lines_printed -= 1;
-            }
             println!("│ {}✅ SUCCESS{} : {} (Gemini {}/{})", GREEN, RESET, model, index + 1, GEMINI_MODELS.len());
-            *lines_printed += 1;
             
             let gemini_response: GeminiResponse = response.json().await
                 .map_err(|e| format!("Failed to deserialize: {}", e))?;
@@ -424,13 +363,7 @@ async fn try_gemini_models(prompt: &str, lines_printed: &mut usize) -> Result<AI
             return Ok(classification);
         }
         
-        if *lines_printed > 0 {
-            clear_attempts(1);
-            *lines_printed -= 1;
-        }
         println!("│ {}❌ FAILED{} : {} - HTTP {}", RED, RESET, model, status);
-        *lines_printed += 1;
-        
         if index < GEMINI_MODELS.len() - 1 {
             continue;
         }
@@ -439,46 +372,15 @@ async fn try_gemini_models(prompt: &str, lines_printed: &mut usize) -> Result<AI
     Err("All Gemini models failed".to_string())
 }
 
-// ===== GROQ REASONING WITH RETRY =====
+// ===== GROQ REASONING =====
 
-async fn try_groq_reasoning_with_retry(prompt: &str) -> Result<AIClassification, String> {
-    let mut attempt = 1;
-    let mut lines_printed = 0;
-    
-    loop {
-        match try_groq_reasoning(prompt, &mut lines_printed).await {
-            Ok(result) => return Ok(result),
-            Err(e) if e.contains("rate limit") && attempt < MAX_RETRIES => {
-                if lines_printed > 0 {
-                    clear_attempts(lines_printed);
-                    lines_printed = 0;
-                }
-                retry_with_countdown(attempt).await;
-                attempt += 1;
-            }
-            Err(e) => {
-                if lines_printed > 0 {
-                    clear_attempts(lines_printed);
-                }
-                return Err(e);
-            }
-        }
-    }
-}
-
-async fn try_groq_reasoning(prompt: &str, lines_printed: &mut usize) -> Result<AIClassification, String> {
+async fn try_groq_reasoning(prompt: &str) -> Result<AIClassification, String> {
     let api_key = std::env::var("GROQ_API_KEY")
         .map_err(|_| "GROQ_API_KEY not set in .env".to_string())?;
     
     for (index, model) in GROQ_REASONING_MODELS.iter().enumerate() {
-        if *lines_printed > 0 {
-            clear_attempts(1);
-            *lines_printed -= 1;
-        }
-        
         println!("│ {}🔄 TRYING{} : {} (Groq Reasoning {}/{})", BLUE, RESET, model, index + 1, GROQ_REASONING_MODELS.len());
         stdout().flush().ok();
-        *lines_printed += 1;
         
         let url = "https://api.groq.com/openai/v1/chat/completions";
         
@@ -502,19 +404,13 @@ async fn try_groq_reasoning(prompt: &str, lines_printed: &mut usize) -> Result<A
         {
             Ok(r) => r,
             Err(_) => {
-                if *lines_printed > 0 {
-                    clear_attempts(1);
-                    *lines_printed -= 1;
-                }
                 println!("│ {}❌ FAILED{} : {} - Network error", RED, RESET, model);
-                *lines_printed += 1;
-                
                 if index < GROQ_REASONING_MODELS.len() - 1 {
                     continue;
                 } else {
-                    eprintln!("│ {}🔄 Falling back{} to standard models...", YELLOW, RESET);
+                    println!("│ {}🔄 Falling back{} to standard models...", YELLOW, RESET);
                     println!("│");
-                    return try_groq_standard_text(prompt, lines_printed).await;
+                    return try_groq_standard_text(prompt).await;
                 }
             }
         };
@@ -522,29 +418,18 @@ async fn try_groq_reasoning(prompt: &str, lines_printed: &mut usize) -> Result<A
         let status = response.status();
         
         if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
-            if *lines_printed > 0 {
-                clear_attempts(1);
-                *lines_printed -= 1;
-            }
             println!("│ {}⚠️  R-LIMIT{} : {} - Rate limited", YELLOW, RESET, model);
-            *lines_printed += 1;
-            
             if index < GROQ_REASONING_MODELS.len() - 1 {
                 continue;
             } else {
-                eprintln!("│ {}🔄 Falling back{} to standard models...", YELLOW, RESET);
+                println!("│ {}🔄 Falling back{} to standard models...", YELLOW, RESET);
                 println!("│");
-                return try_groq_standard_text(prompt, lines_printed).await;
+                return try_groq_standard_text(prompt).await;
             }
         }
         
         if status.is_success() {
-            if *lines_printed > 0 {
-                clear_attempts(1);
-                *lines_printed -= 1;
-            }
             println!("│ {}✅ SUCCESS{} : {} (Groq Reasoning {}/{})", GREEN, RESET, model, index + 1, GROQ_REASONING_MODELS.len());
-            *lines_printed += 1;
             
             let groq_response: GroqResponse = response.json().await
                 .map_err(|e| format!("Failed to deserialize: {}", e))?;
@@ -561,38 +446,26 @@ async fn try_groq_reasoning(prompt: &str, lines_printed: &mut usize) -> Result<A
             return Ok(classification);
         }
         
-        if *lines_printed > 0 {
-            clear_attempts(1);
-            *lines_printed -= 1;
-        }
         println!("│ {}❌ FAILED{} : {} - HTTP {}", RED, RESET, model, status);
-        *lines_printed += 1;
-        
         if index < GROQ_REASONING_MODELS.len() - 1 {
             continue;
         }
     }
     
-    eprintln!("│ {}🔄 Falling back{} to standard models...", YELLOW, RESET);
+    println!("│ {}🔄 Falling back{} to standard models...", YELLOW, RESET);
     println!("│");
-    try_groq_standard_text(prompt, lines_printed).await
+    try_groq_standard_text(prompt).await
 }
 
 // ===== GROQ STANDARD TEXT =====
 
-async fn try_groq_standard_text(prompt: &str, lines_printed: &mut usize) -> Result<AIClassification, String> {
+async fn try_groq_standard_text(prompt: &str) -> Result<AIClassification, String> {
     let api_key = std::env::var("GROQ_API_KEY")
         .map_err(|_| "GROQ_API_KEY not set in .env".to_string())?;
     
     for (index, model) in GROQ_TEXT_MODELS.iter().enumerate() {
-        if *lines_printed > 0 {
-            clear_attempts(1);
-            *lines_printed -= 1;
-        }
-        
         println!("│ {}🔄 TRYING{} : {} (Groq Standard {}/{})", BLUE, RESET, model, index + 1, GROQ_TEXT_MODELS.len());
         stdout().flush().ok();
-        *lines_printed += 1;
         
         let url = "https://api.groq.com/openai/v1/chat/completions";
         
@@ -617,13 +490,7 @@ async fn try_groq_standard_text(prompt: &str, lines_printed: &mut usize) -> Resu
         {
             Ok(r) => r,
             Err(_) => {
-                if *lines_printed > 0 {
-                    clear_attempts(1);
-                    *lines_printed -= 1;
-                }
                 println!("│ {}❌ FAILED{} : {} - Network error", RED, RESET, model);
-                *lines_printed += 1;
-                
                 if index < GROQ_TEXT_MODELS.len() - 1 {
                     continue;
                 } else {
@@ -635,27 +502,16 @@ async fn try_groq_standard_text(prompt: &str, lines_printed: &mut usize) -> Resu
         let status = response.status();
         
         if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
-            if *lines_printed > 0 {
-                clear_attempts(1);
-                *lines_printed -= 1;
-            }
             println!("│ {}⚠️  R-LIMIT{} : {} - Rate limited", YELLOW, RESET, model);
-            *lines_printed += 1;
-            
             if index < GROQ_TEXT_MODELS.len() - 1 {
                 continue;
             } else {
-                return Err("rate limit: All Groq standard models rate limited".to_string());
+                return Err("rate limit".to_string());
             }
         }
         
         if status.is_success() {
-            if *lines_printed > 0 {
-                clear_attempts(1);
-                *lines_printed -= 1;
-            }
             println!("│ {}✅ SUCCESS{} : {} (Groq Standard {}/{})", GREEN, RESET, model, index + 1, GROQ_TEXT_MODELS.len());
-            *lines_printed += 1;
             
             let groq_response: GroqResponse = response.json().await
                 .map_err(|e| format!("Failed to deserialize: {}", e))?;
@@ -672,13 +528,7 @@ async fn try_groq_standard_text(prompt: &str, lines_printed: &mut usize) -> Resu
             return Ok(classification);
         }
         
-        if *lines_printed > 0 {
-            clear_attempts(1);
-            *lines_printed -= 1;
-        }
         println!("│ {}❌ FAILED{} : {} - HTTP {}", RED, RESET, model, status);
-        *lines_printed += 1;
-        
         if index < GROQ_TEXT_MODELS.len() - 1 {
             continue;
         }
@@ -687,46 +537,15 @@ async fn try_groq_standard_text(prompt: &str, lines_printed: &mut usize) -> Resu
     Err("All Groq standard models failed".to_string())
 }
 
-// ===== GROQ VISION WITH RETRY =====
+// ===== GROQ VISION =====
 
-async fn try_groq_vision_with_retry(prompt: &str, image_base64: &str) -> Result<AIClassification, String> {
-    let mut attempt = 1;
-    let mut lines_printed = 0;
-    
-    loop {
-        match try_groq_vision(prompt, image_base64, &mut lines_printed).await {
-            Ok(result) => return Ok(result),
-            Err(e) if e.contains("rate limit") && attempt < MAX_RETRIES => {
-                if lines_printed > 0 {
-                    clear_attempts(lines_printed);
-                    lines_printed = 0;
-                }
-                retry_with_countdown(attempt).await;
-                attempt += 1;
-            }
-            Err(e) => {
-                if lines_printed > 0 {
-                    clear_attempts(lines_printed);
-                }
-                return Err(e);
-            }
-        }
-    }
-}
-
-async fn try_groq_vision(prompt: &str, image_base64: &str, lines_printed: &mut usize) -> Result<AIClassification, String> {
+async fn try_groq_vision(prompt: &str, image_base64: &str) -> Result<AIClassification, String> {
     let api_key = std::env::var("GROQ_API_KEY")
         .map_err(|_| "GROQ_API_KEY not set in .env".to_string())?;
     
     for (index, model) in GROQ_VISION_MODELS.iter().enumerate() {
-        if *lines_printed > 0 {
-            clear_attempts(1);
-            *lines_printed -= 1;
-        }
-        
         println!("│ {}🔄 TRYING{} : {} (Vision {}/{})", BLUE, RESET, model, index + 1, GROQ_VISION_MODELS.len());
         stdout().flush().ok();
-        *lines_printed += 1;
         
         let url = "https://api.groq.com/openai/v1/chat/completions";
         
@@ -762,13 +581,7 @@ async fn try_groq_vision(prompt: &str, image_base64: &str, lines_printed: &mut u
         {
             Ok(r) => r,
             Err(_) => {
-                if *lines_printed > 0 {
-                    clear_attempts(1);
-                    *lines_printed -= 1;
-                }
                 println!("│ {}❌ FAILED{} : {} - Network error", RED, RESET, model);
-                *lines_printed += 1;
-                
                 if index < GROQ_VISION_MODELS.len() - 1 {
                     continue;
                 } else {
@@ -780,27 +593,16 @@ async fn try_groq_vision(prompt: &str, image_base64: &str, lines_printed: &mut u
         let status = response.status();
         
         if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
-            if *lines_printed > 0 {
-                clear_attempts(1);
-                *lines_printed -= 1;
-            }
             println!("│ {}⚠️  R-LIMIT{} : {} - Rate limited", YELLOW, RESET, model);
-            *lines_printed += 1;
-            
             if index < GROQ_VISION_MODELS.len() - 1 {
                 continue;
             } else {
-                return Err("rate limit: All Groq vision models rate limited".to_string());
+                return Err("rate limit".to_string());
             }
         }
         
         if status.is_success() {
-            if *lines_printed > 0 {
-                clear_attempts(1);
-                *lines_printed -= 1;
-            }
             println!("│ {}✅ SUCCESS{} : {} (Vision {}/{})", GREEN, RESET, model, index + 1, GROQ_VISION_MODELS.len());
-            *lines_printed += 1;
             
             let groq_response: GroqResponse = response.json().await
                 .map_err(|e| format!("Failed to deserialize: {}", e))?;
@@ -817,13 +619,7 @@ async fn try_groq_vision(prompt: &str, image_base64: &str, lines_printed: &mut u
             return Ok(classification);
         }
         
-        if *lines_printed > 0 {
-            clear_attempts(1);
-            *lines_printed -= 1;
-        }
         println!("│ {}❌ FAILED{} : {} - HTTP {}", RED, RESET, model, status);
-        *lines_printed += 1;
-        
         if index < GROQ_VISION_MODELS.len() - 1 {
             continue;
         }
@@ -900,47 +696,16 @@ pub async fn check_duplicate_assignment(
         course_map,
     );
     
-    try_gemini_duplicate_check_with_retry(&prompt).await
+    try_gemini_duplicate_check(&prompt).await
 }
 
-async fn try_gemini_duplicate_check_with_retry(prompt: &str) -> Result<Option<Uuid>, String> {
-    let mut attempt = 1;
-    let mut lines_printed = 0;
-    
-    loop {
-        match try_gemini_duplicate_check(prompt, &mut lines_printed).await {
-            Ok(result) => return Ok(result),
-            Err(e) if e.contains("rate limit") && attempt < MAX_RETRIES => {
-                if lines_printed > 0 {
-                    clear_attempts(lines_printed);
-                    lines_printed = 0;
-                }
-                retry_with_countdown(attempt).await;
-                attempt += 1;
-            }
-            Err(e) => {
-                if lines_printed > 0 {
-                    clear_attempts(lines_printed);
-                }
-                return Err(e);
-            }
-        }
-    }
-}
-
-async fn try_gemini_duplicate_check(prompt: &str, lines_printed: &mut usize) -> Result<Option<Uuid>, String> {
+async fn try_gemini_duplicate_check(prompt: &str) -> Result<Option<Uuid>, String> {
     let api_key = std::env::var("GEMINI_API_KEY")
         .map_err(|_| "GEMINI_API_KEY not set".to_string())?;
     
     for (index, model) in GEMINI_MODELS.iter().enumerate() {
-        if *lines_printed > 0 {
-            clear_attempts(1);
-            *lines_printed -= 1;
-        }
-        
         println!("│ {}🔄 TRYING{} : {} (Gemini {}/{})", BLUE, RESET, model, index + 1, GEMINI_MODELS.len());
         stdout().flush().ok();
-        *lines_printed += 1;
         
         let url = format!(
             "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent",
@@ -967,12 +732,7 @@ async fn try_gemini_duplicate_check(prompt: &str, lines_printed: &mut usize) -> 
         {
             Ok(r) => r,
             Err(_) => {
-                if *lines_printed > 0 {
-                    clear_attempts(1);
-                    *lines_printed -= 1;
-                }
                 println!("│ {}❌ FAILED{} : {} - Network error", RED, RESET, model);
-                *lines_printed += 1;
                 continue;
             }
         };
@@ -980,27 +740,16 @@ async fn try_gemini_duplicate_check(prompt: &str, lines_printed: &mut usize) -> 
         let status = response.status();
         
         if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
-            if *lines_printed > 0 {
-                clear_attempts(1);
-                *lines_printed -= 1;
-            }
             println!("│ {}⚠️  R-LIMIT{} : {} - Rate limited", YELLOW, RESET, model);
-            *lines_printed += 1;
-            
             if index < GEMINI_MODELS.len() - 1 {
                 continue;
             } else {
-                return Err("rate limit: All Gemini models rate limited".to_string());
+                return Err("rate limit".to_string());
             }
         }
         
         if status.is_success() {
-            if *lines_printed > 0 {
-                clear_attempts(1);
-                *lines_printed -= 1;
-            }
             println!("│ {}✅ SUCCESS{} : {} (Gemini {}/{})", GREEN, RESET, model, index + 1, GEMINI_MODELS.len());
-            *lines_printed += 1;
             
             let gemini_response: GeminiResponse = response.json().await
                 .map_err(|e| format!("Parse error: {}", e))?;
@@ -1022,13 +771,7 @@ async fn try_gemini_duplicate_check(prompt: &str, lines_printed: &mut usize) -> 
             return Ok(None);
         }
         
-        if *lines_printed > 0 {
-            clear_attempts(1);
-            *lines_printed -= 1;
-        }
         println!("│ {}❌ FAILED{} : {} - HTTP {}", RED, RESET, model, status);
-        *lines_printed += 1;
-        
         if index < GEMINI_MODELS.len() - 1 {
             continue;
         }
@@ -1056,50 +799,19 @@ pub async fn match_update_to_assignment(
     }
     println!("│");
     
-    let result = try_gemini_matching_with_retry(&prompt).await;
+    let result = try_gemini_matching(&prompt).await;
     
     println!("{}└──────────────────────────────────────────────{}", GRAY, RESET);
     result
 }
 
-async fn try_gemini_matching_with_retry(prompt: &str) -> Result<Option<Uuid>, String> {
-    let mut attempt = 1;
-    let mut lines_printed = 0;
-    
-    loop {
-        match try_gemini_matching(prompt, &mut lines_printed).await {
-            Ok(result) => return Ok(result),
-            Err(e) if e.contains("rate limit") && attempt < MAX_RETRIES => {
-                if lines_printed > 0 {
-                    clear_attempts(lines_printed);
-                    lines_printed = 0;
-                }
-                retry_with_countdown(attempt).await;
-                attempt += 1;
-            }
-            Err(e) => {
-                if lines_printed > 0 {
-                    clear_attempts(lines_printed);
-                }
-                return Err(e);
-            }
-        }
-    }
-}
-
-async fn try_gemini_matching(prompt: &str, lines_printed: &mut usize) -> Result<Option<Uuid>, String> {
+async fn try_gemini_matching(prompt: &str) -> Result<Option<Uuid>, String> {
     let api_key = std::env::var("GEMINI_API_KEY")
         .map_err(|_| "GEMINI_API_KEY not set in .env".to_string())?;
     
     for (index, model) in GEMINI_MODELS.iter().enumerate() {
-        if *lines_printed > 0 {
-            clear_attempts(1);
-            *lines_printed -= 1;
-        }
-        
         println!("│ {}🔄 TRYING{} : {} (Gemini {}/{})", BLUE, RESET, model, index + 1, GEMINI_MODELS.len());
         stdout().flush().ok();
-        *lines_printed += 1;
         
         let url = format!(
             "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent",
@@ -1125,13 +837,7 @@ async fn try_gemini_matching(prompt: &str, lines_printed: &mut usize) -> Result<
         {
             Ok(r) => r,
             Err(_) => {
-                if *lines_printed > 0 {
-                    clear_attempts(1);
-                    *lines_printed -= 1;
-                }
                 println!("│ {}❌ FAILED{} : {} - Network error", RED, RESET, model);
-                *lines_printed += 1;
-                
                 if index < GEMINI_MODELS.len() - 1 {
                     continue;
                 } else {
@@ -1143,27 +849,16 @@ async fn try_gemini_matching(prompt: &str, lines_printed: &mut usize) -> Result<
         let status = response.status();
         
         if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
-            if *lines_printed > 0 {
-                clear_attempts(1);
-                *lines_printed -= 1;
-            }
             println!("│ {}⚠️  R-LIMIT{} : {} - Rate limited", YELLOW, RESET, model);
-            *lines_printed += 1;
-            
             if index < GEMINI_MODELS.len() - 1 {
                 continue;
             } else {
-                return Err("rate limit: All Gemini models rate limited for matching".to_string());
+                return Err("rate limit".to_string());
             }
         }
         
         if status.is_success() {
-            if *lines_printed > 0 {
-                clear_attempts(1);
-                *lines_printed -= 1;
-            }
             println!("│ {}✅ SUCCESS{} : {} (Gemini {}/{})", GREEN, RESET, model, index + 1, GEMINI_MODELS.len());
-            *lines_printed += 1;
             
             let gemini_response: GeminiResponse = response.json().await
                 .map_err(|e| format!("Failed to deserialize: {}", e))?;
@@ -1174,13 +869,7 @@ async fn try_gemini_matching(prompt: &str, lines_printed: &mut usize) -> Result<
             return Ok(result);
         }
         
-        if *lines_printed > 0 {
-            clear_attempts(1);
-            *lines_printed -= 1;
-        }
         println!("│ {}❌ FAILED{} : {} - HTTP {}", RED, RESET, model, status);
-        *lines_printed += 1;
-        
         if index < GEMINI_MODELS.len() - 1 {
             continue;
         }
