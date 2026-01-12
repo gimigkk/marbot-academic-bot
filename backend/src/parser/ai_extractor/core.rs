@@ -276,25 +276,57 @@ async fn retry_with_countdown(attempt: u32) {
     let delay = RETRY_DELAY_SECS * attempt as u64;
     
     println!("│");
-    println!("│ {}⏳ RETRY #{}{} - Waiting {} seconds...", 
-        YELLOW, attempt, RESET, delay);
+    // Header for the countdown. We'll update the seconds on the same line every second.
+    println!("│ {}⏳ RETRY #{}{} - Waiting {} seconds...", YELLOW, attempt, RESET, delay);
+    // Start the animated second countdown on the following line to preserve the header.
     print!("│ ");
     stdout().flush().ok();
     
     for remaining in (1..=delay).rev() {
-        print!("{}⏱  {}s{}", CYAN, remaining, RESET);
+        // Move cursor to start of this line and clear it, then print updated seconds.
+        // \x1b[2K clears the entire line; \r moves cursor to start; we keep the prefix "│ "
+        print!("\r\x1b[2K│ {}⏱  {}s{}", CYAN, remaining, RESET);
         stdout().flush().ok();
         tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-        
-        if remaining > 1 {
-            // Clear the countdown and redraw
-            print!("\r│ ");
-            stdout().flush().ok();
-        }
     }
     
+    // Finish the countdown line and add an empty line for separation
     println!();
     println!("│");
+}
+
+// ===== small helpers for controlled logging/overwrite =====
+
+/// Print a normal prefixed line (keeps previous lines intact)
+fn log_line(msg: &str) {
+    println!("│ {}", msg);
+}
+
+/// Maintain a TRYING-line overwriteable display within a loop.
+/// - If `last_trying` is true we will move the cursor up, clear that line, and print the new TRYING.
+/// - Otherwise we just print the TRYING line normally and set last_trying to true.
+fn print_trying_line(model: &str, index: usize, total: usize, last_trying: &mut bool) {
+    let formatted = format!("{}🔄 TRYING{} : {} ({} / {})", BLUE, RESET, model, index, total);
+    if *last_trying {
+        // Move up one line and clear it, then print the new trying line.
+        // This preserves your visual "single-line TRYING" behaviour.
+        print!("\x1b[1A\x1b[2K│ {}\n", formatted);
+    } else {
+        println!("│ {}", formatted);
+        *last_trying = true;
+    }
+    stdout().flush().ok();
+}
+
+/// Overwrite and remove the previous TRYING line (if any) without printing anything.
+/// Useful when you want to silently move to the next TRYING line.
+fn clear_previous_trying(last_trying: &mut bool) {
+    if *last_trying {
+        // Move up and clear the "│ ..." line
+        print!("\x1b[1A\x1b[2K");
+        stdout().flush().ok();
+        *last_trying = false;
+    }
 }
 
 // ===== GEMINI MODELS =====
@@ -303,9 +335,12 @@ async fn try_gemini_models(prompt: &str) -> Result<AIClassification, String> {
     let api_key = std::env::var("GEMINI_API_KEY")
         .map_err(|_| "GEMINI_API_KEY not set in .env".to_string())?;
     
-    for (index, model) in GEMINI_MODELS.iter().enumerate() {
-        println!("│ {}🔄 TRYING{} : {} (Gemini {}/{})", BLUE, RESET, model, index + 1, GEMINI_MODELS.len());
-        stdout().flush().ok();
+    let mut rate_limited_count = 0usize;
+    let mut last_trying = false;
+    
+    for (idx, model) in GEMINI_MODELS.iter().enumerate() {
+        let index = idx + 1;
+        print_trying_line(model, index, GEMINI_MODELS.len(), &mut last_trying);
         
         let request_body = json!({
             "contents": [{"parts": [{"text": prompt}]}],
@@ -331,8 +366,10 @@ async fn try_gemini_models(prompt: &str) -> Result<AIClassification, String> {
         {
             Ok(r) => r,
             Err(e) => {
+                // network error: remove TRYING line and either continue or fail if last model
+                clear_previous_trying(&mut last_trying);
                 println!("│ {}❌ FAILED{} : {} - Network error", RED, RESET, model);
-                if index < GEMINI_MODELS.len() - 1 {
+                if index < GEMINI_MODELS.len() {
                     continue;
                 } else {
                     return Err(format!("Network error: {}", e));
@@ -343,16 +380,23 @@ async fn try_gemini_models(prompt: &str) -> Result<AIClassification, String> {
         let status = response.status();
         
         if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
-            println!("│ {}⚠️  R-LIMIT{} : {} - Rate limited", YELLOW, RESET, model);
-            if index < GEMINI_MODELS.len() - 1 {
+            // Instead of printing a rate-limit line per model, we clear the TRYING line
+            // and simply count it; if all models are rate-limited we'll display a single line.
+            clear_previous_trying(&mut last_trying);
+            rate_limited_count += 1;
+            if index < GEMINI_MODELS.len() {
+                // immediately continue to show the next TRYING line (it will be printed next loop iter)
                 continue;
             } else {
-                return Err("rate limit".to_string());
+                // last model was rate-limited; we will fall through after loop to summary
+                continue;
             }
         }
         
         if status.is_success() {
-            println!("│ {}✅ SUCCESS{} : {} (Gemini {}/{})", GREEN, RESET, model, index + 1, GEMINI_MODELS.len());
+            // success - clear TRYING (we will print SUCCESS as a fresh line)
+            clear_previous_trying(&mut last_trying);
+            println!("│ {}✅ SUCCESS{} : {} (Gemini {}/{})", GREEN, RESET, model, index, GEMINI_MODELS.len());
             
             let gemini_response: GeminiResponse = response.json().await
                 .map_err(|e| format!("Failed to deserialize: {}", e))?;
@@ -363,10 +407,18 @@ async fn try_gemini_models(prompt: &str) -> Result<AIClassification, String> {
             return Ok(classification);
         }
         
+        // non-rate-limit HTTP error
+        clear_previous_trying(&mut last_trying);
         println!("│ {}❌ FAILED{} : {} - HTTP {}", RED, RESET, model, status);
-        if index < GEMINI_MODELS.len() - 1 {
+        if index < GEMINI_MODELS.len() {
             continue;
         }
+    }
+    
+    // after loop, if all gemini models were rate-limited print single consolidated R-LIMIT line
+    if rate_limited_count == GEMINI_MODELS.len() {
+        println!("│ {}⚠️  R-LIMIT{} : on all gemini models {}/{}", YELLOW, RESET, rate_limited_count, GEMINI_MODELS.len());
+        return Err("rate limit".to_string());
     }
     
     Err("All Gemini models failed".to_string())
@@ -378,8 +430,12 @@ async fn try_groq_reasoning(prompt: &str) -> Result<AIClassification, String> {
     let api_key = std::env::var("GROQ_API_KEY")
         .map_err(|_| "GROQ_API_KEY not set in .env".to_string())?;
     
-    for (index, model) in GROQ_REASONING_MODELS.iter().enumerate() {
-        println!("│ {}🔄 TRYING{} : {} (Groq Reasoning {}/{})", BLUE, RESET, model, index + 1, GROQ_REASONING_MODELS.len());
+    let mut rate_limited_count = 0usize;
+    let mut last_trying = false;
+    
+    for (idx, model) in GROQ_REASONING_MODELS.iter().enumerate() {
+        let index = idx + 1;
+        print_trying_line(model, index, GROQ_REASONING_MODELS.len(), &mut last_trying);
         stdout().flush().ok();
         
         let url = "https://api.groq.com/openai/v1/chat/completions";
@@ -404,8 +460,9 @@ async fn try_groq_reasoning(prompt: &str) -> Result<AIClassification, String> {
         {
             Ok(r) => r,
             Err(_) => {
+                clear_previous_trying(&mut last_trying);
                 println!("│ {}❌ FAILED{} : {} - Network error", RED, RESET, model);
-                if index < GROQ_REASONING_MODELS.len() - 1 {
+                if index < GROQ_REASONING_MODELS.len() {
                     continue;
                 } else {
                     println!("│ {}🔄 Falling back{} to standard models...", YELLOW, RESET);
@@ -418,18 +475,19 @@ async fn try_groq_reasoning(prompt: &str) -> Result<AIClassification, String> {
         let status = response.status();
         
         if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
-            println!("│ {}⚠️  R-LIMIT{} : {} - Rate limited", YELLOW, RESET, model);
-            if index < GROQ_REASONING_MODELS.len() - 1 {
+            clear_previous_trying(&mut last_trying);
+            rate_limited_count += 1;
+            if index < GROQ_REASONING_MODELS.len() {
                 continue;
             } else {
-                println!("│ {}🔄 Falling back{} to standard models...", YELLOW, RESET);
-                println!("│");
-                return try_groq_standard_text(prompt).await;
+                // fallthrough to check rate-limit summary after loop
+                continue;
             }
         }
         
         if status.is_success() {
-            println!("│ {}✅ SUCCESS{} : {} (Groq Reasoning {}/{})", GREEN, RESET, model, index + 1, GROQ_REASONING_MODELS.len());
+            clear_previous_trying(&mut last_trying);
+            println!("│ {}✅ SUCCESS{} : {} (Groq Reasoning {}/{})", GREEN, RESET, model, index, GROQ_REASONING_MODELS.len());
             
             let groq_response: GroqResponse = response.json().await
                 .map_err(|e| format!("Failed to deserialize: {}", e))?;
@@ -446,10 +504,19 @@ async fn try_groq_reasoning(prompt: &str) -> Result<AIClassification, String> {
             return Ok(classification);
         }
         
+        clear_previous_trying(&mut last_trying);
         println!("│ {}❌ FAILED{} : {} - HTTP {}", RED, RESET, model, status);
-        if index < GROQ_REASONING_MODELS.len() - 1 {
+        if index < GROQ_REASONING_MODELS.len() {
             continue;
         }
+    }
+    
+    // consolidate rate-limit message for reasoning models
+    if rate_limited_count == GROQ_REASONING_MODELS.len() {
+        println!("│ {}⚠️  R-LIMIT{} : on all Groq reasoning models {}/{}", YELLOW, RESET, rate_limited_count, GROQ_REASONING_MODELS.len());
+        println!("│ {}🔄 Falling back{} to standard models...", YELLOW, RESET);
+        println!("│");
+        return try_groq_standard_text(prompt).await;
     }
     
     println!("│ {}🔄 Falling back{} to standard models...", YELLOW, RESET);
@@ -463,8 +530,12 @@ async fn try_groq_standard_text(prompt: &str) -> Result<AIClassification, String
     let api_key = std::env::var("GROQ_API_KEY")
         .map_err(|_| "GROQ_API_KEY not set in .env".to_string())?;
     
-    for (index, model) in GROQ_TEXT_MODELS.iter().enumerate() {
-        println!("│ {}🔄 TRYING{} : {} (Groq Standard {}/{})", BLUE, RESET, model, index + 1, GROQ_TEXT_MODELS.len());
+    let mut rate_limited_count = 0usize;
+    let mut last_trying = false;
+    
+    for (idx, model) in GROQ_TEXT_MODELS.iter().enumerate() {
+        let index = idx + 1;
+        print_trying_line(model, index, GROQ_TEXT_MODELS.len(), &mut last_trying);
         stdout().flush().ok();
         
         let url = "https://api.groq.com/openai/v1/chat/completions";
@@ -490,8 +561,9 @@ async fn try_groq_standard_text(prompt: &str) -> Result<AIClassification, String
         {
             Ok(r) => r,
             Err(_) => {
+                clear_previous_trying(&mut last_trying);
                 println!("│ {}❌ FAILED{} : {} - Network error", RED, RESET, model);
-                if index < GROQ_TEXT_MODELS.len() - 1 {
+                if index < GROQ_TEXT_MODELS.len() {
                     continue;
                 } else {
                     return Err("All Groq standard models failed".to_string());
@@ -502,8 +574,9 @@ async fn try_groq_standard_text(prompt: &str) -> Result<AIClassification, String
         let status = response.status();
         
         if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
-            println!("│ {}⚠️  R-LIMIT{} : {} - Rate limited", YELLOW, RESET, model);
-            if index < GROQ_TEXT_MODELS.len() - 1 {
+            clear_previous_trying(&mut last_trying);
+            rate_limited_count += 1;
+            if index < GROQ_TEXT_MODELS.len() {
                 continue;
             } else {
                 return Err("rate limit".to_string());
@@ -511,7 +584,8 @@ async fn try_groq_standard_text(prompt: &str) -> Result<AIClassification, String
         }
         
         if status.is_success() {
-            println!("│ {}✅ SUCCESS{} : {} (Groq Standard {}/{})", GREEN, RESET, model, index + 1, GROQ_TEXT_MODELS.len());
+            clear_previous_trying(&mut last_trying);
+            println!("│ {}✅ SUCCESS{} : {} (Groq Standard {}/{})", GREEN, RESET, model, index, GROQ_TEXT_MODELS.len());
             
             let groq_response: GroqResponse = response.json().await
                 .map_err(|e| format!("Failed to deserialize: {}", e))?;
@@ -528,8 +602,9 @@ async fn try_groq_standard_text(prompt: &str) -> Result<AIClassification, String
             return Ok(classification);
         }
         
+        clear_previous_trying(&mut last_trying);
         println!("│ {}❌ FAILED{} : {} - HTTP {}", RED, RESET, model, status);
-        if index < GROQ_TEXT_MODELS.len() - 1 {
+        if index < GROQ_TEXT_MODELS.len() {
             continue;
         }
     }
@@ -543,8 +618,12 @@ async fn try_groq_vision(prompt: &str, image_base64: &str) -> Result<AIClassific
     let api_key = std::env::var("GROQ_API_KEY")
         .map_err(|_| "GROQ_API_KEY not set in .env".to_string())?;
     
-    for (index, model) in GROQ_VISION_MODELS.iter().enumerate() {
-        println!("│ {}🔄 TRYING{} : {} (Vision {}/{})", BLUE, RESET, model, index + 1, GROQ_VISION_MODELS.len());
+    let mut rate_limited_count = 0usize;
+    let mut last_trying = false;
+    
+    for (idx, model) in GROQ_VISION_MODELS.iter().enumerate() {
+        let index = idx + 1;
+        print_trying_line(model, index, GROQ_VISION_MODELS.len(), &mut last_trying);
         stdout().flush().ok();
         
         let url = "https://api.groq.com/openai/v1/chat/completions";
@@ -581,8 +660,9 @@ async fn try_groq_vision(prompt: &str, image_base64: &str) -> Result<AIClassific
         {
             Ok(r) => r,
             Err(_) => {
+                clear_previous_trying(&mut last_trying);
                 println!("│ {}❌ FAILED{} : {} - Network error", RED, RESET, model);
-                if index < GROQ_VISION_MODELS.len() - 1 {
+                if index < GROQ_VISION_MODELS.len() {
                     continue;
                 } else {
                     return Err("All Groq vision models failed".to_string());
@@ -593,8 +673,9 @@ async fn try_groq_vision(prompt: &str, image_base64: &str) -> Result<AIClassific
         let status = response.status();
         
         if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
-            println!("│ {}⚠️  R-LIMIT{} : {} - Rate limited", YELLOW, RESET, model);
-            if index < GROQ_VISION_MODELS.len() - 1 {
+            clear_previous_trying(&mut last_trying);
+            rate_limited_count += 1;
+            if index < GROQ_VISION_MODELS.len() {
                 continue;
             } else {
                 return Err("rate limit".to_string());
@@ -602,7 +683,8 @@ async fn try_groq_vision(prompt: &str, image_base64: &str) -> Result<AIClassific
         }
         
         if status.is_success() {
-            println!("│ {}✅ SUCCESS{} : {} (Vision {}/{})", GREEN, RESET, model, index + 1, GROQ_VISION_MODELS.len());
+            clear_previous_trying(&mut last_trying);
+            println!("│ {}✅ SUCCESS{} : {} (Vision {}/{})", GREEN, RESET, model, index, GROQ_VISION_MODELS.len());
             
             let groq_response: GroqResponse = response.json().await
                 .map_err(|e| format!("Failed to deserialize: {}", e))?;
@@ -619,8 +701,9 @@ async fn try_groq_vision(prompt: &str, image_base64: &str) -> Result<AIClassific
             return Ok(classification);
         }
         
+        clear_previous_trying(&mut last_trying);
         println!("│ {}❌ FAILED{} : {} - HTTP {}", RED, RESET, model, status);
-        if index < GROQ_VISION_MODELS.len() - 1 {
+        if index < GROQ_VISION_MODELS.len() {
             continue;
         }
     }
@@ -703,9 +786,12 @@ async fn try_gemini_duplicate_check(prompt: &str) -> Result<Option<Uuid>, String
     let api_key = std::env::var("GEMINI_API_KEY")
         .map_err(|_| "GEMINI_API_KEY not set".to_string())?;
     
-    for (index, model) in GEMINI_MODELS.iter().enumerate() {
-        println!("│ {}🔄 TRYING{} : {} (Gemini {}/{})", BLUE, RESET, model, index + 1, GEMINI_MODELS.len());
-        stdout().flush().ok();
+    let mut rate_limited_count = 0usize;
+    let mut last_trying = false;
+    
+    for (idx, model) in GEMINI_MODELS.iter().enumerate() {
+        let index = idx + 1;
+        print_trying_line(model, index, GEMINI_MODELS.len(), &mut last_trying);
         
         let url = format!(
             "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent",
@@ -732,6 +818,7 @@ async fn try_gemini_duplicate_check(prompt: &str) -> Result<Option<Uuid>, String
         {
             Ok(r) => r,
             Err(_) => {
+                clear_previous_trying(&mut last_trying);
                 println!("│ {}❌ FAILED{} : {} - Network error", RED, RESET, model);
                 continue;
             }
@@ -740,16 +827,18 @@ async fn try_gemini_duplicate_check(prompt: &str) -> Result<Option<Uuid>, String
         let status = response.status();
         
         if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
-            println!("│ {}⚠️  R-LIMIT{} : {} - Rate limited", YELLOW, RESET, model);
-            if index < GEMINI_MODELS.len() - 1 {
+            clear_previous_trying(&mut last_trying);
+            rate_limited_count += 1;
+            if index < GEMINI_MODELS.len() {
                 continue;
             } else {
-                return Err("rate limit".to_string());
+                continue;
             }
         }
         
         if status.is_success() {
-            println!("│ {}✅ SUCCESS{} : {} (Gemini {}/{})", GREEN, RESET, model, index + 1, GEMINI_MODELS.len());
+            clear_previous_trying(&mut last_trying);
+            println!("│ {}✅ SUCCESS{} : {} (Gemini {}/{})", GREEN, RESET, model, index, GEMINI_MODELS.len());
             
             let gemini_response: GeminiResponse = response.json().await
                 .map_err(|e| format!("Parse error: {}", e))?;
@@ -771,10 +860,16 @@ async fn try_gemini_duplicate_check(prompt: &str) -> Result<Option<Uuid>, String
             return Ok(None);
         }
         
+        clear_previous_trying(&mut last_trying);
         println!("│ {}❌ FAILED{} : {} - HTTP {}", RED, RESET, model, status);
-        if index < GEMINI_MODELS.len() - 1 {
+        if index < GEMINI_MODELS.len() {
             continue;
         }
+    }
+    
+    if rate_limited_count == GEMINI_MODELS.len() {
+        println!("│ {}⚠️  R-LIMIT{} : on all gemini models {}/{}", YELLOW, RESET, rate_limited_count, GEMINI_MODELS.len());
+        return Err("rate limit".to_string());
     }
     
     Err("All Gemini models failed".to_string())
@@ -809,9 +904,12 @@ async fn try_gemini_matching(prompt: &str) -> Result<Option<Uuid>, String> {
     let api_key = std::env::var("GEMINI_API_KEY")
         .map_err(|_| "GEMINI_API_KEY not set in .env".to_string())?;
     
-    for (index, model) in GEMINI_MODELS.iter().enumerate() {
-        println!("│ {}🔄 TRYING{} : {} (Gemini {}/{})", BLUE, RESET, model, index + 1, GEMINI_MODELS.len());
-        stdout().flush().ok();
+    let mut rate_limited_count = 0usize;
+    let mut last_trying = false;
+    
+    for (idx, model) in GEMINI_MODELS.iter().enumerate() {
+        let index = idx + 1;
+        print_trying_line(model, index, GEMINI_MODELS.len(), &mut last_trying);
         
         let url = format!(
             "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent",
@@ -837,8 +935,9 @@ async fn try_gemini_matching(prompt: &str) -> Result<Option<Uuid>, String> {
         {
             Ok(r) => r,
             Err(_) => {
+                clear_previous_trying(&mut last_trying);
                 println!("│ {}❌ FAILED{} : {} - Network error", RED, RESET, model);
-                if index < GEMINI_MODELS.len() - 1 {
+                if index < GEMINI_MODELS.len() {
                     continue;
                 } else {
                     return Err("All Gemini models failed for matching".to_string());
@@ -849,8 +948,9 @@ async fn try_gemini_matching(prompt: &str) -> Result<Option<Uuid>, String> {
         let status = response.status();
         
         if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
-            println!("│ {}⚠️  R-LIMIT{} : {} - Rate limited", YELLOW, RESET, model);
-            if index < GEMINI_MODELS.len() - 1 {
+            clear_previous_trying(&mut last_trying);
+            rate_limited_count += 1;
+            if index < GEMINI_MODELS.len() {
                 continue;
             } else {
                 return Err("rate limit".to_string());
@@ -858,7 +958,8 @@ async fn try_gemini_matching(prompt: &str) -> Result<Option<Uuid>, String> {
         }
         
         if status.is_success() {
-            println!("│ {}✅ SUCCESS{} : {} (Gemini {}/{})", GREEN, RESET, model, index + 1, GEMINI_MODELS.len());
+            clear_previous_trying(&mut last_trying);
+            println!("│ {}✅ SUCCESS{} : {} (Gemini {}/{})", GREEN, RESET, model, index, GEMINI_MODELS.len());
             
             let gemini_response: GeminiResponse = response.json().await
                 .map_err(|e| format!("Failed to deserialize: {}", e))?;
@@ -869,10 +970,16 @@ async fn try_gemini_matching(prompt: &str) -> Result<Option<Uuid>, String> {
             return Ok(result);
         }
         
+        clear_previous_trying(&mut last_trying);
         println!("│ {}❌ FAILED{} : {} - HTTP {}", RED, RESET, model, status);
-        if index < GEMINI_MODELS.len() - 1 {
+        if index < GEMINI_MODELS.len() {
             continue;
         }
+    }
+    
+    if rate_limited_count == GEMINI_MODELS.len() {
+        println!("│ {}⚠️  R-LIMIT{} : on all gemini models {}/{}", YELLOW, RESET, rate_limited_count, GEMINI_MODELS.len());
+        return Err("rate limit".to_string());
     }
     
     Err("All Gemini models failed for matching".to_string())
