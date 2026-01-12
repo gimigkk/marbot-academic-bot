@@ -374,6 +374,7 @@ async fn try_groq_reasoning(prompt: &str) -> Result<AIClassification, String> {
         
         let status = response.status();
 
+        
         if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
 
             eprintln!("│ ⚠️  R-LIMIT  : {} (Groq Reasoning {}/{})", model, index + 1, GROQ_REASONING_MODELS.len());
