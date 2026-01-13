@@ -11,7 +11,7 @@ mod context_builder;
 pub const GROQ_REASONING_MODELS: &[&str; 3] = &[
     "openai/gpt-oss-120b",            // Rank 1: Flagship reasoning (Replace DeepSeek R1)
     "llama-3.3-70b-versatile",        // Rank 2: The most reliable 70B (300k TPM limit)
-    "qwen/qwen3-32b",                 // Rank 3: Dense logic model, punches above weight
+    "qwen/qwen3-32b",                 // Rank 3: Dense logic model, punches above weight, limited to 32k context which is really bad
 ];
 
 // Groq vision models (multimodal - for image processing)

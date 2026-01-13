@@ -13,8 +13,8 @@ fn build_context_assignments_list(
         return "No assignment in database.".to_string();
     }
     
-    let assignments_to_show = assignments.iter().take(20);
-    let count = assignments.len().min(20);
+    let assignments_to_show = assignments.iter().take(12);
+    let count = assignments.len().min(12);
     
     let list = assignments_to_show
         .map(|a| {
@@ -41,7 +41,7 @@ fn build_context_assignments_list(
         .collect::<Vec<_>>()
         .join("\n");
     
-    if assignments.len() > 20 {
+    if assignments.len() > 12 {
         format!("{}\n(Showing {} most recent out of {} total assignments)", list, count, assignments.len())
     } else {
         list

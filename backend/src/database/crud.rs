@@ -187,7 +187,7 @@ pub async fn get_assignments(pool: &PgPool) -> Result<Vec<Assignment>> {
             relating_messages
         FROM assignments
         ORDER BY created_at DESC
-        LIMIT 20
+        LIMIT 12
         "#
     )
     .fetch_all(pool)
@@ -275,7 +275,7 @@ pub async fn get_active_assignments(pool: &PgPool) -> Result<Vec<Assignment>> {
         FROM assignments
         WHERE deadline > $1 OR deadline IS NULL
         ORDER BY created_at DESC
-        LIMIT 20
+        LIMIT 12
         "#
     )
     .bind(now)
@@ -406,7 +406,7 @@ pub async fn get_recent_assignments_for_update(
         FROM assignments
         WHERE created_at > NOW() - INTERVAL '30 days'
         ORDER BY created_at DESC
-        LIMIT 20
+        LIMIT 12
         "#
     )
     .fetch_all(pool)
