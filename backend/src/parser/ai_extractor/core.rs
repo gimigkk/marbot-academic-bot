@@ -840,7 +840,7 @@ pub async fn check_duplicate_assignment(
         course_map,
     );
     
-    // ✅ ADD RETRY LOGIC (same as classification)
+    // RETRY LOGIC (same as classification)
     for attempt in 0..MAX_RETRIES {
         if attempt > 0 {
             retry_with_countdown(attempt).await;
@@ -850,7 +850,7 @@ pub async fn check_duplicate_assignment(
         match try_gemini_duplicate_check(&prompt).await {
             Ok(result) => return Ok(result),
             Err(e) if e == "rate limit" => {
-                println!("│ {}🔄 Falling back{} to Groq for duplicate check...", YELLOW, RESET);
+                println!("{}🔄 Falling back{} to Groq for duplicate check...", YELLOW, RESET);
             }
             Err(_) => {}
         }
@@ -867,7 +867,7 @@ pub async fn check_duplicate_assignment(
         }
     }
     
-    // ✅ After all retries exhausted, log critical error
+    // After all retries exhausted, log critical error
     eprintln!("│ {}❌ CRITICAL{}: Duplicate check failed after {} retries", RED, RESET, MAX_RETRIES);
     Err("All duplicate check attempts failed".to_string())
 }
@@ -923,9 +923,9 @@ async fn try_gemini_duplicate_check(prompt: &str) -> Result<Option<Uuid>, String
         }
         
         if status.is_success() {
-            all_rate_limited = false;
+            //all_rate_limited = false;
             clear_previous_trying(&mut last_trying);
-            println!("│ {}✅ SUCCESS{} : {} (Gemini {}/{})", GREEN, RESET, model, index, GEMINI_MODELS.len());
+            println!("{}✅ SUCCESS{} : {} (Gemini {}/{})", GREEN, RESET, model, index, GEMINI_MODELS.len());
             
             let gemini_response: GeminiResponse = response.json().await
                 .map_err(|e| format!("Parse error: {}", e))?;
@@ -959,7 +959,7 @@ async fn try_gemini_duplicate_check(prompt: &str) -> Result<Option<Uuid>, String
     Err("All Gemini models failed".to_string())
 }
 
-// ✅ ADD GROQ FALLBACK
+// ADD GROQ FALLBACK FOR DUPLICATION CHECK
 async fn try_groq_duplicate_check(prompt: &str) -> Result<Option<Uuid>, String> {
     let api_key = std::env::var("GROQ_API_KEY")
         .map_err(|_| "GROQ_API_KEY not set".to_string())?;
@@ -1006,7 +1006,7 @@ async fn try_groq_duplicate_check(prompt: &str) -> Result<Option<Uuid>, String> 
         
         if status.is_success() {
             clear_previous_trying(&mut last_trying);
-            println!("│ {}✅ SUCCESS{} : {} (Groq {}/{})", GREEN, RESET, model, index, GROQ_REASONING_MODELS.len());
+            println!("{}✅ SUCCESS{} : {} (Groq {}/{})", GREEN, RESET, model, index, GROQ_REASONING_MODELS.len());
             
             let groq_response: GroqResponse = response.json().await
                 .map_err(|e| format!("Parse error: {}", e))?;
@@ -1040,7 +1040,7 @@ async fn try_groq_duplicate_check(prompt: &str) -> Result<Option<Uuid>, String> 
 pub async fn match_update_to_assignment(
     changes: &str,
     keywords: &[String],
-    active_assignments: &[Assignment],  // This now expects 100 assignments
+    active_assignments: &[Assignment],
     course_map: &HashMap<Uuid, String>,
     parallel_codes: &[String],
 ) -> Result<Option<Uuid>, String> {
@@ -1054,10 +1054,43 @@ pub async fn match_update_to_assignment(
     }
     println!("│");
     
-    let result = try_gemini_matching(&prompt).await;
+    // ✅ ADD RETRY LOGIC (same as classification and duplicate check)
+    for attempt in 0..MAX_RETRIES {
+        if attempt > 0 {
+            retry_with_countdown(attempt).await;
+        }
+        
+        // Try Gemini first
+        match try_gemini_matching(&prompt).await {
+            Ok(result) => {
+                println!("{}└──────────────────────────────────────────────{}", GRAY, RESET);
+                return Ok(result);
+            }
+            Err(e) if e == "rate limit" => {
+                println!("│ {}🔄 Falling back{} to Groq for matching...", YELLOW, RESET);
+            }
+            Err(_) => {}
+        }
+        
+        // Fallback to Groq
+        match try_groq_matching(&prompt).await {
+            Ok(result) => {
+                println!("{}└──────────────────────────────────────────────{}", GRAY, RESET);
+                return Ok(result);
+            }
+            Err(_) => {
+                if attempt < MAX_RETRIES - 1 {
+                    println!("│ {}⚠️ Matching failed{} - will retry ({}/{})", 
+                             YELLOW, RESET, attempt + 1, MAX_RETRIES - 1);
+                }
+            }
+        }
+    }
     
+    // ✅ After all retries exhausted
+    eprintln!("│ {}❌ CRITICAL{}: Matching failed after {} retries", RED, RESET, MAX_RETRIES);
     println!("{}└──────────────────────────────────────────────{}", GRAY, RESET);
-    result
+    Err("All matching attempts failed".to_string())
 }
 
 async fn try_gemini_matching(prompt: &str) -> Result<Option<Uuid>, String> {
@@ -1098,11 +1131,7 @@ async fn try_gemini_matching(prompt: &str) -> Result<Option<Uuid>, String> {
                 all_rate_limited = false;
                 clear_previous_trying(&mut last_trying);
                 println!("│ {}❌ FAILED{} : {} - Network error", RED, RESET, model);
-                if index < GEMINI_MODELS.len() {
-                    continue;
-                } else {
-                    return Err("All Gemini models failed for matching".to_string());
-                }
+                continue;
             }
         };
         
@@ -1110,11 +1139,7 @@ async fn try_gemini_matching(prompt: &str) -> Result<Option<Uuid>, String> {
         
         if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
             clear_previous_trying(&mut last_trying);
-            if index < GEMINI_MODELS.len() {
-                continue;
-            } else {
-                return Err("rate limit".to_string());
-            }
+            continue;
         }
         
         if status.is_success() {
@@ -1134,17 +1159,78 @@ async fn try_gemini_matching(prompt: &str) -> Result<Option<Uuid>, String> {
         all_rate_limited = false;
         clear_previous_trying(&mut last_trying);
         println!("│ {}❌ FAILED{} : {} - HTTP {}", RED, RESET, model, status);
-        if index < GEMINI_MODELS.len() {
-            continue;
-        }
     }
     
     if all_rate_limited {
-        println!("│ {}⚠️ R-LIMIT{} : on all gemini models", YELLOW, RESET);
         return Err("rate limit".to_string());
     }
     
     Err("All Gemini models failed for matching".to_string())
+}
+
+// GROQ FALLBACK FOR MATCHING
+async fn try_groq_matching(prompt: &str) -> Result<Option<Uuid>, String> {
+    let api_key = std::env::var("GROQ_API_KEY")
+        .map_err(|_| "GROQ_API_KEY not set".to_string())?;
+    
+    let mut last_trying = false;
+    
+    for (idx, model) in GROQ_REASONING_MODELS.iter().enumerate() {
+        let index = idx + 1;
+        print_trying_line(model, index, GROQ_REASONING_MODELS.len(), &mut last_trying);
+        
+        let url = "https://api.groq.com/openai/v1/chat/completions";
+        
+        let request_body = json!({
+            "model": model,
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.2,
+            "max_completion_tokens": 4096,
+            "response_format": { "type": "json_object" }
+        });
+        
+        let client = reqwest::Client::new();
+        let response = match client
+            .post(url)
+            .header("Authorization", format!("Bearer {}", api_key))
+            .header("Content-Type", "application/json")
+            .json(&request_body)
+            .send()
+            .await
+        {
+            Ok(r) => r,
+            Err(_) => {
+                clear_previous_trying(&mut last_trying);
+                println!("│ {}❌ FAILED{} : {} - Network error", RED, RESET, model);
+                continue;
+            }
+        };
+        
+        let status = response.status();
+        
+        if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
+            clear_previous_trying(&mut last_trying);
+            continue;
+        }
+        
+        if status.is_success() {
+            clear_previous_trying(&mut last_trying);
+            println!("│ {}✅ SUCCESS{} : {} (Groq {}/{})", GREEN, RESET, model, index, GROQ_REASONING_MODELS.len());
+            
+            let groq_response: GroqResponse = response.json().await
+                .map_err(|e| format!("Failed to deserialize: {}", e))?;
+            
+            let ai_text = extract_groq_text(&groq_response)?;
+            let result = parse_match_result(&ai_text)?;
+            
+            return Ok(result);
+        }
+        
+        clear_previous_trying(&mut last_trying);
+        println!("│ {}❌ FAILED{} : {} - HTTP {}", RED, RESET, model, status);
+    }
+    
+    Err("All Groq models failed for matching".to_string())
 }
 
 // ===== LOGGING HELPER =====
