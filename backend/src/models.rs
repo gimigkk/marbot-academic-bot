@@ -191,6 +191,83 @@ pub enum AIClassification {
     },
 }
 
+impl AIClassification {
+    /// Clean up parallel codes - if "all" is present, remove all other codes
+    pub fn clean_parallel_codes(self) -> Self {
+        match self {
+            AIClassification::AssignmentInfo { 
+                course_name, 
+                title, 
+                deadline, 
+                description, 
+                parallel_codes,
+                original_message 
+            } => {
+                let cleaned_codes = if parallel_codes.iter().any(|c| c.eq_ignore_ascii_case("all")) {
+                    vec!["all".to_string()]
+                } else {
+                    parallel_codes
+                };
+                
+                AIClassification::AssignmentInfo {
+                    course_name,
+                    title,
+                    deadline,
+                    description,
+                    parallel_codes: cleaned_codes,
+                    original_message,
+                }
+            }
+            
+            AIClassification::MultipleAssignments { assignments, original_message } => {
+                let cleaned_assignments = assignments
+                    .into_iter()
+                    .map(|mut assignment| {
+                        if assignment.parallel_codes.iter().any(|c| c.eq_ignore_ascii_case("all")) {
+                            assignment.parallel_codes = vec!["all".to_string()];
+                        }
+                        assignment
+                    })
+                    .collect();
+                
+                AIClassification::MultipleAssignments {
+                    assignments: cleaned_assignments,
+                    original_message,
+                }
+            }
+            
+            AIClassification::AssignmentUpdate {
+                reference_keywords,
+                changes,
+                new_deadline,
+                new_title,
+                new_description,
+                parallel_codes,
+                original_message,
+            } => {
+                let cleaned_codes = if parallel_codes.iter().any(|c| c.eq_ignore_ascii_case("all")) {
+                    vec!["all".to_string()]
+                } else {
+                    parallel_codes
+                };
+                
+                AIClassification::AssignmentUpdate {
+                    reference_keywords,
+                    changes,
+                    new_deadline,
+                    new_title,
+                    new_description,
+                    parallel_codes: cleaned_codes,
+                    original_message,
+                }
+            }
+            
+            // Unrecognized doesn't have parallel codes
+            other => other,
+        }
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum UnrecognizedCategory {

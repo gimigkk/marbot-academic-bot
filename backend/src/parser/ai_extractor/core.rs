@@ -733,16 +733,42 @@ pub async fn check_duplicate_assignment(
     description: &str,
     course_name: &str,
     parallel_codes: &[String],
-    existing_assignments: &[Assignment],  // This now expects 100 assignments
+    existing_assignments: &[Assignment],
     course_map: &HashMap<Uuid, String>,
 ) -> Result<Option<Uuid>, String> {
     
     let new_numbers = extract_numbers(title);
     let new_type = extract_assignment_type(title);
     
+    // Helper function to check if parallel codes overlap (handles "all" case)
+    fn parallels_overlap(new_codes: &[String], existing_codes: &[String]) -> bool {
+        // If either has "all", they overlap
+        if new_codes.iter().any(|c| c == "all") || existing_codes.iter().any(|c| c == "all") {
+            return true;
+        }
+        
+        // If both are empty, consider them overlapping (no parallel restriction)
+        if new_codes.is_empty() && existing_codes.is_empty() {
+            return true;
+        }
+        
+        // If one is empty and the other isn't, no overlap
+        if new_codes.is_empty() || existing_codes.is_empty() {
+            return false;
+        }
+        
+        // Check for actual overlap
+        new_codes.iter().any(|new_p| 
+            existing_codes.iter().any(|existing_p| 
+                new_p.eq_ignore_ascii_case(existing_p)
+            )
+        )
+    }
+    
     let filtered: Vec<&Assignment> = existing_assignments
         .iter()
         .filter(|a| {
+            // 1. Must be same course
             let same_course = a.course_id
                 .and_then(|id| course_map.get(&id))
                 .map(|name| name.eq_ignore_ascii_case(course_name))
@@ -750,27 +776,33 @@ pub async fn check_duplicate_assignment(
             
             if !same_course { return false; }
             
-            if !parallel_codes.is_empty() && !a.parallel_codes.is_empty() {
-                let has_overlap = parallel_codes.iter()
-                    .any(|new_p| a.parallel_codes.iter()
-                        .any(|existing_p| new_p.eq_ignore_ascii_case(existing_p)));
-                
-                if !has_overlap { return false; }
+            // 2. Check parallel overlap (with "all" handling)
+            if !parallels_overlap(parallel_codes, &a.parallel_codes) {
+                return false;
             }
             
+            // 3. Check numbers - if both have numbers, they must match
             let existing_numbers = extract_numbers(&a.title);
             if !new_numbers.is_empty() && !existing_numbers.is_empty() {
-                if new_numbers != existing_numbers { return false; }
-            }
-            
-            if let Some(ref new_t) = new_type {
-                if let Some(existing_t) = extract_assignment_type(&a.title) {
-                    if new_t != &existing_t { return false; }
+                if new_numbers != existing_numbers { 
+                    return false; 
                 }
             }
             
+            // 4. Check assignment type - must match
+            if let Some(ref new_t) = new_type {
+                if let Some(existing_t) = extract_assignment_type(&a.title) {
+                    if new_t != &existing_t { 
+                        return false; 
+                    }
+                }
+            }
+            
+            // 5. Check word overlap - basic similarity
             let similarity = calculate_word_overlap(title, &a.title);
-            if similarity < 0.2 { return false; }
+            if similarity < 0.2 { 
+                return false; 
+            }
             
             true
         })

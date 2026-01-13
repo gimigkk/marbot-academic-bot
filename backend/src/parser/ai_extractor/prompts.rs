@@ -387,16 +387,33 @@ COMMON ABBREVIATIONS IN INFORMAL MESSAGES:
 Format: YYYY-MM-DD HH:MM (always include time component)
 
 PARALLEL CODES:
+═══════════════════════════════════════════════════════════════════
+⚠️  CRITICAL: "all" PARALLEL CODE HANDLING
+═══════════════════════════════════════════════════════════════════
+If message mentions "all", "semua", or "seluruh":
+→ Return ONLY ["all"]
+→ DO NOT include other parallel codes
+→ "all" already includes every parallel
+
+WRONG: ["all", "k2"]  ❌
+RIGHT: ["all"]        ✅
+
+WRONG: ["all", "k1", "k2"]  ❌
+RIGHT: ["all"]              ✅
+═══════════════════════════════════════════════════════════════════
+
 - Valid codes (lowercase): k1, k2, k3, k4, p1, p2, p3, p4, r1, r2, r3, r4, all
 - Return as ARRAY (assignments can target multiple parallels)
 - Extract from message or use context hint if not explicitly mentioned
 - Look in course abbreviation section (e.g., "GRAFKOM K2" → ["k2"])
-- If the parallel code is all, no need to add any other parallel
 
 Examples:
 - "Tugas untuk k1 dan k2" → ["k1", "k2"]
 - "GRAFKOM K2" → ["k2"]
 - "Semua kelas" → ["all"]
+- "Semua parallel, k2" → ["all"] (NOT ["all", "k2"])
+- "All students including k1" → ["all"] (NOT ["all", "k1"])
+- "Untuk seluruh kelas dan k3" → ["all"] (NOT ["all", "k3"])
 - No mention + no context → []
 
 DESCRIPTION FIELD (MANDATORY):

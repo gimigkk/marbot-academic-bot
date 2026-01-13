@@ -380,7 +380,7 @@ pub async fn get_active_assignments(pool: &PgPool) -> Result<Vec<Assignment>> {
         FROM assignments
         WHERE deadline > $1 OR deadline IS NULL
         ORDER BY created_at DESC
-        LIMIT 12
+        LIMIT 100
         "#
     )
     .bind(now)

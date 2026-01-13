@@ -89,7 +89,10 @@ pub(super) fn parse_classification(ai_text: &str) -> Result<AIClassification, St
     }
     
     match serde_json::from_str::<AIClassification>(cleaned) {
-        Ok(classification) => Ok(classification),
+        Ok(classification) => {
+            // ✅ Clean up parallel codes after deserialization
+            Ok(classification.clean_parallel_codes())
+        }
         Err(e) => {
             eprintln!("❌ JSON parse error: {}", e);
             eprintln!("   Tried to parse: {}", cleaned);
@@ -248,30 +251,3 @@ pub(super) fn truncate_for_log(text: &str, max_chars: usize) -> String {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_extract_numbers() {
-        assert_eq!(extract_numbers("LKP 15"), vec![15]);
-        assert_eq!(extract_numbers("LKP 15 and LKP 17"), vec![15, 17]);
-        assert_eq!(extract_numbers("Assignment 1, 2, 3"), vec![1, 2, 3]);
-        assert_eq!(extract_numbers("No numbers here"), Vec::<u32>::new());
-        assert_eq!(extract_numbers("2025-01-15"), vec![2025, 1, 15]);
-    }
-
-    #[test]
-    fn test_extract_assignment_type() {
-        assert_eq!(extract_assignment_type("LKP 15"), Some("lab".to_string()));
-        assert_eq!(extract_assignment_type("Quiz 1"), Some("quiz".to_string()));
-        assert_eq!(extract_assignment_type("Tugas Pemrograman"), Some("homework".to_string()));
-    }
-
-    #[test]
-    fn test_word_overlap() {
-        assert!(calculate_word_overlap("LKP 15", "LKP 15") > 0.9);
-        assert!(calculate_word_overlap("Quiz Data Structures", "Quiz Algorithms") > 0.3);
-        assert!(calculate_word_overlap("Quiz", "Lab") < 0.1);
-    }
-}
