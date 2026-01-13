@@ -581,13 +581,12 @@ async fn webhook(
         MessageType::NeedsAI(text) => {
             println!("🤖 Processing with AI...");
             
-            // Image handling (GUNAKAN VERSI AMAN DARI KODE ORIGINAL ANDA)
+            // Image handling (same as before)
             let image_base64 = if payload.payload.has_media.unwrap_or(false) {
                 if let Some(ref media) = payload.payload.media {
                     if let Some(ref media_url) = media.url {
-                         if media.mimetype.as_ref().map(|m| m.starts_with("image/")).unwrap_or(false) {
+                        if media.mimetype.as_ref().map(|m| m.starts_with("image/")).unwrap_or(false) {
                             let api_key = std::env::var("WAHA_API_KEY").unwrap_or_else(|_| "devkey123".to_string());
-                            // Pakai fetch_image_from_url yang AMAN
                             match fetch_image_from_url(media_url, &api_key).await {
                                 Ok(base64) => Some(base64),
                                 Err(e) => {
@@ -595,14 +594,16 @@ async fn webhook(
                                     None
                                 }
                             }
-                         } else { None }
+                        } else { None }
                     } else { None }
                 } else { None }
             } else { None };
             
             // Context fetching
             let courses_list = crud::get_all_courses_formatted(&state.pool).await.unwrap_or_default();
-            let assignments = crud::get_assignments(&state.pool).await.unwrap_or_default();
+            
+            // USE NEW FUNCTION: get_assignments_for_classification (20 assignments)
+            let assignments = crud::get_assignments_for_classification(&state.pool).await.unwrap_or_default();
             
             let course_map = sqlx::query_as::<_, (uuid::Uuid, String)>("SELECT id, name FROM courses")
                 .fetch_all(&state.pool).await.map(|rows| rows.into_iter().collect()).unwrap_or_default();
@@ -614,7 +615,7 @@ async fn webhook(
             match extract_with_ai(
                 &text, 
                 &courses_list, 
-                &assignments, 
+                &assignments,  // 20 assignments for classification
                 &course_map, 
                 image_base64.as_deref(),
                 sender_phone,   
@@ -797,7 +798,7 @@ async fn handle_ai_classification(
                     None
                 };
                 
-                let active_assignments = crud::get_recent_assignments_for_update(&pool_clone)
+                let active_assignments = crud::get_recent_assignments_for_matching(&pool_clone)
                     .await
                     .unwrap_or_default();
                 
@@ -1045,7 +1046,8 @@ async fn handle_single_assignment(
             .map(|r| r.into_iter().collect())
             .unwrap_or_default();
             
-            let existing_assignments = crud::get_recent_assignments_for_update(&pool)
+            // ✅ USE NEW FUNCTION: get_recent_assignments_for_duplicate_check (100 assignments)
+            let existing_assignments = crud::get_recent_assignments_for_duplicate_check(&pool)
                 .await
                 .unwrap_or_default();
             

@@ -733,7 +733,7 @@ pub async fn check_duplicate_assignment(
     description: &str,
     course_name: &str,
     parallel_codes: &[String],
-    existing_assignments: &[Assignment],
+    existing_assignments: &[Assignment],  // This now expects 100 assignments
     course_map: &HashMap<Uuid, String>,
 ) -> Result<Option<Uuid>, String> {
     
@@ -780,6 +780,7 @@ pub async fn check_duplicate_assignment(
         return Ok(None);
     }
     
+    // Limit to top 3 most similar for AI check
     if filtered.len() > 3 {
         return Ok(None);
     }
@@ -897,7 +898,7 @@ async fn try_gemini_duplicate_check(prompt: &str) -> Result<Option<Uuid>, String
 pub async fn match_update_to_assignment(
     changes: &str,
     keywords: &[String],
-    active_assignments: &[Assignment],
+    active_assignments: &[Assignment],  // This now expects 100 assignments
     course_map: &HashMap<Uuid, String>,
     parallel_codes: &[String],
 ) -> Result<Option<Uuid>, String> {

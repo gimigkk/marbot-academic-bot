@@ -13,8 +13,8 @@ fn build_context_assignments_list(
         return "No assignment in database.".to_string();
     }
     
-    let assignments_to_show = assignments.iter().take(12);
-    let count = assignments.len().min(12);
+    let assignments_to_show = assignments.iter().take(20);
+    let count = assignments.len().min(20);
     
     let list = assignments_to_show
         .map(|a| {
@@ -41,7 +41,7 @@ fn build_context_assignments_list(
         .collect::<Vec<_>>()
         .join("\n");
     
-    if assignments.len() > 12 {
+    if assignments.len() > 20 {
         format!("{}\n(Showing {} most recent out of {} total assignments)", list, count, assignments.len())
     } else {
         list
@@ -352,7 +352,7 @@ TITLE EXTRACTION RULES:
    - "Tugas Individu Pertemuan 8" ✓
    - "Tugas individu untuk pertemuan ke-8 yang harus dikerjakan sendiri" ✗
 
-   
+
 DEADLINE EXTRACTION (priority order):
 
 COMMON ABBREVIATIONS IN INFORMAL MESSAGES:
@@ -478,8 +478,6 @@ CORE PRINCIPLES
 8. Extract parallel codes from course abbreviations (e.g., "GRAFKOM K2")
 9. Use semantic understanding (not literal matching)
 10. When uncertain: NEW > UPDATE (avoid bad matches)
-11. When uncertain: UNRECOGNIZED > false positive
-12. Course boundaries: Never match updates across different courses
 11. When uncertain: UNRECOGNIZED > false positive
 12. Course boundaries: Never match updates across different courses
 13. UNRECOGNIZED CATEGORIES:

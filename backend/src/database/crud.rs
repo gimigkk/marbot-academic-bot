@@ -167,7 +167,112 @@ pub async fn get_last_completed_assignment(
     Ok(assignment)
 }
 
-/// Get all assignments
+/// Get recent assignments for duplicate detection (larger limit)
+pub async fn get_recent_assignments_for_duplicate_check(
+    pool: &PgPool
+) -> Result<Vec<Assignment>, sqlx::Error> {
+    let assignments = sqlx::query_as::<_, Assignment>(
+        r#"
+        SELECT 
+            id,
+            created_at,
+            course_id,
+            title,
+            description,
+            deadline,
+            parallel_codes,
+            sender_id,
+            message_ids,
+            reminder_1h_sent,
+            relating_messages
+        FROM assignments
+        WHERE created_at > NOW() - INTERVAL '30 days'
+        ORDER BY created_at DESC
+        LIMIT 100
+        "#
+    )
+    .fetch_all(pool)
+    .await?;
+    
+    println!("🔍 Fetched {} assignments for duplicate check", assignments.len());
+    
+    Ok(assignments)
+}
+
+/// Get recent assignments for update matching (larger limit)
+pub async fn get_recent_assignments_for_matching(
+    pool: &PgPool
+) -> Result<Vec<Assignment>, sqlx::Error> {
+    let assignments = sqlx::query_as::<_, Assignment>(
+        r#"
+        SELECT 
+            id,
+            created_at,
+            course_id,
+            title,
+            description,
+            deadline,
+            parallel_codes,
+            sender_id,
+            message_ids,
+            reminder_1h_sent,
+            relating_messages
+        FROM assignments
+        WHERE created_at > NOW() - INTERVAL '30 days'
+        ORDER BY created_at DESC
+        LIMIT 100
+        "#
+    )
+    .fetch_all(pool)
+    .await?;
+    
+    println!("🔍 Fetched {} assignments for update matching", assignments.len());
+    
+    Ok(assignments)
+}
+
+/// Get assignments for classification context (standard limit of 20)
+pub async fn get_assignments_for_classification(pool: &PgPool) -> Result<Vec<Assignment>> {
+    println!("🔍 DEBUG: Calling get_assignments_for_classification()...");
+    
+    let result = sqlx::query_as::<_, Assignment>(
+        r#"
+        SELECT 
+            id,
+            created_at,
+            course_id,
+            title,
+            description,
+            deadline,
+            parallel_codes,
+            sender_id,
+            message_ids,
+            reminder_1h_sent,
+            relating_messages
+        FROM assignments
+        ORDER BY created_at DESC
+        LIMIT 20
+        "#
+    )
+    .fetch_all(pool)
+    .await;
+
+    match &result {
+        Ok(assignments) => {
+            println!("✅ DEBUG: Successfully fetched {} assignments for classification", assignments.len());
+            if assignments.is_empty() {
+                println!("⚠️  DEBUG: No assignments found in database!");
+            }
+        }
+        Err(e) => {
+            eprintln!("❌ DEBUG: get_assignments_for_classification() failed: {:?}", e);
+        }
+    }
+
+    result
+}
+
+// Update the original get_assignments to use LIMIT 20 as well
 pub async fn get_assignments(pool: &PgPool) -> Result<Vec<Assignment>> {
     println!("🔍 DEBUG: Calling get_assignments()...");
     
@@ -187,7 +292,7 @@ pub async fn get_assignments(pool: &PgPool) -> Result<Vec<Assignment>> {
             relating_messages
         FROM assignments
         ORDER BY created_at DESC
-        LIMIT 12
+        LIMIT 20
         "#
     )
     .fetch_all(pool)
@@ -383,40 +488,6 @@ pub async fn get_active_assignments_for_user(
     
     Ok(assignments)
 }
-
-
-/// Get recent assignments for update matching
-pub async fn get_recent_assignments_for_update(
-    pool: &PgPool
-) -> Result<Vec<Assignment>, sqlx::Error> {
-    let assignments = sqlx::query_as::<_, Assignment>(
-        r#"
-        SELECT 
-            id,
-            created_at,
-            course_id,
-            title,
-            description,
-            deadline,
-            parallel_codes,
-            sender_id,
-            message_ids,
-            reminder_1h_sent,
-            relating_messages
-        FROM assignments
-        WHERE created_at > NOW() - INTERVAL '30 days'
-        ORDER BY created_at DESC
-        LIMIT 12
-        "#
-    )
-    .fetch_all(pool)
-    .await?;
-    
-    println!("🔍 Fetched {} assignments for duplicate check", assignments.len());
-    
-    Ok(assignments)
-}
-
 
 
 /// Find course by name (case-insensitive)

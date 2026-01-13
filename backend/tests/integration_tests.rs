@@ -605,7 +605,7 @@ async fn save_classification_to_db(
             // For updates, try to find and update existing assignment
             if let Some(course_name) = reference_keywords.first() {
                 if let Ok(Some(course)) = crud::get_course_by_name(pool, course_name).await {
-                    let active_assignments = crud::get_recent_assignments_for_update(pool).await.unwrap_or_default();
+                    let active_assignments = crud::get_recent_assignments_for_matching(pool).await.unwrap_or_default();
                     
                     // Find matching assignment
                     let matching = active_assignments.iter()
