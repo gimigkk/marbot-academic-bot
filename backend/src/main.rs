@@ -281,7 +281,7 @@ async fn webhook(
     // Ignore messages from debug group
     let debug_group_id = std::env::var("DEBUG_GROUP_ID").ok();
 
-    // ✅ EXTRACT SENDER AND CHAT IDs
+    // EXTRACT SENDER AND CHAT IDs
     let chat_id = &payload.payload.from;  
     
     // Extract sender's actual phone number
@@ -293,7 +293,7 @@ async fn webhook(
         chat_id
     };
     
-    // ✅ Extract WhatsApp display name
+    // Extract WhatsApp display name
     let sender_name = payload.payload.data
         .as_ref()
         .and_then(|data| data.push_name.as_ref())
@@ -1020,7 +1020,7 @@ async fn handle_single_assignment(
         .and_then(|d| crud::parse_deadline(d).ok());
     let parallel_code_parsed = extract_parallel_code(&title);
 
-    // ✅ Build final parallel codes Vec - MORE EXPLICIT
+    // Build final parallel codes Vectors - MORE EXPLICIT
     let final_parallel_codes: Vec<String> = {
         if !parallel_codes.is_empty() {
             parallel_codes.clone()
@@ -1046,7 +1046,7 @@ async fn handle_single_assignment(
             .map(|r| r.into_iter().collect())
             .unwrap_or_default();
             
-            // ✅ USE NEW FUNCTION: get_recent_assignments_for_duplicate_check (100 assignments)
+            // USE NEW FUNCTION: get_recent_assignments_for_duplicate_check (100 assignments)
             let existing_assignments = crud::get_recent_assignments_for_duplicate_check(&pool)
                 .await
                 .unwrap_or_default();

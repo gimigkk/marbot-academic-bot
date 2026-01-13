@@ -84,11 +84,12 @@ pub async fn handle_command(
         }
 
         BotCommand::Todo => {
-            println!("✅ Todo command received from {}", user_phone);
+            println!("✅ Todo command received from {} ({})", user_name, user_phone);
 
             match get_active_assignments_for_user(pool, user_phone).await {
                 Ok(assignments) => {
-                    let header = format!("*[To-Do] User ID: {}*", user_name);
+                    // Display sender's WhatsApp name instead of phone number
+                    let header = format!("*[To-Do] {}*", user_name);
                     format_assignments_list(assignments, &header, false, true)
                 }
                 Err(e) => {
