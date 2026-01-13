@@ -251,7 +251,7 @@ pub async fn get_assignments_for_classification(pool: &PgPool) -> Result<Vec<Ass
             relating_messages
         FROM assignments
         ORDER BY created_at DESC
-        LIMIT 20
+        LIMIT 15
         "#
     )
     .fetch_all(pool)

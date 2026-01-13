@@ -13,8 +13,8 @@ fn build_context_assignments_list(
         return "No assignment in database.".to_string();
     }
     
-    let assignments_to_show = assignments.iter().take(20);
-    let count = assignments.len().min(20);
+    let assignments_to_show = assignments.iter().take(10);
+    let count = assignments.len().min(10);
     
     let list = assignments_to_show
         .map(|a| {
@@ -35,13 +35,13 @@ fn build_context_assignments_list(
             
             format!(
                 "- Course: {}, Title: \"{}\", Deadline: {}, Parallels: {}, Desc: \"{}\"",
-                course_name, a.title, deadline, parallel, truncate_for_log(&a.description, 80)
+                course_name, a.title, deadline, parallel, truncate_for_log(&a.description, 40)
             )
         })
         .collect::<Vec<_>>()
         .join("\n");
     
-    if assignments.len() > 20 {
+    if assignments.len() > 10 {
         format!("{}\n(Showing {} most recent out of {} total assignments)", list, count, assignments.len())
     } else {
         list
@@ -173,15 +173,13 @@ ASSIGNMENTS (require deliverable work):
 - "Tugas dikumpulkan ketika praktikum" (assignment collected during class)
 
 NOT ASSIGNMENTS (no deliverable to submit):
-- CLASS SESSIONS: "praktikum besok", "kelas hari ini", "lecture tomorrow", "lab session Friday"
-- ATTENDANCE: "come to class", "hadir ke lab", "meeting at 10am", "pertemuan Senin"
+- CLASS SESSIONS/ATTENDENCE: "praktikum besok", "hadir ke lab", "lecture tomorrow", "lab session Friday"
 - ANNOUNCEMENTS: "topik minggu ini", "we'll discuss X", "next week's topic"
 - READING/VIEWING: "baca chapter 5", "watch this video", "prepare reading" (without submission)
 - RESOURCES: "here are the slides", "check the forum", "see course website"
 
-CRITICAL DISTINCTION:
-- "Praktikum besok" → Class schedule (NO assignment)
-- "Tugas dikumpulkan ketika praktikum" → Assignment (deliverable EXISTS)
+CRITICAL: "Praktikum besok" = NO assignment | "Tugas dikumpulkan ketika praktikum" = Assignment"
+
 
 ═══════════════════════════════════════════════════════════════════
 CONTEXT
@@ -310,26 +308,11 @@ Key distinction:
 PRIORITY 3: EXTRACTION RULES
 ═══════════════════════════════════════════════════════════════════
 
-TITLE EXTRACTION (CRITICAL - AVOID GENERIC TITLES):
-The title should be SPECIFIC and IDENTIFIABLE. Users will see this in a list. MINIMUM of 2 words, MAX 40 characters.
+TITLE EXTRACTION (SPECIFIC, 2-40 chars):
+BAD: "Tugas", "Assignment", "Praktikum" (too generic)
+GOOD: "LKP 15", "Quiz 3", "Tugas Berpasangan", "Coding on Paper"
 
-BAD TITLES (too generic):
-- "Tugas" (what assignment?)
-- "Tugas Pemrograman" (which one?)
-- "Assignment" (not specific)
-- "Praktikum" (which praktikum?)
-- "Latihan" (which exercise?)
-
-GOOD TITLES (specific and identifiable):
-- "LKP 15" (lab assignment number)
-- "Quiz 3" (quiz number)
-- "Tugas Berpasangan" (describes type)
-- "Laporan Praktikum P2" (specific report)
-- "Coding on Paper" (describes content)
-- "Tugas Individu Pertemuan 8" (specific meeting)
-- "Project Fase 2" (project phase)
-- "Essay Final" (final essay)
-- "Tugas Kelompok" (group assignment)
+Rules: Use identifiers (numbers/names) → descriptive type → never just "Tugas"
 
 TITLE EXTRACTION RULES:
 1. Look for IDENTIFIERS first:
@@ -388,32 +371,19 @@ Format: YYYY-MM-DD HH:MM (always include time component)
 
 PARALLEL CODES:
 ═══════════════════════════════════════════════════════════════════
-⚠️  CRITICAL: "all" PARALLEL CODE HANDLING
+⚠️  "all" HANDLING: If "all"/"semua" mentioned → return ONLY ["all"]
+    WRONG: ["all", "k2"] ❌  |  RIGHT: ["all"] ✅
 ═══════════════════════════════════════════════════════════════════
-If message mentions "all", "semua", or "seluruh":
-→ Return ONLY ["all"]
-→ DO NOT include other parallel codes
-→ "all" already includes every parallel
+Valid: k1-k4, p1-p4, r1-r4, all
+Examples: "k1 dan k2"→["k1","k2"] | "semua parallel, k2"→["all"]
 
-WRONG: ["all", "k2"]  ❌
-RIGHT: ["all"]        ✅
-
-WRONG: ["all", "k1", "k2"]  ❌
-RIGHT: ["all"]              ✅
-═══════════════════════════════════════════════════════════════════
-
-- Valid codes (lowercase): k1, k2, k3, k4, p1, p2, p3, p4, r1, r2, r3, r4, all
 - Return as ARRAY (assignments can target multiple parallels)
 - Extract from message or use context hint if not explicitly mentioned
 - Look in course abbreviation section (e.g., "GRAFKOM K2" → ["k2"])
 
-Examples:
-- "Tugas untuk k1 dan k2" → ["k1", "k2"]
+More Examples:
 - "GRAFKOM K2" → ["k2"]
-- "Semua kelas" → ["all"]
-- "Semua parallel, k2" → ["all"] (NOT ["all", "k2"])
 - "All students including k1" → ["all"] (NOT ["all", "k1"])
-- "Untuk seluruh kelas dan k3" → ["all"] (NOT ["all", "k3"])
 - No mention + no context → []
 
 DESCRIPTION FIELD (MANDATORY):
