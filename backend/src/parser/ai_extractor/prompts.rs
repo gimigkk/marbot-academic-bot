@@ -390,6 +390,7 @@ PARALLEL CODES:
 - Return as ARRAY (assignments can target multiple parallels)
 - Extract from message or use context hint if not explicitly mentioned
 - Look in course abbreviation section (e.g., "GRAFKOM K2" → ["k2"])
+- If the parallel code is all, no need to add any other parallel
 
 Examples:
 - "Tugas untuk k1 dan k2" → ["k1", "k2"]
