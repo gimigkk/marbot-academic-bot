@@ -959,7 +959,7 @@ async fn try_gemini_duplicate_check(prompt: &str) -> Result<Option<Uuid>, String
     Err("All Gemini models failed".to_string())
 }
 
-// ADD GROQ FALLBACK FOR DUPLICATION CHECK
+// GROQ FALLBACK FOR DUPLICATION CHECK
 async fn try_groq_duplicate_check(prompt: &str) -> Result<Option<Uuid>, String> {
     let api_key = std::env::var("GROQ_API_KEY")
         .map_err(|_| "GROQ_API_KEY not set".to_string())?;
@@ -1054,7 +1054,7 @@ pub async fn match_update_to_assignment(
     }
     println!("│");
     
-    // ✅ ADD RETRY LOGIC (same as classification and duplicate check)
+    // RETRY LOGIC (same as classification and duplicate check)
     for attempt in 0..MAX_RETRIES {
         if attempt > 0 {
             retry_with_countdown(attempt).await;
@@ -1087,7 +1087,7 @@ pub async fn match_update_to_assignment(
         }
     }
     
-    // ✅ After all retries exhausted
+    // After all retries exhausted
     eprintln!("│ {}❌ CRITICAL{}: Matching failed after {} retries", RED, RESET, MAX_RETRIES);
     println!("{}└──────────────────────────────────────────────{}", GRAY, RESET);
     Err("All matching attempts failed".to_string())
