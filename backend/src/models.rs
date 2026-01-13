@@ -193,6 +193,7 @@ pub enum AIClassification {
 
 impl AIClassification {
     /// Clean up parallel codes - if "all" is present, remove all other codes
+    /// This is a safety net for when AI makes mistakes
     pub fn clean_parallel_codes(self) -> Self {
         match self {
             AIClassification::AssignmentInfo { 
@@ -203,11 +204,7 @@ impl AIClassification {
                 parallel_codes,
                 original_message 
             } => {
-                let cleaned_codes = if parallel_codes.iter().any(|c| c.eq_ignore_ascii_case("all")) {
-                    vec!["all".to_string()]
-                } else {
-                    parallel_codes
-                };
+                let cleaned_codes = Self::clean_codes_array(parallel_codes);
                 
                 AIClassification::AssignmentInfo {
                     course_name,
@@ -223,9 +220,7 @@ impl AIClassification {
                 let cleaned_assignments = assignments
                     .into_iter()
                     .map(|mut assignment| {
-                        if assignment.parallel_codes.iter().any(|c| c.eq_ignore_ascii_case("all")) {
-                            assignment.parallel_codes = vec!["all".to_string()];
-                        }
+                        assignment.parallel_codes = Self::clean_codes_array(assignment.parallel_codes);
                         assignment
                     })
                     .collect();
@@ -245,11 +240,7 @@ impl AIClassification {
                 parallel_codes,
                 original_message,
             } => {
-                let cleaned_codes = if parallel_codes.iter().any(|c| c.eq_ignore_ascii_case("all")) {
-                    vec!["all".to_string()]
-                } else {
-                    parallel_codes
-                };
+                let cleaned_codes = Self::clean_codes_array(parallel_codes);
                 
                 AIClassification::AssignmentUpdate {
                     reference_keywords,
@@ -264,6 +255,17 @@ impl AIClassification {
             
             // Unrecognized doesn't have parallel codes
             other => other,
+        }
+    }
+    
+    /// Helper function to clean a parallel codes array
+    /// If "all" is present, return only ["all"]
+    fn clean_codes_array(codes: Vec<String>) -> Vec<String> {
+        // Check if "all" is present (case-insensitive)
+        if codes.iter().any(|c| c.eq_ignore_ascii_case("all")) {
+            vec!["all".to_string()]
+        } else {
+            codes
         }
     }
 }

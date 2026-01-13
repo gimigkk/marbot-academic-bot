@@ -742,24 +742,37 @@ pub async fn check_duplicate_assignment(
     
     // Helper function to check if parallel codes overlap (handles "all" case)
     fn parallels_overlap(new_codes: &[String], existing_codes: &[String]) -> bool {
+        // CRITICAL: Clean both arrays first - if either has "all", convert to ["all"]
+        let clean_new = if new_codes.iter().any(|c| c.eq_ignore_ascii_case("all")) {
+            vec!["all".to_string()]
+        } else {
+            new_codes.to_vec()
+        };
+        
+        let clean_existing = if existing_codes.iter().any(|c| c.eq_ignore_ascii_case("all")) {
+            vec!["all".to_string()]
+        } else {
+            existing_codes.to_vec()
+        };
+        
         // If either has "all", they overlap
-        if new_codes.iter().any(|c| c == "all") || existing_codes.iter().any(|c| c == "all") {
+        if clean_new.iter().any(|c| c == "all") || clean_existing.iter().any(|c| c == "all") {
             return true;
         }
         
         // If both are empty, consider them overlapping (no parallel restriction)
-        if new_codes.is_empty() && existing_codes.is_empty() {
+        if clean_new.is_empty() && clean_existing.is_empty() {
             return true;
         }
         
         // If one is empty and the other isn't, no overlap
-        if new_codes.is_empty() || existing_codes.is_empty() {
+        if clean_new.is_empty() || clean_existing.is_empty() {
             return false;
         }
         
         // Check for actual overlap
-        new_codes.iter().any(|new_p| 
-            existing_codes.iter().any(|existing_p| 
+        clean_new.iter().any(|new_p| 
+            clean_existing.iter().any(|existing_p| 
                 new_p.eq_ignore_ascii_case(existing_p)
             )
         )

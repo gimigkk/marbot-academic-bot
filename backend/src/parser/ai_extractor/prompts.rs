@@ -371,20 +371,33 @@ Format: YYYY-MM-DD HH:MM (always include time component)
 
 PARALLEL CODES:
 ═══════════════════════════════════════════════════════════════════
-⚠️  "all" HANDLING: If "all"/"semua" mentioned → return ONLY ["all"]
-    WRONG: ["all", "k2"] ❌  |  RIGHT: ["all"] ✅
+⚠️  CRITICAL "all" RULE (HIGHEST PRIORITY):
+    If "all"/"semua"/"everyone"/"semuanya" appears ANYWHERE:
+    → IMMEDIATELY return ["all"] and STOP processing other parallel codes
+    → IGNORE all other parallel mentions (k1, k2, etc.)
+    → ["all", "k2"] is ALWAYS WRONG ❌
+    → ["all"] is ALWAYS RIGHT ✅
 ═══════════════════════════════════════════════════════════════════
-Valid: k1-k4, p1-p4, r1-r4, all
-Examples: "k1 dan k2"→["k1","k2"] | "semua parallel, k2"→["all"]
+
+Valid codes: k1-k4, p1-p4, r1-r4, all
+
+DECISION TREE:
+1. Does message contain "all"/"semua"/"everyone"? 
+   → YES: Return ["all"] immediately, skip step 2
+   → NO: Proceed to step 2
+2. Extract specific parallel codes (k1, k2, etc.)
+
+Examples:
+- "semua parallel, k2" → ["all"] ✅ (step 1: "semua" found, stop)
+- "untuk all parallel" → ["all"] ✅ (step 1: "all" found, stop)
+- "k1 dan k2" → ["k1","k2"] ✅ (step 1: no "all", step 2: extract codes)
+- "GRAFKOM K2" → ["k2"] ✅ (step 1: no "all", step 2: extract from title)
+- "All students including k1" → ["all"] ✅ (step 1: "all" found, stop)
+- No mention + no context → [] ✅
 
 - Return as ARRAY (assignments can target multiple parallels)
 - Extract from message or use context hint if not explicitly mentioned
 - Look in course abbreviation section (e.g., "GRAFKOM K2" → ["k2"])
-
-More Examples:
-- "GRAFKOM K2" → ["k2"]
-- "All students including k1" → ["all"] (NOT ["all", "k1"])
-- No mention + no context → []
 
 DESCRIPTION FIELD (MANDATORY):
 - NEVER leave empty or null
