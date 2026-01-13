@@ -6,37 +6,37 @@ use chrono::{Utc, FixedOffset};
 // ===== API RESPONSE STRUCTURES =====
 
 #[derive(Debug, Deserialize)]
-pub(super) struct GroqResponse {
+pub struct GroqResponse {  // ← Changed from pub(super)
     pub choices: Vec<GroqChoice>,
 }
 
 #[derive(Debug, Deserialize)]
-pub(super) struct GroqChoice {
+pub struct GroqChoice {
     pub message: GroqMessage,
 }
 
 #[derive(Debug, Deserialize)]
-pub(super) struct GroqMessage {
+pub struct GroqMessage {
     pub content: String,
 }
 
 #[derive(Debug, Deserialize)]
-pub(super) struct GeminiResponse {
+pub struct GeminiResponse {  // ← Changed from pub(super)
     pub candidates: Vec<Candidate>,
 }
 
 #[derive(Debug, Deserialize)]
-pub(super) struct Candidate {
+pub struct Candidate {
     pub content: Content,
 }
 
 #[derive(Debug, Deserialize)]
-pub(super) struct Content {
+pub struct Content {
     pub parts: Vec<Part>,
 }
 
 #[derive(Debug, Deserialize)]
-pub(super) struct Part {
+pub struct Part {
     pub text: String,
 }
 
@@ -53,7 +53,7 @@ pub(super) struct DuplicateCheckResult {
 
 // ===== RESPONSE EXTRACTORS =====
 
-pub(super) fn extract_groq_text(groq_response: &GroqResponse) -> Result<String, String> {
+pub fn extract_groq_text(groq_response: &GroqResponse) -> Result<String, String> {  // ← Changed from pub(super)
     groq_response
         .choices
         .first()
@@ -61,7 +61,7 @@ pub(super) fn extract_groq_text(groq_response: &GroqResponse) -> Result<String, 
         .ok_or_else(|| "Groq returned empty response".to_string())
 }
 
-pub(super) fn extract_ai_text(gemini_response: &GeminiResponse) -> Result<&str, String> {
+pub fn extract_ai_text(gemini_response: &GeminiResponse) -> Result<&str, String> {  // ← Changed from pub(super)
     gemini_response
         .candidates
         .first()
