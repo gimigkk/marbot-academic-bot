@@ -920,8 +920,8 @@ fn calculate_course_hints(
     
     for ai_course_hint in &hints.course_hints {
         println!("│");
-        println!("│ 🎯 Processing: {}", ai_course_hint.course_name);
-        println!("│    Parallels: {:?}", ai_course_hint.parallel_codes);
+        println!("│ 🎯 Processing   : {}", ai_course_hint.course_name);
+        println!("│    Parallels    : {:?}", ai_course_hint.parallel_codes);
         println!("│    Deadline Type: {}", ai_course_hint.deadline_type);
         
         let parallel_schedules = match ai_course_hint.deadline_type.as_str() {
@@ -935,11 +935,11 @@ fn calculate_course_hints(
                 )
             },
             "explicit" => {
-                println!("│    📅 Result: Explicit date (main AI will parse)");
+                println!("│    📅 Result    : Explicit date (main AI will parse)");
                 vec![]
             },
             _ => {
-                println!("│    ❓ Result: Unknown type");
+                println!("│    ❓ Result    : Unknown type");
                 vec![]
             }
         };
@@ -964,12 +964,12 @@ fn calculate_parallel_schedules(
     today: chrono::NaiveDate,
 ) -> Vec<ParallelSchedule> {
     if parallel_codes.is_empty() {
-        println!("│    ⏭️  Result: Skipped (needs parallel for schedule)");
+        println!("│    ⏭️ Result    : Skipped (needs parallel for schedule)");
         return vec![];
     }
     
     if parallel_codes.contains(&"all".to_string()) {
-        println!("│    ⏭️  Result: Skipped ('all' cannot determine specific schedule)");
+        println!("│    ⏭️ Result    : Skipped ('all' cannot determine specific schedule)");
         return vec![];
     }
     

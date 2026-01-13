@@ -67,7 +67,7 @@ pub async fn extract_with_ai(
         format!("\"{}\"", message_display)
     };
     
-    println!("│ {}📝 Message{} : {}{}{}", CYAN, RESET, CYAN, message_truncated, RESET);
+    println!("│ {}📝 Message{}   : {}{}{}", CYAN, RESET, CYAN, message_truncated, RESET);
     
     if let Some(quoted) = quoted_message {
         let quoted_display = quoted
@@ -179,7 +179,7 @@ pub async fn extract_with_ai(
         println!("│ {}🖼️  Image{} : Attached (may be irrelevant meme)", MAGENTA, RESET);
     }
     println!("│ {}📊 Context{} : {} active assignments", CYAN, RESET, active_assignments.len());
-    println!("│ {}📅 Time{} : {}", CYAN, RESET, current_datetime);
+    println!("│ {}📅 Time{}    : {}", CYAN, RESET, current_datetime);
     println!("│");
     
     // Try all models with retries
@@ -1047,7 +1047,7 @@ pub async fn match_update_to_assignment(
     let prompt = build_matching_prompt(changes, keywords, active_assignments, course_map, parallel_codes);
     
     println!("{}┌── 🤖 AI MATCHING ────────────────────────────{}", GRAY, RESET);
-    println!("│ {}🔍 Keywords{} : {:?}", CYAN, RESET, keywords);
+    println!("│ {}🔍 Keywords{}  : {:?}", CYAN, RESET, keywords);
     
     if !parallel_codes.is_empty() {
         println!("│ {}🧩 Parallels{} : [{}]", MAGENTA, RESET, parallel_codes.join(", "));
@@ -1145,7 +1145,7 @@ async fn try_gemini_matching(prompt: &str) -> Result<Option<Uuid>, String> {
         if status.is_success() {
             //all_rate_limited = false;
             clear_previous_trying(&mut last_trying);
-            println!("│ {}✅ SUCCESS{} : {} (Gemini {}/{})", GREEN, RESET, model, index, GEMINI_MODELS.len());
+            println!("│ {}✅ SUCCESS{}    : {} (Gemini {}/{})", GREEN, RESET, model, index, GEMINI_MODELS.len());
             
             let gemini_response: GeminiResponse = response.json().await
                 .map_err(|e| format!("Failed to deserialize: {}", e))?;
@@ -1215,7 +1215,7 @@ async fn try_groq_matching(prompt: &str) -> Result<Option<Uuid>, String> {
         
         if status.is_success() {
             clear_previous_trying(&mut last_trying);
-            println!("│ {}✅ SUCCESS{} : {} (Groq {}/{})", GREEN, RESET, model, index, GROQ_REASONING_MODELS.len());
+            println!("│ {}✅ SUCCESS{}    : {} (Groq {}/{})", GREEN, RESET, model, index, GROQ_REASONING_MODELS.len());
             
             let groq_response: GroqResponse = response.json().await
                 .map_err(|e| format!("Failed to deserialize: {}", e))?;
@@ -1239,7 +1239,7 @@ fn log_classification_success(classification: &AIClassification) {
     println!("│");
     match classification {
         AIClassification::MultipleAssignments { assignments, .. } => {
-            println!("│ {}✅ Result{} : {} assignments detected", GREEN, RESET, assignments.len());
+            println!("│ {}✅ Result{}  : {} assignments detected", GREEN, RESET, assignments.len());
             for (i, a) in assignments.iter().enumerate() {
                 let parallels = if a.parallel_codes.is_empty() {
                     "N/A".to_string()
@@ -1257,7 +1257,7 @@ fn log_classification_success(classification: &AIClassification) {
             } else {
                 format!("[{}]", parallel_codes.join(", "))
             };
-            println!("│ {}✅ Result{} : Single assignment ({} - {}, parallels: {})", 
+            println!("│ {}✅ Result{}  : Single assignment ({} - {}, parallels: {})", 
                 GREEN, RESET, course_display, title, parallels);
         }
         AIClassification::AssignmentUpdate { reference_keywords, parallel_codes, .. } => {
@@ -1266,7 +1266,7 @@ fn log_classification_success(classification: &AIClassification) {
             } else {
                 format!("[{}]", parallel_codes.join(", "))
             };
-            println!("│ {}✅ Result{} : Update detected (keywords: {:?}, parallels: {})", 
+            println!("│ {}✅ Result{}  : Update detected (keywords: {:?}, parallels: {})", 
                 GREEN, RESET, reference_keywords, parallels);
         }
         AIClassification::Unrecognized { reason, category } => {
@@ -1274,11 +1274,11 @@ fn log_classification_success(classification: &AIClassification) {
             
             match category {
                 UnrecognizedCategory::Informal => {
-                    println!("│ {}ℹ️  Result{} : Informal chat (no academic context)", BLUE, RESET);
+                    println!("│ {}ℹ️  Result{}  : Informal chat (no academic context)", BLUE, RESET);
                 }
                 UnrecognizedCategory::AcademicRelated => {
                     let reason_display = reason.as_deref().unwrap_or("No reason provided");
-                    println!("│ {}ℹ️  Result{} : Academic-related but not assignment ({})", 
+                    println!("│ {}ℹ️  Result{}  : Academic-related but not assignment ({})", 
                         BLUE, RESET, reason_display);
                 }
             }
