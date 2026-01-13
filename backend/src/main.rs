@@ -28,7 +28,7 @@ pub mod clarification;
 use crate::database::crud;
 use crate::parser::commands::CommandResponse;
 
-use models::{MessageType, AIClassification, WebhookPayload, SendTextRequest, NewAssignment};
+use models::{MessageType, AIClassification, WebhookPayload, SendTextRequest, NewAssignment, UnrecognizedCategory};
 use classifier::classify_message;
 use parser::commands::handle_command;
 use parser::ai_extractor::{extract_with_ai, check_duplicate_assignment}; 
@@ -976,15 +976,23 @@ async fn handle_ai_classification(
             });
         }
         
-        AIClassification::Unrecognized { reason } => {
-            // Send just the reason to debug group if available
-            if let Some(debug_id) = debug_group_id {
-                let message = reason
-                    .as_ref()
-                    .map(|r| format!("_{}_", r))
-                    .unwrap_or_else(|| "_Unrecognized, no reason provided_".to_string());
-                
-                let _ = send_reply(&debug_id, &message).await;
+        AIClassification::Unrecognized { reason, category } => {
+            match category {
+                UnrecognizedCategory::Informal => {
+                    // Completely informal - don't send anything to debug group
+                    println!("💬 Informal chat detected - ignoring");
+                }
+                UnrecognizedCategory::AcademicRelated => {
+                    // Academic-related but not an assignment - send reason to debug
+                    if let Some(debug_id) = debug_group_id {
+                        let message = reason
+                            .as_ref()
+                            .map(|r| format!("_{}_", r))
+                            .unwrap_or_else(|| "_Academic-related but not an assignment_".to_string());
+                        
+                        let _ = send_reply(&debug_id, &message).await;
+                    }
+                }
             }
         }
     }

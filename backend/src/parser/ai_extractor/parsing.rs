@@ -83,7 +83,8 @@ pub(super) fn parse_classification(ai_text: &str) -> Result<AIClassification, St
     if !is_valid_json_object(cleaned) {
         eprintln!("⚠️  Response is not a valid JSON object");
         return Ok(AIClassification::Unrecognized { 
-            reason: Some("Invalid JSON response from AI".to_string()) 
+            reason: Some("Invalid JSON response from AI".to_string()),
+            category: Default::default()
         });
     }
     
@@ -93,11 +94,13 @@ pub(super) fn parse_classification(ai_text: &str) -> Result<AIClassification, St
             eprintln!("❌ JSON parse error: {}", e);
             eprintln!("   Tried to parse: {}", cleaned);
             Ok(AIClassification::Unrecognized { 
-                reason: Some(format!("JSON parsing failed: {}", e)) 
+                reason: Some(format!("JSON parsing failed: {}", e)),
+                category: Default::default()
             })
         }
     }
 }
+
 
 pub(super) fn parse_match_result(ai_text: &str) -> Result<Option<Uuid>, String> {
     let cleaned = ai_text.trim()

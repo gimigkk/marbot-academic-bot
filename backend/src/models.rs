@@ -187,7 +187,16 @@ pub enum AIClassification {
     Unrecognized {
         #[serde(default)]
         reason: Option<String>,
+        category: UnrecognizedCategory,
     },
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum UnrecognizedCategory {
+    #[default]
+    Informal,          // Completely unrelated to academics
+    AcademicRelated,   // Seems academic but not an assignment
 }
 
 /// Individual assignment data for batch processing

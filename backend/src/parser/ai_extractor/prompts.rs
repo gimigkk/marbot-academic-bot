@@ -408,8 +408,17 @@ DESCRIPTION FIELD (MANDATORY):
 OUTPUT FORMATS
 ═══════════════════════════════════════════════════════════════════
 
-UNRECOGNIZED (for non-assignments):
-{{"type": "unrecognized", "reason": "One sentence explanation why this is not an assignment"}}
+UNRECOGNIZED:
+{{
+  "type": "unrecognized",
+  "category": "informal" | "academic_related",
+  "reason": string | null
+}}
+
+Rules:
+- category="informal": No academic context (social chat, memes, greetings)
+- category="academic_related": Has academic context but fails THREE REQUIREMENTS
+- reason: Required for academic_related (explain which requirement fails), omit for informal
 
 MULTIPLE_ASSIGNMENTS:
 {{
@@ -469,6 +478,11 @@ CORE PRINCIPLES
 10. When uncertain: NEW > UPDATE (avoid bad matches)
 11. When uncertain: UNRECOGNIZED > false positive
 12. Course boundaries: Never match updates across different courses
+11. When uncertain: UNRECOGNIZED > false positive
+12. Course boundaries: Never match updates across different courses
+13. UNRECOGNIZED CATEGORIES:
+    - informal: Casual chat with no academic context
+    - academic_related: Mentions courses/classes but no assignment deliverable
 
 Return ONLY valid JSON. No markdown, no explanations, no commentary."#,
         current_datetime,

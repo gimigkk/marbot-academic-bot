@@ -193,7 +193,7 @@ pub async fn extract_with_ai(
             match try_groq_vision(&prompt, img).await {
                 Ok(classification) => {
                     match classification {
-                        AIClassification::Unrecognized {reason}=> {
+                        AIClassification::Unrecognized { reason, category } => {
                             let reason_display = reason.as_deref().unwrap_or("No reason provided");
                             println!("│ {}ℹ️  Vision Result{}: Unrecognized ({})", BLUE, RESET, reason_display);
                             println!("│ {}🔄 Retrying{} with Gemini text-only...", YELLOW, RESET);
@@ -202,10 +202,10 @@ pub async fn extract_with_ai(
                             match try_gemini_models(&prompt).await {
                                 Ok(text_result) => {
                                     match text_result {
-                                        AIClassification::Unrecognized {..} => {
+                                        AIClassification::Unrecognized { reason, category } => {
                                             println!("│ {}⚠️  Gemini{}: Still unrecognized", YELLOW, RESET);
                                             println!("{}└──────────────────────────────────────────────{}", GRAY, RESET);
-                                            return Ok(AIClassification::Unrecognized{reason});
+                                            return Ok(AIClassification::Unrecognized { reason, category });
                                         }
                                         _ => {
                                             log_classification_success(&text_result);
@@ -1040,9 +1040,19 @@ fn log_classification_success(classification: &AIClassification) {
             println!("│ {}✅ Result{} : Update detected (keywords: {:?}, parallels: {})", 
                 GREEN, RESET, reference_keywords, parallels);
         }
-        AIClassification::Unrecognized { reason } => {
-            let reason_display = reason.as_deref().unwrap_or("No reason provided");
-            println!("│ {}ℹ️  Result{} : Unrecognized ({})", BLUE, RESET, reason_display);
+        AIClassification::Unrecognized { reason, category } => {
+            use crate::models::UnrecognizedCategory;
+            
+            match category {
+                UnrecognizedCategory::Informal => {
+                    println!("│ {}ℹ️  Result{} : Informal chat (no academic context)", BLUE, RESET);
+                }
+                UnrecognizedCategory::AcademicRelated => {
+                    let reason_display = reason.as_deref().unwrap_or("No reason provided");
+                    println!("│ {}ℹ️  Result{} : Academic-related but not assignment ({})", 
+                        BLUE, RESET, reason_display);
+                }
+            }
         }
     }
 }
