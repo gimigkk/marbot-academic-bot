@@ -193,7 +193,7 @@ pub async fn extract_with_ai(
             match try_groq_vision(&prompt, img).await {
                 Ok(classification) => {
                     match classification {
-                        AIClassification::Unrecognized { reason, category } => {
+                        AIClassification::Unrecognized { reason, ..} => {
                             let reason_display = reason.as_deref().unwrap_or("No reason provided");
                             println!("│ {}ℹ️  Vision Result{}: Unrecognized ({})", BLUE, RESET, reason_display);
                             println!("│ {}🔄 Retrying{} with Gemini text-only...", YELLOW, RESET);
