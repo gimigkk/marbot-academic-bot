@@ -135,14 +135,17 @@ pub async fn build_context(
     let courses_list = get_courses_list(pool).await
         .unwrap_or_else(|_| "No courses available".to_string());
     
-    // Prepare quoted message summary (truncate if needed)
-    let quoted_summary = quoted_message.map(|q| {
-        if q.len() > 200 {
-            format!("{}...", &q[..200])
+    // Byte safe truncater, Emojis was breaking the system
+    fn truncate_utf8(s: &str, max_chars: usize) -> String {
+        let truncated: String = s.chars().take(max_chars).collect();
+        if truncated.len() < s.len() {
+            format!("{}...", truncated)
         } else {
-            q.to_string()
+            truncated
         }
-    });
+    }
+
+    let quoted_summary = quoted_message.map(|q| truncate_utf8(q, 200));
     
     // Call lightweight AI for context resolution
     let ai_hints = call_context_resolver_ai(
