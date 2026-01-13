@@ -352,6 +352,7 @@ TITLE EXTRACTION RULES:
    - "Tugas Individu Pertemuan 8" ✓
    - "Tugas individu untuk pertemuan ke-8 yang harus dikerjakan sendiri" ✗
 
+   
 DEADLINE EXTRACTION (priority order):
 
 COMMON ABBREVIATIONS IN INFORMAL MESSAGES:
