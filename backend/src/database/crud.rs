@@ -840,7 +840,6 @@ pub async fn set_user_course_parallel(
             let clean_code = parallel_code.to_lowercase();
             
             // 2. Upsert (Insert atau Update jika sudah ada)
-            // Pastikan tabel user_course_settings memiliki constraint UNIQUE(user_id, course_id)
             sqlx::query!(
                 r#"
                 INSERT INTO user_course_settings (user_id, course_id, parallel_code)
