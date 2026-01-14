@@ -2,18 +2,33 @@ use sqlx::{PgPool, Result};
 use uuid::Uuid;
 use chrono::{DateTime, Utc, FixedOffset, TimeZone, NaiveDateTime};
 use std::collections::HashMap;
+use crate::tui::JobLogger;
 
 use crate::models::{Assignment, NewAssignment, Course, AssignmentWithCourse};
+
+// Helper macro for optional logging
+#[allow(unused_macros)]
+macro_rules! log {
+    ($logger:expr, $($arg:tt)*) => {
+        if let Some(logger) = $logger {
+            logger.log(&format!($($arg)*));
+        } else {
+            println!($($arg)*);
+        }
+    };
+}
 
 // ========================================
 // CREATE OPERATIONS
 // ========================================
 
 /// Create a new assignment in the database
+#[allow(unused_variables)]
 #[allow(non_snake_case)]
 pub async fn create_assignment(
     pool: &PgPool,
     new_assignment: NewAssignment,
+    logger: Option<&JobLogger>,
 ) -> Result<String, sqlx::Error> {
     let mut tx = pool.begin().await?;
     
@@ -169,7 +184,8 @@ pub async fn get_last_completed_assignment(
 
 /// Get recent assignments for duplicate detection (larger limit)
 pub async fn get_recent_assignments_for_duplicate_check(
-    pool: &PgPool
+    pool: &PgPool,
+    logger: Option<&JobLogger>,
 ) -> Result<Vec<Assignment>, sqlx::Error> {
     let assignments = sqlx::query_as::<_, Assignment>(
         r#"
@@ -194,14 +210,15 @@ pub async fn get_recent_assignments_for_duplicate_check(
     .fetch_all(pool)
     .await?;
     
-    println!("🔍 Fetched {} assignments for duplicate check", assignments.len());
+    log!(logger, "🔍 Fetched {} assignments for duplicate check", assignments.len());
     
     Ok(assignments)
 }
 
 /// Get recent assignments for update matching (larger limit)
 pub async fn get_recent_assignments_for_matching(
-    pool: &PgPool
+    pool: &PgPool,
+    logger: Option<&JobLogger>,
 ) -> Result<Vec<Assignment>, sqlx::Error> {
     let assignments = sqlx::query_as::<_, Assignment>(
         r#"
@@ -226,14 +243,17 @@ pub async fn get_recent_assignments_for_matching(
     .fetch_all(pool)
     .await?;
     
-    println!("🔍 Fetched {} assignments for update matching", assignments.len());
+    log!(logger, "🔍 Fetched {} assignments for update matching", assignments.len());
     
     Ok(assignments)
 }
 
 /// Get assignments for classification context (standard limit of 20)
-pub async fn get_assignments_for_classification(pool: &PgPool) -> Result<Vec<Assignment>> {
-    println!("🔍 DEBUG: Calling get_assignments_for_classification()...");
+pub async fn get_assignments_for_classification(
+    pool: &PgPool,
+    logger: Option<&JobLogger>,
+) -> Result<Vec<Assignment>> {
+    log!(logger, "🔍 DEBUG: Calling get_assignments_for_classification()...");
     
     let result = sqlx::query_as::<_, Assignment>(
         r#"
@@ -259,13 +279,13 @@ pub async fn get_assignments_for_classification(pool: &PgPool) -> Result<Vec<Ass
 
     match &result {
         Ok(assignments) => {
-            println!("✅ DEBUG: Successfully fetched {} assignments for classification", assignments.len());
+            log!(logger, "✅ DEBUG: Successfully fetched {} assignments for classification", assignments.len());
             if assignments.is_empty() {
-                println!("⚠️  DEBUG: No assignments found in database!");
+                log!(logger, "⚠️  DEBUG: No assignments found in database!");
             }
         }
         Err(e) => {
-            eprintln!("❌ DEBUG: get_assignments_for_classification() failed: {:?}", e);
+            log!(logger, "❌ DEBUG: get_assignments_for_classification() failed: {:?}", e);
         }
     }
 
@@ -273,8 +293,11 @@ pub async fn get_assignments_for_classification(pool: &PgPool) -> Result<Vec<Ass
 }
 
 // Update the original get_assignments to use LIMIT 20 as well
-pub async fn get_assignments(pool: &PgPool) -> Result<Vec<Assignment>> {
-    println!("🔍 DEBUG: Calling get_assignments()...");
+pub async fn get_assignments(
+    pool: &PgPool,
+    logger: Option<&JobLogger>,
+) -> Result<Vec<Assignment>> {
+    log!(logger, "🔍 DEBUG: Calling get_assignments()...");
     
     let result = sqlx::query_as::<_, Assignment>(
         r#"
@@ -300,13 +323,13 @@ pub async fn get_assignments(pool: &PgPool) -> Result<Vec<Assignment>> {
 
     match &result {
         Ok(assignments) => {
-            println!("✅ DEBUG: Successfully fetched {} assignments", assignments.len());
+            log!(logger, "✅ DEBUG: Successfully fetched {} assignments", assignments.len());
             if assignments.is_empty() {
-                println!("⚠️  DEBUG: No assignments found in database!");
+                log!(logger, "⚠️  DEBUG: No assignments found in database!");
             }
         }
         Err(e) => {
-            eprintln!("❌ DEBUG: get_assignments() failed: {:?}", e);
+            log!(logger, "❌ DEBUG: get_assignments() failed: {:?}", e);
         }
     }
 
@@ -360,7 +383,10 @@ pub async fn get_assignment_by_title_and_course(
 }
 
 /// Get active assignments (not past deadline)
-pub async fn get_active_assignments(pool: &PgPool) -> Result<Vec<Assignment>> {
+pub async fn get_active_assignments(
+    pool: &PgPool,
+    logger: Option<&JobLogger>,
+) -> Result<Vec<Assignment>> {
     let now = Utc::now();
     
     let assignments = sqlx::query_as::<_, Assignment>(
@@ -387,12 +413,15 @@ pub async fn get_active_assignments(pool: &PgPool) -> Result<Vec<Assignment>> {
     .fetch_all(pool)
     .await?;
     
-    println!("✅ Found {} active assignments", assignments.len());
+    log!(logger, "✅ Found {} active assignments", assignments.len());
     
     Ok(assignments)
 }
 
-pub async fn get_active_assignments_sorted(pool: &PgPool) -> Result<Vec<AssignmentWithCourse>, sqlx::Error> {
+pub async fn get_active_assignments_sorted(
+    pool: &PgPool,
+    logger: Option<&JobLogger>,
+) -> Result<Vec<AssignmentWithCourse>, sqlx::Error> {
     let now = Utc::now();
     
     let assignments = sqlx::query_as::<_, AssignmentWithCourse>(
@@ -422,7 +451,7 @@ pub async fn get_active_assignments_sorted(pool: &PgPool) -> Result<Vec<Assignme
     .fetch_all(pool)
     .await?;
     
-    println!("✅ Found {} active assignments (scheduler)\n", assignments.len());
+    log!(logger, "✅ Found {} active assignments (scheduler)\n", assignments.len());
     
     Ok(assignments)
 }
@@ -430,11 +459,12 @@ pub async fn get_active_assignments_sorted(pool: &PgPool) -> Result<Vec<Assignme
 #[allow(non_snake_case)]
 pub async fn get_active_assignments_for_user(
     pool: &PgPool, 
-    user_id: &str
+    user_id: &str,
+    logger: Option<&JobLogger>,
 ) -> Result<(Vec<AssignmentWithCourse>, HashMap<String, String>), sqlx::Error> {
     let now = Utc::now();
     
-    println!("🔍 Fetching assignments for user: {}", user_id);
+    log!(logger, "🔍 Fetching assignments for user: {}", user_id);
     
     let assignments = sqlx::query_as::<_, AssignmentWithCourse>(
         r#"
@@ -468,7 +498,7 @@ pub async fn get_active_assignments_for_user(
     .fetch_all(pool)
     .await?;
     
-    println!("✅ Found {} assignments for user {}", assignments.len(), user_id);
+    log!(logger, "✅ Found {} assignments for user {}", assignments.len(), user_id);
     
     // Ambil setting user mapping Course NAME ke Parallel Code (karena struct AssignmentWithCourse punya course_name)
     let user_settings = sqlx::query!(
@@ -496,11 +526,11 @@ pub async fn get_active_assignments_for_user(
         } else {
             format!("[{}]", a.parallel_codes.join(", "))
         };
-        println!("  {}. {} - Deadline: {} - Parallels: {} - Completed: {}", 
+        log!(logger, "  {}. {} - Deadline: {} - Parallels: {} - Completed: {}", 
             i + 1, a.title, deadline_str, parallel_display, a.is_completed);
     }
 
-    println!("");
+    log!(logger, "");
     
     Ok((assignments, settings_map))
 }
@@ -692,7 +722,6 @@ pub async fn find_assignment_by_keywords(
 
 /// Update specific fields of an assignment
 #[allow(non_snake_case)]
-#[allow(non_snake_case)]
 pub async fn update_assignment_fields(
     pool: &PgPool,
     id: Uuid,
@@ -702,6 +731,7 @@ pub async fn update_assignment_fields(
     new_parallel_codes: Option<Vec<String>>,
     incoming_message_id: Option<String>,
     incoming_message_content: Option<String>,
+    logger: Option<&JobLogger>,
 ) -> Result<Assignment> {
     let mut tx = pool.begin().await?;
     
@@ -773,7 +803,7 @@ pub async fn update_assignment_fields(
     
     tx.commit().await?;
     
-    println!("   \x1b[32m✅ Updated\x1b[0m\n");
+    log!(logger, "   \x1b[32m✅ Updated\x1b[0m\n");
     
     Ok(assignment)
 }

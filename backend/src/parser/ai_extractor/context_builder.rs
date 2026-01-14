@@ -10,6 +10,7 @@ use once_cell::sync::Lazy;
 use super::schedule_oracle::ScheduleOracle;
 use super::parsing::{GeminiResponse, GroqResponse, extract_ai_text, extract_groq_text};
 use super::{GEMINI_MODELS, GROQ_REASONING_MODELS, GROQ_TEXT_MODELS};
+use crate::tui::JobLogger;
 
 // ===== CONSTANTS & STATICS =====
 
@@ -107,6 +108,7 @@ pub async fn build_context(
     schedule_oracle: &ScheduleOracle,
     quoted_message: Option<&str>,
     quoted_message_id: Option<&str>,
+    logger: &JobLogger,
 ) -> Result<MessageContext, String> {
     
     // TIER 1: Extract parallels from message directly (HIGHEST PRIORITY)
@@ -127,7 +129,7 @@ pub async fn build_context(
         get_sender_history(pool, sender_id, &text_extracted_parallels).await
             .unwrap_or_default()
     } else {
-        println!("│ ⏭️ Skipping sender history (explicit context available)");
+        logger.log("│ ⏭️ Skipping sender history (explicit context available)");
         SenderHistory::default()
     };
     
@@ -155,12 +157,14 @@ pub async fn build_context(
         quoted_summary.as_deref(),
         &text_extracted_parallels,
         quoted_assignment.as_ref(),
+        logger,
     ).await?;
     
     // Calculate per-course schedule hints
     let course_hints = calculate_course_hints(
         &ai_hints,
         schedule_oracle,
+        logger,
     );
     
     // Generate deadline hint (single assignment only)
@@ -428,6 +432,7 @@ async fn call_context_resolver_ai(
     quoted_context: Option<&str>,
     text_extracted_parallels: &[String],
     quoted_assignment: Option<&QuotedAssignmentInfo>,
+    logger: &JobLogger,
 ) -> Result<AIHints, String> {
     
     let history_text = format_history_for_prompt(sender_history);
@@ -443,27 +448,27 @@ async fn call_context_resolver_ai(
     );
     
     // TIER 1: Try Gemini models first (PRIORITY)
-    match try_gemini_context(&prompt).await {
+    match try_gemini_context(&prompt, logger).await {
         Ok(hints) => return Ok(hints),
         Err(e) => {
-            println!("│ \x1b[33m⚠️ CONTEXT\x1b[0m   : Gemini failed - {}", e);
-            println!("│ \x1b[36m🔄 CONTEXT\x1b[0m   : Falling back to Groq...");
+            logger.log(&format!("│ \x1b[33m⚠️ CONTEXT\x1b[0m   : Gemini failed - {}", e));
+            logger.log("│ \x1b[36m🔄 CONTEXT\x1b[0m   : Falling back to Groq...");
         }
     }
     
     // TIER 2: Groq reasoning models
-    match try_groq_reasoning_context(&prompt).await {
+    match try_groq_reasoning_context(&prompt, logger).await {
         Ok(hints) => return Ok(hints),
         Err(e) => {
-            println!("│ \x1b[33m⚠️ CONTEXT\x1b[0m   : Groq Reasoning failed - {}", e);
+            logger.log(&format!("│ \x1b[33m⚠️ CONTEXT\x1b[0m   : Groq Reasoning failed - {}", e));
         }
     }
     
     // TIER 3: Groq standard text models (final fallback)
-    match try_groq_standard_context(&prompt).await {
+    match try_groq_standard_context(&prompt, logger).await {
         Ok(hints) => return Ok(hints),
         Err(e) => {
-            println!("│ \x1b[31m❌ CONTEXT\x1b[0m   : All models failed - {}", e);
+            logger.log(&format!("│ \x1b[31m❌ CONTEXT\x1b[0m   : All models failed - {}", e));
         }
     }
     
@@ -472,7 +477,7 @@ async fn call_context_resolver_ai(
 
 // ===== GEMINI CONTEXT RESOLUTION =====
 
-async fn try_gemini_context(prompt: &str) -> Result<AIHints, String> {
+async fn try_gemini_context(prompt: &str, logger: &JobLogger) -> Result<AIHints, String> {
     let api_key = std::env::var("GEMINI_API_KEY")
         .map_err(|_| "GEMINI_API_KEY not set".to_string())?;
     
@@ -552,7 +557,7 @@ async fn try_gemini_context(prompt: &str) -> Result<AIHints, String> {
 
 // ===== GROQ REASONING CONTEXT RESOLUTION =====
 
-async fn try_groq_reasoning_context(prompt: &str) -> Result<AIHints, String> {
+async fn try_groq_reasoning_context(prompt: &str, logger: &JobLogger) -> Result<AIHints, String> {
     let api_key = std::env::var("GROQ_API_KEY")
         .map_err(|_| "GROQ_API_KEY not set".to_string())?;
     
@@ -599,7 +604,7 @@ async fn try_groq_reasoning_context(prompt: &str) -> Result<AIHints, String> {
 
 // ===== GROQ STANDARD CONTEXT RESOLUTION (FINAL FALLBACK) =====
 
-async fn try_groq_standard_context(prompt: &str) -> Result<AIHints, String> {
+async fn try_groq_standard_context(prompt: &str, logger: &JobLogger) -> Result<AIHints, String> {
     let api_key = std::env::var("GROQ_API_KEY")
         .map_err(|_| "GROQ_API_KEY not set".to_string())?;
     
@@ -639,9 +644,9 @@ async fn try_groq_standard_context(prompt: &str) -> Result<AIHints, String> {
                 .unwrap_or_else(|_| String::new());
             
             if let Some(retry_after) = extract_retry_after(&error_text) {
-                println!("│ \x1b[33m⚠️ CONTEXT\x1b[0m   : {} - ⏳ Rate limit (retry in {})", model, retry_after);
+                logger.log(&format!("│ \x1b[33m⚠️ CONTEXT\x1b[0m   : {} - ⏳ Rate limit (retry in {})", model, retry_after));
             } else {
-                println!("│ \x1b[33m⚠️ CONTEXT\x1b[0m   : {} - ⏳ Rate limit", model);
+                logger.log(&format!("│ \x1b[33m⚠️ CONTEXT\x1b[0m   : {} - ⏳ Rate limit", model));
             }
             
             if index < GROQ_TEXT_MODELS.len() - 1 {
@@ -660,7 +665,7 @@ async fn try_groq_standard_context(prompt: &str) -> Result<AIHints, String> {
         }
         
         if status == reqwest::StatusCode::BAD_REQUEST {
-            println!("│ \x1b[31m❌ CONTEXT\x1b[0m   : {} - 400 Bad Request", model);
+            logger.log(&format!("│ \x1b[31m❌ CONTEXT\x1b[0m   : {} - 400 Bad Request", model));
             if index < GROQ_TEXT_MODELS.len() - 1 {
                 continue;
             }
@@ -914,6 +919,7 @@ fn parse_ai_hints(json_text: &str) -> Result<AIHints, String> {
 fn calculate_course_hints(
     hints: &AIHints,
     schedule_oracle: &ScheduleOracle,
+    logger: &JobLogger,
 ) -> Vec<CourseHint> {
     let mut course_hints = Vec::new();
     
@@ -922,10 +928,10 @@ fn calculate_course_hints(
     let today = now.date_naive();
     
     for ai_course_hint in &hints.course_hints {
-        println!("│");
-        println!("│ 🎯 Processing   : {}", ai_course_hint.course_name);
-        println!("│    Parallels    : {:?}", ai_course_hint.parallel_codes);
-        println!("│    Deadline Type: {}", ai_course_hint.deadline_type);
+        logger.log("│");
+        logger.log(&format!("│ 🎯 Processing   : {}", ai_course_hint.course_name));
+        logger.log(&format!("│    Parallels    : {:?}", ai_course_hint.parallel_codes));
+        logger.log(&format!("│    Deadline Type: {}", ai_course_hint.deadline_type));
         
         let parallel_schedules = match ai_course_hint.deadline_type.as_str() {
             "next_meeting" | "relative" => {
@@ -935,14 +941,15 @@ fn calculate_course_hints(
                     &ai_course_hint.deadline_type,
                     schedule_oracle,
                     today,
+                    logger,
                 )
             },
             "explicit" => {
-                println!("│    📅 Result    : Explicit date (main AI will parse)");
+                logger.log("│    📅 Result    : Explicit date (main AI will parse)");
                 vec![]
             },
             _ => {
-                println!("│    ❓ Result    : Unknown type");
+                logger.log("│    ❓ Result    : Unknown type");
                 vec![]
             }
         };
@@ -965,14 +972,15 @@ fn calculate_parallel_schedules(
     deadline_type: &str,
     schedule_oracle: &ScheduleOracle,
     today: chrono::NaiveDate,
+    logger: &JobLogger,
 ) -> Vec<ParallelSchedule> {
     if parallel_codes.is_empty() {
-        println!("│    ⏭️ Result    : Skipped (needs parallel for schedule)");
+        logger.log("│    ⏭️ Result    : Skipped (needs parallel for schedule)");
         return vec![];
     }
     
     if parallel_codes.contains(&"all".to_string()) {
-        println!("│    ⏭️ Result    : Skipped ('all' cannot determine specific schedule)");
+        logger.log("│    ⏭️ Result    : Skipped ('all' cannot determine specific schedule)");
         return vec![];
     }
     
@@ -989,15 +997,15 @@ fn calculate_parallel_schedules(
             .get_next_meeting_with_time(course_name, parallel, today)
         {
             let next_meeting = format!("{} {}", meeting_date, meeting_time);
-            println!("│    ✅ {}: {} at {}", 
-                parallel.to_uppercase(), hint_type, next_meeting);
+            logger.log(&format!("│    ✅ {}: {} at {}", 
+                parallel.to_uppercase(), hint_type, next_meeting));
             
             schedules.push(ParallelSchedule {
                 parallel_code: parallel.clone(),
                 next_meeting: Some(next_meeting),
             });
         } else {
-            println!("│    ⏭️  {}: No schedule found", parallel.to_uppercase());
+            logger.log(&format!("│    ⏭️  {}: No schedule found", parallel.to_uppercase()));
             
             schedules.push(ParallelSchedule {
                 parallel_code: parallel.clone(),

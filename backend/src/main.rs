@@ -9,13 +9,14 @@ use std::collections::HashSet;
 use std::net::SocketAddr;
 use std::sync::Arc;  
 use std::io::Write;
-use tokio::sync::Mutex;  
+use tokio::sync::{Mutex, mpsc};
 use tokio::net::TcpListener;
 use sqlx::PgPool;
 use std::time::{Instant, Duration}; 
 use std::collections::HashMap;
 //use chrono::{Datelike};
 use chrono::Duration as ChronoDuration;
+use once_cell::sync::OnceCell;
 
 pub mod models;
 pub mod scheduler;
@@ -24,6 +25,7 @@ pub mod parser;
 pub mod whitelist;
 pub mod database;
 pub mod clarification;
+pub mod tui;
 
 use crate::database::crud;
 use crate::parser::commands::CommandResponse;
@@ -37,6 +39,7 @@ use whitelist::Whitelist;
 type MessageCache = Arc<Mutex<HashSet<String>>>;
 type SpamTracker = Arc<Mutex<HashMap<String, (u32, Instant)>>>;
 
+static TUI_STATE: OnceCell<Arc<tui::state::TuiState>> = OnceCell::new();
 
 const BANNER_ART: &str = r#"
 ███╗   ███╗ █████╗ ██████╗ 
@@ -64,6 +67,7 @@ struct AppState {
     spam_tracker: SpamTracker, 
     whitelist: Arc<Whitelist>,
     pool: PgPool,
+    log_tx: mpsc::UnboundedSender<tui::state::LogEntry>,
 }
 
 /// Health check endpoint for Docker
@@ -81,7 +85,7 @@ async fn check_waha_health() -> String {
     let waha_urls = vec![
         std::env::var("WAHA_URL").unwrap_or_else(|_| "http://waha:3000".to_string()),
         "http://localhost:3001".to_string(),
-        "[http://127.0.0.1:3001](http://127.0.0.1:3001)".to_string(),
+        "http://127.0.0.1:3001".to_string(),
     ];
     
     let api_key = std::env::var("WAHA_API_KEY")
@@ -209,10 +213,18 @@ async fn main() {
 
     let whitelist = Arc::new(Whitelist::new());
     let cache = Arc::new(Mutex::new(HashSet::new()));
-
     let spam_tracker = Arc::new(Mutex::new(HashMap::new())); 
 
-    // 4. Run Scheduler
+    // 4. Initialize TUI System
+    let (tui_state, log_tx) = tui::init();
+    
+    // Store TUI state globally for access in webhook handler
+    TUI_STATE.set(tui_state.clone()).ok();
+    
+    tui::spawn_log_collector(tui_state.clone());
+    tui::spawn_tui_listener(tui_state.clone());
+
+    // 5. Run Scheduler
     let pool_for_scheduler = pool.clone();
     tokio::spawn(async move {
         tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
@@ -226,7 +238,8 @@ async fn main() {
         cache,
         spam_tracker, 
         whitelist, 
-        pool
+        pool,
+        log_tx,
     };
     
     let app = Router::new()
@@ -242,6 +255,7 @@ async fn main() {
     println!("    📡 Listening on\t: \x1b[36mhttp://0.0.0.0:{}\x1b[0m", port);
     println!("    📍 Webhook URL\t: \x1b[36mhttp://localhost:{}/webhook\x1b[0m", port);
     println!("\x1b[1;30m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\x1b[0m");
+    println!("\n💡 Press \x1b[1;33mF2\x1b[0m anytime to enter TUI mode");
     println!("\nWaiting for incoming messages...\n");
 
     let listener = TcpListener::bind(addr).await.unwrap();
@@ -340,6 +354,7 @@ async fn webhook(
 
         // Cek BATAS
         if *count > MAX_MESSAGES {
+            // NOTE: This spam blocking happens before job creation, so no logger needed here
             println!("🚫 SPAM COMMAND BLOCKED: {} sent > {} cmds/{}s", sender_phone, MAX_MESSAGES, WINDOW_SECONDS);
             
             if *count == MAX_MESSAGES + 1 {
@@ -351,6 +366,20 @@ async fn webhook(
         }
     }
 
+    // ============================================================
+    // TUI INTEGRATION: Create job logger
+    // ============================================================
+    let job_id = tui::generate_job_id();
+    let logger = tui::JobLogger::new(job_id.clone(), state.log_tx.clone());
+    
+    // Get TUI state from global storage
+    if let Some(tui_state) = TUI_STATE.get() {
+        tui_state.create_job(
+            job_id.clone(),
+            chat_id.to_string(),
+            sender_name.to_string()
+        ).await;
+    }
 
     // Terminal logging with compact formatting
     let body_display = payload.payload.body
@@ -370,10 +399,10 @@ async fn webhook(
         MessageType::NeedsAI(_) => "NeedsAI".to_string(),
     };
 
-    println!("\n| Message from: \x1b[32m{}\x1b[0m", chat_id);
-    println!("| Sender      : \x1b[32m{}\x1b[0m (\x1b[32m{}\x1b[0m)", sender_name, sender_phone);
-    println!("| Body        : \x1b[32m{}\x1b[0m", body_truncated);
-    println!("| Type        : \x1b[32m{}\x1b[0m\n", type_display);
+    logger.log(&format!("\n| Message from: \x1b[32m{}\x1b[0m", chat_id));
+    logger.log(&format!("| Sender      : \x1b[32m{}\x1b[0m (\x1b[32m{}\x1b[0m)", sender_name, sender_phone));
+    logger.log(&format!("| Body        : \x1b[32m{}\x1b[0m", body_truncated));
+    logger.log(&format!("| Type        : \x1b[32m{}\x1b[0m\n", type_display));
     
     // Extract quoted message text and id
     let (quoted_message_text, quoted_message_id) = if let Some(quoted) = payload.payload.get_quoted_message() {
@@ -383,8 +412,8 @@ async fn webhook(
     };
 
     if let Some(ref quoted) = quoted_message_text {
-        println!("| Quoted: \"{}\"\n", 
-            quoted.chars().take(80).collect::<String>());
+        logger.log(&format!("| Quoted: \"{}\"\n", 
+            quoted.chars().take(80).collect::<String>()));
     }
 
     // ============= CLARIFICATION HANDLER =============
@@ -393,7 +422,7 @@ async fn webhook(
             || (quoted.text.contains("ID:") && quoted.text.contains("```"));
         
         if is_clarification_reply {
-            println!("📝 Clarification response detected from {}", sender_phone);
+            logger.log(&format!("📝 Clarification response detected from {}", sender_phone));
             
             // 1. Extract ID Assignment dari pesan yang di-reply
             if let Some(assignment_id) = clarification::extract_assignment_id_from_message(&quoted.text) {
@@ -416,7 +445,8 @@ async fn webhook(
                     match clarification::parse_clarification_response(
                         &payload.payload.body, 
                         assignment_obj, 
-                        &missing_fields
+                        &missing_fields,
+                        &logger,
                     ).await {
                         Ok(updates) => {
                             // Extract fields from updates HashMap
@@ -440,10 +470,11 @@ async fn webhook(
                                     Ok(None) => {
                                         let error_msg = format!("❌ Mata kuliah '{}' tidak ditemukan.", course_name);
                                         let _ = send_reply(chat_id, &error_msg).await;
+                                        logger.set_status(tui::state::JobStatus::Failed);
                                         return StatusCode::OK;
                                     }
                                     Err(e) => {
-                                        eprintln!("❌ Failed to lookup course: {}", e);
+                                        logger.log(&format!("❌ Failed to lookup course: {}", e));
                                         None
                                     }
                                 }
@@ -461,6 +492,7 @@ async fn webhook(
                                 new_parallel_codes,
                                 Some(payload.payload.id.clone()),
                                 Some(payload.payload.body.clone()), 
+                                Some(&logger),
                             ).await {
                                 Ok(_) => {
                                     // Update course_id jika ada perubahan
@@ -501,10 +533,12 @@ async fn webhook(
                                     } else {
                                         let _ = send_reply(chat_id, "✅ *KLARIFIKASI TERSIMPAN*").await;
                                     }
+                                    logger.set_status(tui::state::JobStatus::Completed);
                                 }
                                 Err(e) => {
                                     let error_msg = format!("❌ Gagal menyimpan database: {}", e);
                                     let _ = send_reply(chat_id, &error_msg).await;
+                                    logger.set_status(tui::state::JobStatus::Failed);
                                 }
                             }
                         }
@@ -527,15 +561,18 @@ async fn webhook(
                                     let _ = send_reply(chat_id, "❌ Maaf, aku tidak mengerti format pesanmu.").await;
                                 }
                             }
+                            logger.set_status(tui::state::JobStatus::Failed);
                         }
                     }
                 } else {
                     let _ = send_reply(chat_id, "❌ Data tugas tidak ditemukan/sudah dihapus.").await;
+                    logger.set_status(tui::state::JobStatus::Failed);
                 }
 
                 return StatusCode::OK;
             } else {
-                println!("⚠️ Could not extract assignment ID from quoted message");
+                logger.log("⚠️ Could not extract assignment ID from quoted message");
+                logger.set_status(tui::state::JobStatus::Failed);
                 return StatusCode::OK;
             }
         }
@@ -547,20 +584,24 @@ async fn webhook(
         state.whitelist.should_process(chat_id, is_command);
 
     if !should_process {
-        println!("🚫 Ignoring: {} (from: {})\n", reason, chat_id);
+        logger.log(&format!("🚫 Ignoring: {} (from: {})\n", reason, chat_id));
+        logger.set_status(tui::state::JobStatus::Completed);
         return StatusCode::OK;
     }
 
     // STEP 3: HANDLE MESSAGE BASED ON TYPE
     match message_type {
         MessageType::Command(cmd) => {
-            println!("⚙️  Processing command: {:?}", cmd);
+            logger.log(&format!("⚙️  Processing command: {:?}", cmd));
             let response = handle_command(cmd, sender_phone, sender_name, chat_id, &state.pool).await;
             
             match response {
                 CommandResponse::Text(text) => {
                     if let Err(e) = send_reply(chat_id, &text).await {
-                        eprintln!("❌ Failed to send reply: {}", e);
+                        logger.log(&format!("❌ Failed to send reply: {}", e));
+                        logger.set_status(tui::state::JobStatus::Failed);
+                    } else {
+                        logger.set_status(tui::state::JobStatus::Completed);
                     }
                 }
                 CommandResponse::ResendMessages { messages, summary } => {
@@ -569,7 +610,7 @@ async fn webhook(
                         let formatted_msg = format!("*↱* _Forwarded_ \n\n{}", msg_content);
                         
                         if let Err(e) = send_reply(chat_id, &formatted_msg).await {
-                            eprintln!("❌ Failed to send message {}: {}", i + 1, e);
+                            logger.log(&format!("❌ Failed to send message {}: {}", i + 1, e));
                         }
                         
                         // Delay between messages
@@ -583,14 +624,17 @@ async fn webhook(
 
                     // First send summary
                     if let Err(e) = send_reply(chat_id, &summary).await {
-                        eprintln!("❌ Failed to send summary: {}", e);
+                        logger.log(&format!("❌ Failed to send summary: {}", e));
+                        logger.set_status(tui::state::JobStatus::Failed);
+                    } else {
+                        logger.set_status(tui::state::JobStatus::Completed);
                     }
                 }
             }
         }
 
         MessageType::NeedsAI(text) => {
-            println!("🤖 Processing with AI...");
+            logger.log("🤖 Processing with AI...");
             
             // Image handling (same as before)
             let image_base64 = if payload.payload.has_media.unwrap_or(false) {
@@ -598,10 +642,10 @@ async fn webhook(
                     if let Some(ref media_url) = media.url {
                         if media.mimetype.as_ref().map(|m| m.starts_with("image/")).unwrap_or(false) {
                             let api_key = std::env::var("WAHA_API_KEY").unwrap_or_else(|_| "devkey123".to_string());
-                            match fetch_image_from_url(media_url, &api_key).await {
+                            match fetch_image_from_url(media_url, &api_key, &logger).await {
                                 Ok(base64) => Some(base64),
                                 Err(e) => {
-                                    eprintln!("❌ Failed to download image: {}", e);
+                                    logger.log(&format!("❌ Failed to download image: {}", e));
                                     None
                                 }
                             }
@@ -614,7 +658,7 @@ async fn webhook(
             let courses_list = crud::get_all_courses_formatted(&state.pool).await.unwrap_or_default();
             
             // USE NEW FUNCTION: get_assignments_for_classification (20 assignments)
-            let assignments = crud::get_assignments_for_classification(&state.pool).await.unwrap_or_default();
+            let assignments = crud::get_assignments_for_classification(&state.pool, Some(&logger)).await.unwrap_or_default();
             
             let course_map = sqlx::query_as::<_, (uuid::Uuid, String)>("SELECT id, name FROM courses")
                 .fetch_all(&state.pool).await.map(|rows| rows.into_iter().collect()).unwrap_or_default();
@@ -633,13 +677,14 @@ async fn webhook(
                 &state.pool,
                 quoted_message_text.as_deref(),
                 quoted_message_id.as_deref(),
+                &logger,  // Pass logger to AI
             ).await {
                 Ok(classification) => {
                     //  STOP MONITORING: Log AI Duration
                     let ai_duration = ai_start.elapsed();
-                    println!("🧠 AI Latency: {:.2?}", ai_duration);
+                    logger.log(&format!("🧠 AI Latency: {:.2?}", ai_duration));
 
-                    println!("✅ AI Classification: {:?}\n", classification);
+                    logger.log(&format!("✅ AI Classification: {:?}\n", classification));
                     
                     handle_ai_classification(
                         state.pool.clone(), 
@@ -648,12 +693,14 @@ async fn webhook(
                         sender_phone, 
                         &payload.payload.body,
                         chat_id,
-                        debug_group_id
+                        debug_group_id,
+                        logger.clone(),
                     ).await;
                 }
                 Err(e) => {
-                    eprintln!("❌ AI extraction failed: {}", e);
+                    logger.log(&format!("❌ AI extraction failed: {}", e));
                     let _ = send_reply(chat_id, "❌ Failed to process message").await;
+                    logger.set_status(tui::state::JobStatus::Failed);
                 }
             }
         }
@@ -661,9 +708,9 @@ async fn webhook(
     
     // STOP MONITORING: Global Request Timer
     let total_duration = request_start.elapsed();
-    println!("⏱️  Total Request Processed in: {:.2?}\n", total_duration);
+    logger.log(&format!("⏱️  Total Request Processed in: {:.2?}\n", total_duration));
 
-    StatusCode::OK
+    StatusCode::OK;
 }
 
 #[allow(non_snake_case)]
@@ -675,6 +722,7 @@ async fn handle_ai_classification(
     message_body: &str,
     source_chat_id: &str, 
     debug_group_id: Option<String>,
+    logger: tui::JobLogger,
 ) {
     let message_id = message_id.to_string();
     let sender_id = sender_id.to_string();
@@ -751,14 +799,18 @@ async fn handle_ai_classification(
                     &message_body,  // FIX: Pass message_body here
                     debug_group_id.clone(),
                     index + 1,
+                    logger.clone(),
                 ).await;
             }
+            
+            logger.set_status(tui::state::JobStatus::Completed);
         }
         
         // Single assignment - USE AI FOR DUPLICATE DETECTION
         AIClassification::AssignmentInfo { course_name, title, deadline, description, parallel_codes, .. } => {
             let debug_group = debug_group_id.clone();
             let msg_body = message_body.to_string();
+            let logger_clone = logger.clone();
             
             tokio::spawn(async move {
                 handle_single_assignment(
@@ -773,7 +825,10 @@ async fn handle_ai_classification(
                     &msg_body,
                     debug_group,
                     0,
-                ).await
+                    logger_clone.clone(),
+                ).await;
+                
+                logger_clone.set_status(tui::state::JobStatus::Completed);
             });
         }
         
@@ -792,6 +847,7 @@ async fn handle_ai_classification(
             let msg_body = message_body.clone();
             let debug_clone = debug_group_id.clone();
             let source_chat_clone = source_chat_id.clone(); // Clone untuk spawn
+            let logger_clone = logger.clone();
 
             tokio::spawn(async move {
                 let course_map: HashMap<uuid::Uuid, String> = sqlx::query_as::<_, (uuid::Uuid, String)>(
@@ -809,7 +865,7 @@ async fn handle_ai_classification(
                     None
                 };
                 
-                let active_assignments = crud::get_recent_assignments_for_matching(&pool_clone)
+                let active_assignments = crud::get_recent_assignments_for_matching(&pool_clone, Some(&logger_clone))
                     .await
                     .unwrap_or_default();
                 
@@ -862,10 +918,11 @@ async fn handle_ai_classification(
                             &parallel_codes,
                             &active_assignments,
                             &course_map,
+                            &logger_clone,  // Pass logger
                         ).await;
                         
                         if let Ok(Some(id)) = dup_check {
-                            println!("🔄 \x1b[33mRe-announcement\x1b[0m: \x1b[1m{}\x1b[0m", title);
+                            logger_clone.log(&format!("🔄 \x1b[33mRe-announcement\x1b[0m: \x1b[1m{}\x1b[0m", title));
                             
                             let deadline_parsed = new_deadline.as_ref()
                                 .and_then(|d| crud::parse_deadline(d).ok());
@@ -880,6 +937,7 @@ async fn handle_ai_classification(
                                 if parallel_codes.is_empty() { None } else { Some(parallel_codes.clone()) },
                                 Some(msg_id.clone()),
                                 Some(msg_body.clone()),
+                                Some(&logger_clone),
                             ).await;
                             
                             // KIRIM NOTIFIKASI
@@ -904,6 +962,8 @@ async fn handle_ai_classification(
                                     &format!("🔄 *UPDATED*: {}\n_{}_", title, changes)
                                 ).await;
                             }
+                            
+                            logger_clone.set_status(tui::state::JobStatus::Completed);
                             return;
                         }
                     }
@@ -916,6 +976,7 @@ async fn handle_ai_classification(
                     &active_assignments,
                     &course_map,
                     &parallel_codes,
+                    &logger_clone,  // Pass logger
                 ).await {
                     Ok(Some(assignment_id)) => {
                         let current_title = active_assignments.iter()
@@ -923,7 +984,7 @@ async fn handle_ai_classification(
                             .map(|a| a.title.clone())
                             .unwrap_or_else(|| "Unknown".to_string());
                         
-                        println!("🔄 \x1b[33mUpdating\x1b[0m: \x1b[1m{}\x1b[0m", current_title);
+                        logger_clone.log(&format!("🔄 \x1b[33mUpdating\x1b[0m: \x1b[1m{}\x1b[0m", current_title));
                         
                         let deadline_parsed = new_deadline.as_ref()
                             .and_then(|d| crud::parse_deadline(d).ok());
@@ -938,6 +999,7 @@ async fn handle_ai_classification(
                             if parallel_codes.is_empty() { None } else { Some(parallel_codes.clone()) },
                             Some(msg_id),
                             Some(msg_body),
+                            Some(&logger_clone),
                         ).await {
 
                             // KIRIM NOTIFIKASI
@@ -970,9 +1032,11 @@ async fn handle_ai_classification(
                                 ).await;
                             }
                         }
+                        
+                        logger_clone.set_status(tui::state::JobStatus::Completed);
                     }
                     Ok(None) => {
-                        println!("⚠️  \x1b[33mNo match found\x1b[0m for update: {:?}", reference_keywords);
+                        logger_clone.log(&format!("⚠️  \x1b[33mNo match found\x1b[0m for update: {:?}", reference_keywords));
                         
                         if let Some(debug_id) = debug_clone {
                             let _ = send_reply(
@@ -980,9 +1044,12 @@ async fn handle_ai_classification(
                                 "⚠️ Could not find assignment to update"
                             ).await;
                         }
+                        
+                        logger_clone.set_status(tui::state::JobStatus::Failed);
                     }
                     Err(e) => {
-                        eprintln!("❌ Update matching failed: {}", e);
+                        logger_clone.log(&format!("❌ Update matching failed: {}", e));
+                        logger_clone.set_status(tui::state::JobStatus::Failed);
                     }
                 }
             });
@@ -992,7 +1059,7 @@ async fn handle_ai_classification(
             match category {
                 UnrecognizedCategory::Informal => {
                     // Completely informal - don't send anything to debug group
-                    println!("💬 Informal chat detected - ignoring");
+                    logger.log("💬 Informal chat detected - ignoring");
                 }
                 UnrecognizedCategory::AcademicRelated => {
                     // Academic-related but not an assignment - send reason to debug
@@ -1006,6 +1073,8 @@ async fn handle_ai_classification(
                     }
                 }
             }
+            
+            logger.set_status(tui::state::JobStatus::Completed);
         }
     }
 }
@@ -1024,6 +1093,7 @@ async fn handle_single_assignment(
     message_body: &str,
     debug_group_id: Option<String>,
     assignment_number: usize,
+    logger: tui::JobLogger,
 ) {
     let title_clone = title.clone();
     let desc_clone = description.clone().unwrap_or("No description".to_string());
@@ -1058,7 +1128,7 @@ async fn handle_single_assignment(
             .unwrap_or_default();
             
             // USE NEW FUNCTION: get_recent_assignments_for_duplicate_check (100 assignments)
-            let existing_assignments = crud::get_recent_assignments_for_duplicate_check(&pool)
+            let existing_assignments = crud::get_recent_assignments_for_duplicate_check(&pool, Some(&logger))
                 .await
                 .unwrap_or_default();
             
@@ -1070,12 +1140,13 @@ async fn handle_single_assignment(
                     final_parallel_codes.as_slice(),
                     &existing_assignments,
                     &course_map,
+                    &logger,  // Pass logger
                 ).await;
                 
                 match &match_result {
                     Ok(Some(id)) => {
                         // CLEAN LOG: Just show what's being updated
-                        println!("🔄 \x1b[33mUpdating\x1b[0m: \x1b[1m{}\x1b[0m", title_clone);
+                        logger.log(&format!("🔄 \x1b[33mUpdating\x1b[0m: \x1b[1m{}\x1b[0m", title_clone));
                         
                         let update_result = crud::update_assignment_fields(
                             &pool, 
@@ -1086,6 +1157,7 @@ async fn handle_single_assignment(
                             if final_parallel_codes.is_empty() { None } else { Some(final_parallel_codes.clone()) },
                             Some(message_id.to_string()),
                             Some(message_body.to_string()),
+                            Some(&logger),
                         ).await;
                         
                         if update_result.is_ok() {
@@ -1125,9 +1197,9 @@ async fn handle_single_assignment(
         relating_messages: vec![message_body.to_string()],
     };
     
-    match crud::create_assignment(&pool, new_assignment).await {
+    match crud::create_assignment(&pool, new_assignment, Some(&logger)).await {
         Ok(_) => {
-            println!("✅ Assignment created: {}", title_clone);
+            logger.log(&format!("✅ Assignment created: {}", title_clone));
             
             // ============ CLARIFICATION CHECK ============
             if let Some(cid) = course_id {
@@ -1135,9 +1207,9 @@ async fn handle_single_assignment(
                     if let Ok(Some(full_assign)) = crud::get_assignment_with_course_by_id(&pool, assignment.id).await {
                         
                         // Compact assignment info display
-                        println!("🔍 Starting clarification check...");
-                        println!("   \x1b[36m📚 {}\x1b[0m", full_assign.course_name);
-                        println!("   \x1b[1m📝 {}\x1b[0m", full_assign.title);
+                        logger.log("🔍 Starting clarification check...");
+                        logger.log(&format!("   \x1b[36m📚 {}\x1b[0m", full_assign.course_name));
+                        logger.log(&format!("   \x1b[1m📝 {}\x1b[0m", full_assign.title));
                         
                         if let Some(ref desc) = full_assign.description {
                             let desc_display = desc.chars().take(60).collect::<String>();
@@ -1146,38 +1218,38 @@ async fn handle_single_assignment(
                             } else {
                                 desc_display
                             };
-                            println!("   \x1b[90m📄 {}\x1b[0m", desc_final);
+                            logger.log(&format!("   \x1b[90m📄 {}\x1b[0m", desc_final));
                         }
                         
                         if let Some(deadline) = full_assign.deadline {
                             let indonesia_time = deadline + ChronoDuration::hours(7);
-                            println!("   \x1b[32m⏰ {}\x1b[0m", indonesia_time.format("%Y-%m-%d %H:%M WIB"));
+                            logger.log(&format!("   \x1b[32m⏰ {}\x1b[0m", indonesia_time.format("%Y-%m-%d %H:%M WIB")));
                         } else {
-                            println!("   \x1b[33m⏰ (no deadline)\x1b[0m");
+                            logger.log("   \x1b[33m⏰ (no deadline)\x1b[0m");
                         }
                         
                         if !full_assign.parallel_codes.is_empty() {
-                            println!("   \x1b[35m🧩 {}\x1b[0m", full_assign.parallel_codes.join(", ").to_uppercase());
+                            logger.log(&format!("   \x1b[35m🧩 {}\x1b[0m", full_assign.parallel_codes.join(", ").to_uppercase()));
                         }
                         
                         // Check for missing fields
                         let missing = clarification::identify_missing_fields(&full_assign);
                         
                         if !missing.is_empty() {
-                            println!("   \x1b[33m🔔 Missing: {}\x1b[0m", missing.join(", "));
+                            logger.log(&format!("   \x1b[33m🔔 Missing: {}\x1b[0m", missing.join(", ")));
                             
                             if let Some(debug_id) = &debug_group_id {
                                 let (info_msg, template_msg) = clarification::generate_clarification_messages(&full_assign, &missing);
                                 let combined_msg = format!("{}\n{}", info_msg, template_msg);
 
                                 match send_reply(debug_id, &combined_msg).await {
-                                    Ok(_) => println!("   \x1b[32m✅ Clarification sent\x1b[0m\n"),
-                                    Err(e) => eprintln!("   \x1b[31m❌ Send failed: {}\x1b[0m\n", e),
+                                    Ok(_) => logger.log("   \x1b[32m✅ Clarification sent\x1b[0m\n"),
+                                    Err(e) => logger.log(&format!("   \x1b[31m❌ Send failed: {}\x1b[0m\n", e)),
                                 }
                             }
                             return; // Don't send success message
                         } else {
-                            println!("   \x1b[32m✅ Complete (no clarification needed)\x1b[0m\n");
+                            logger.log("   \x1b[32m✅ Complete (no clarification needed)\x1b[0m\n");
                         }
                     }
                 }
@@ -1205,7 +1277,7 @@ async fn handle_single_assignment(
                     String::new()
                 };
                 
-                println!("📤 Sending success message...");
+                logger.log("📤 Sending success message...");
                 let _ = send_reply(
                     debug_id, 
                     &format!("{}✨ *NEW TASK*: {}\n📚 {}{}{}", 
@@ -1219,7 +1291,7 @@ async fn handle_single_assignment(
             }
         }
         Err(e) => {
-            eprintln!("❌ Failed to save assignment: {}", e);
+            logger.log(&format!("❌ Failed to save assignment: {}", e));
             
             if let Some(debug_id) = &debug_group_id {
                 let _ = send_reply(
@@ -1270,7 +1342,7 @@ fn extract_parallel_code(title: &str) -> Option<String> {
     ["K1", "K2", "K3", "P1", "P2", "P3"].iter().find(|&c| u.contains(c)).map(|c| c.to_lowercase())
 }
 
-async fn fetch_image_from_url(url: &str, api_key: &str) -> Result<String, String> {
+async fn fetch_image_from_url(url: &str, api_key: &str, logger: &tui::JobLogger) -> Result<String, String> {
     let waha_base = std::env::var("WAHA_URL").unwrap_or_else(|_| "http://waha:3000".to_string());
     let url = url.replace("http://localhost:3000", &waha_base);
     let client = reqwest::Client::new();
@@ -1287,7 +1359,7 @@ async fn fetch_image_from_url(url: &str, api_key: &str) -> Result<String, String
     use std::io::Cursor;
 
     if (bytes.len() as f64 / 1_000_000.0) > 3.5 {
-         println!("   🔄 Compressing image...");
+         logger.log("   🔄 Compressing image...");
          
          let img = ImageReader::new(Cursor::new(&bytes))
             .with_guessed_format()
