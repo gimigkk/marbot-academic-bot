@@ -825,6 +825,42 @@ pub fn parse_deadline(deadline_str: &str) -> Result<DateTime<Utc>, String> {
     Err(format!("Failed to parse deadline '{}'. Expected format: 'YYYY-MM-DD HH:MM' or 'YYYY-MM-DD'", deadline_str))
 }
 
+/// Set user preference for a specific course parallel
+pub async fn set_user_course_parallel(
+    pool: &PgPool,
+    user_id: &str,
+    course_name_query: &str,
+    parallel_code: &str,
+) -> Result<String, sqlx::Error> {
+    // 1. Cari Course dulu berdasarkan nama/alias (reuse fungsi yang sudah ada)
+    let course = get_course_by_name_or_alias(pool, course_name_query).await?;
+    
+    match course {
+        Some(c) => {
+            let clean_code = parallel_code.to_lowercase();
+            
+            // 2. Upsert (Insert atau Update jika sudah ada)
+            // Pastikan tabel user_course_settings memiliki constraint UNIQUE(user_id, course_id)
+            sqlx::query!(
+                r#"
+                INSERT INTO user_course_settings (user_id, course_id, parallel_code)
+                VALUES ($1, $2, $3)
+                ON CONFLICT (user_id, course_id) 
+                DO UPDATE SET parallel_code = $3, created_at = NOW()
+                "#,
+                user_id,
+                c.id,
+                clean_code
+            )
+            .execute(pool)
+            .await?;
+            
+            Ok(format!("✅ Berhasil! Kelas untuk *{}* diatur ke *{}*.", c.name, clean_code.to_uppercase()))
+        },
+        None => Ok(format!("❌ Mata kuliah *{}* tidak ditemukan.", course_name_query))
+    }
+}
+
 // ========================================
 // ADDITIONAL HELPER IF NEEDED
 // ========================================
