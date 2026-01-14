@@ -4,46 +4,52 @@ use sqlx::PgPool;
 use crate::database::crud;
 use crate::models::SendTextRequest;
 use chrono::{DateTime, Datelike, NaiveDate, Utc};
-use crate::tui::JobLogger;
-use std::sync::Arc;
+use crate::tui::{JobLogger, state::LogEntry};
+use tokio::sync::mpsc;
 
-pub async fn start_scheduler(pool: PgPool) -> Result<(), JobSchedulerError> {
-    start_scheduler_internal(pool, None).await
-}
-
-/// TUI-aware entrypoint: pass an Arc<JobLogger> to route messages to the TUI logger.
-pub async fn start_scheduler_with_logger(pool: PgPool, logger: Arc<JobLogger>) -> Result<(), JobSchedulerError> {
-    start_scheduler_internal(pool, Some(logger)).await
-}
-
-async fn start_scheduler_internal(pool: PgPool, logger: Option<Arc<JobLogger>>) -> Result<(), JobSchedulerError> {
+pub async fn start_scheduler(
+    pool: PgPool,
+    log_tx: mpsc::UnboundedSender<LogEntry>,
+) -> Result<(), JobSchedulerError> {
     let sched = JobScheduler::new().await?;
 
     // 1. REMINDER HARIAN (UTC TIME)
     // 07:00 WIB = 00:00 UTC
     let pool_pagi = pool.clone();
-    let logger_pagi = logger.clone();
+    let log_tx_pagi = log_tx.clone();
     sched.add(Job::new_async("0 0 0 * * *", move |_uuid, _l| {
         let pool = pool_pagi.clone();
-        let logger = logger_pagi.clone();
+        let log_tx = log_tx_pagi.clone();
         Box::pin(async move {
-            log_msg(&logger, "⏰ REMINDER PAGI (00:00 UTC / 07:00 WIB):");
-            if let Err(e) = run_reminder_task(pool, "☀️ Selamat pagi Ilkomers!", logger.clone()).await {
-                log_err(&logger, &format!("❌ Error reminder pagi: {}", e));
+            let job_id = crate::tui::generate_job_id();
+            let logger = JobLogger::new(job_id, log_tx);
+            
+            logger.log("⏰ REMINDER PAGI (00:00 UTC / 07:00 WIB)");
+            if let Err(e) = run_reminder_task(pool, "☀️ Selamat pagi Ilkomers!", &logger).await {
+                logger.log(&format!("❌ Error reminder pagi: {}", e));
+                logger.set_status(crate::tui::state::JobStatus::Failed);
+            } else {
+                logger.set_status(crate::tui::state::JobStatus::Completed);
             }
         })
     })?).await?;
 
     // 17:00 WIB = 10:00 UTC
     let pool_sore = pool.clone();
-    let logger_sore = logger.clone();
+    let log_tx_sore = log_tx.clone();
     sched.add(Job::new_async("0 0 10 * * *", move |_uuid, _l| {
         let pool = pool_sore.clone();
-        let logger = logger_sore.clone();
+        let log_tx = log_tx_sore.clone();
         Box::pin(async move {
-            log_msg(&logger, "⏰ REMINDER SORE (10:00 UTC / 17:00 WIB):");
-            if let Err(e) = run_reminder_task(pool, "🌇 Selamat sore Ilkomers!", logger.clone()).await {
-                log_err(&logger, &format!("❌ Error reminder sore: {}", e));
+            let job_id = crate::tui::generate_job_id();
+            let logger = JobLogger::new(job_id, log_tx);
+            
+            logger.log("⏰ REMINDER SORE (10:00 UTC / 17:00 WIB)");
+            if let Err(e) = run_reminder_task(pool, "🌇 Selamat sore Ilkomers!", &logger).await {
+                logger.log(&format!("❌ Error reminder sore: {}", e));
+                logger.set_status(crate::tui::state::JobStatus::Failed);
+            } else {
+                logger.set_status(crate::tui::state::JobStatus::Completed);
             }
         })
     })?).await?;
@@ -51,13 +57,19 @@ async fn start_scheduler_internal(pool: PgPool, logger: Option<Arc<JobLogger>>) 
     // 2. REMINDER DEADLINE MEPET (H-1 JAM)
     // Cek setiap 10 menit (Menit ke-1, 11, 21, dst)
     let pool_urgent = pool.clone();
-    let logger_urgent = logger.clone();
+    let log_tx_urgent = log_tx.clone();
     sched.add(Job::new_async("0 1/10 * * * *", move |_uuid, _l| {
         let pool = pool_urgent.clone();
-        let logger = logger_urgent.clone();
+        let log_tx = log_tx_urgent.clone();
         Box::pin(async move {
-            if let Err(e) = check_urgent_deadlines(pool, logger.clone()).await {
-                log_err(&logger, &format!("❌ Error checking urgent deadlines: {}", e));
+            let job_id = crate::tui::generate_job_id();
+            let logger = JobLogger::new(job_id, log_tx);
+            
+            if let Err(e) = check_urgent_deadlines(pool, &logger).await {
+                logger.log(&format!("❌ Error checking urgent deadlines: {}", e));
+                logger.set_status(crate::tui::state::JobStatus::Failed);
+            } else {
+                logger.set_status(crate::tui::state::JobStatus::Completed);
             }
         })
     })?).await?;
@@ -66,31 +78,17 @@ async fn start_scheduler_internal(pool: PgPool, logger: Option<Arc<JobLogger>>) 
     Ok(())
 }
 
-// --- LOG ROUTERS -----------------------------------------------------------
+// --- LOGIC REMINDER HARIAN ---
 
-fn log_msg(logger: &Option<Arc<JobLogger>>, msg: &str) {
-    if let Some(l) = logger.as_ref() {
-        l.log(msg);
-    } else {
-        println!("{}", msg);
-    }
-}
-
-fn log_err(logger: &Option<Arc<JobLogger>>, msg: &str) {
-    if let Some(l) = logger.as_ref() {
-        l.log(msg);
-    } else {
-        eprintln!("{}", msg);
-    }
-}
-
-// --- LOGIC REMINDER HARIAN -----------------------------------------------
-
-async fn run_reminder_task(pool: PgPool, greeting: &str, logger: Option<Arc<JobLogger>>) -> Result<(), Box<dyn std::error::Error>> {
-    let assignments = crud::get_active_assignments_sorted(&pool, logger: Option<&JobLogger>).await?;
+async fn run_reminder_task(
+    pool: PgPool,
+    greeting: &str,
+    logger: &JobLogger,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let assignments = crud::get_active_assignments_sorted(&pool, Some(logger)).await?;
 
     if assignments.is_empty() {
-        log_msg(&logger, "📭 Tidak ada tugas aktif, skip reminder.");
+        logger.log("📭 Tidak ada tugas aktif, skip reminder");
         return Ok(());
     }
 
@@ -128,7 +126,10 @@ async fn run_reminder_task(pool: PgPool, greeting: &str, logger: Option<Arc<JobL
 }
 
 // REMINDER H-1 JAM  ---
-async fn check_urgent_deadlines(pool: PgPool, logger: Option<Arc<JobLogger>>) -> Result<(), Box<dyn std::error::Error>> {
+async fn check_urgent_deadlines(
+    pool: PgPool,
+    logger: &JobLogger,
+) -> Result<(), Box<dyn std::error::Error>> {
     let now = Utc::now();
     let one_hour_later = now + chrono::Duration::hours(1);
 
@@ -153,28 +154,29 @@ async fn check_urgent_deadlines(pool: PgPool, logger: Option<Arc<JobLogger>>) ->
         return Ok(());
     }
 
-    log_msg(&logger, &format!("🚨 Menemukan {} tugas deadline < 1 jam!", urgent_tasks.len()));
+    logger.log(&format!("🚨 Menemukan {} tugas deadline < 1 jam", urgent_tasks.len()));
 
     for task in urgent_tasks {
         let deadline_wib = task.deadline
             .map(|d| d.with_timezone(&chrono::FixedOffset::east_opt(7 * 3600).unwrap()))
-            .unwrap();
-
+            .unwrap(); 
+            
         let time_str = deadline_wib.format("%H:%M").to_string();
-
+        
         let message = format!(
             "⚠️*JANGAN LUPA KUMPULKAN H-1 JAM*\n\n\
-             📌 *{}*\n\
-             📚 {}\n\
-             ⏰ Deadline: Pukul *{}* WIB\n\n\
-             _Segera kumpulkan!!!!_",
+            📌 *{}*\n\
+            📚 {}\n\
+            ⏰ Deadline: Pukul *{}* WIB\n\
+            \n\
+            _Segera kumpulkan!!!!_",
             sanitize_wa_md(&task.title),
             &task.course_name,
             time_str
         );
 
-        // Kirim Pesan (clone logger when passing into async send)
-        send_to_channels(message, logger.clone()).await?;
+        // Kirim Pesan
+        send_to_channels(message, logger).await?;
 
         // Tandai sudah dikirim
         sqlx::query!(
@@ -183,16 +185,18 @@ async fn check_urgent_deadlines(pool: PgPool, logger: Option<Arc<JobLogger>>) ->
         )
         .execute(&pool)
         .await?;
-
-        log_msg(&logger, &format!("✅ Reminder urgent dikirim untuk: {}", task.title));
+        
+        logger.log(&format!("✅ Reminder urgent dikirim untuk: {}", task.title));
     }
 
     Ok(())
 }
 
-// --- HELPER FUNCTIONS -----------------------------------------------------
-
-async fn send_to_channels(message: String, logger: Option<Arc<JobLogger>>) -> Result<(), Box<dyn std::error::Error>> {
+// --- HELPER FUNCTIONS ---
+async fn send_to_channels(
+    message: String,
+    logger: &JobLogger,
+) -> Result<(), Box<dyn std::error::Error>> {
     let channels_env = std::env::var("ACADEMIC_CHANNELS").unwrap_or_default();
     let target_channels: Vec<&str> = channels_env
         .split(',')
@@ -201,7 +205,7 @@ async fn send_to_channels(message: String, logger: Option<Arc<JobLogger>>) -> Re
         .collect();
 
     if target_channels.is_empty() {
-        log_msg(&logger, "⚠️ ACADEMIC_CHANNELS kosong, skip kirim.");
+        logger.log("⚠️ ACADEMIC_CHANNELS kosong, skip kirim");
         return Ok(());
     }
 
@@ -232,9 +236,9 @@ fn status_dot(deadline: &Option<DateTime<Utc>>) -> &'static str {
     match deadline {
         Some(d) => {
             let days = days_left(d);
-            if days < 1 { "🔴" }
-            else if days == 1 { "🟠" }
-            else if days == 2 { "🟡" }
+            if days < 1 { "🔴" } 
+            else if days == 1 { "🟠" } 
+            else if days == 2 { "🟡" } 
             else { "🟢" }
         }
         None => "⚪"
@@ -246,7 +250,7 @@ fn days_left(deadline_utc: &DateTime<Utc>) -> i64 {
     let wib_offset = chrono::FixedOffset::east_opt(7 * 3600).unwrap();
     let now_wib = Utc::now().with_timezone(&wib_offset).date_naive();
     let due_wib = deadline_utc.with_timezone(&wib_offset).date_naive();
-
+    
     (due_wib - now_wib).num_days()
 }
 
@@ -269,7 +273,7 @@ fn humanize_deadline(deadline: &Option<DateTime<Utc>>) -> String {
                     let now_wib = now_utc.with_timezone(&wib_offset);
                     let duration = deadline_wib.signed_duration_since(now_wib);
                     let hours_left = duration.num_hours();
-
+                    
                     if hours_left > 0 {
                         format!("{} jam lagi ({})", hours_left, time_str)
                     } else if hours_left == 0 {
@@ -280,7 +284,7 @@ fn humanize_deadline(deadline: &Option<DateTime<Utc>>) -> String {
                     }
                 },
                 1 => format!("Besok ({})", date_str),
-                d if d >= 2 => format!("H-{} ({})", d, date_str),
+                d if d >= 2 => format!("H-{} ({})", d, date_str), 
                 -1 => format!("Kemarin ({})", date_str),
                 d => format!("lewat {} hari ({})", d.abs(), date_str),
             }

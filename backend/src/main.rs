@@ -226,9 +226,10 @@ async fn main() {
 
     // 5. Run Scheduler
     let pool_for_scheduler = pool.clone();
+    let log_tx_for_scheduler = log_tx.clone();
     tokio::spawn(async move {
         tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-        if let Err(e) = scheduler::start_scheduler(pool_for_scheduler).await {
+        if let Err(e) = scheduler::start_scheduler(pool_for_scheduler, log_tx_for_scheduler).await {
             eprintln!("\n\x1b[31m❌ Scheduler Error: {:?}\x1b[0m", e);
         }
     });
@@ -593,7 +594,7 @@ async fn webhook(
     match message_type {
         MessageType::Command(cmd) => {
             logger.log(&format!("⚙️  Processing command: {:?}", cmd));
-            let response = handle_command(cmd, sender_phone, sender_name, chat_id, &state.pool).await;
+            let response = handle_command(cmd, sender_phone, sender_name, chat_id, &state.pool, &logger).await;
             
             match response {
                 CommandResponse::Text(text) => {
@@ -710,7 +711,7 @@ async fn webhook(
     let total_duration = request_start.elapsed();
     logger.log(&format!("⏱️  Total Request Processed in: {:.2?}\n", total_duration));
 
-    StatusCode::OK;
+    StatusCode::OK
 }
 
 #[allow(non_snake_case)]
