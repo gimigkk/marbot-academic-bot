@@ -68,6 +68,18 @@ CREATE TABLE IF NOT EXISTS public.user_completions (
     UNIQUE(user_id, assignment_id)
 );
 
+-- TABEL 5: USER COURSE SETTINGS (Preferensi Kelas User)
+CREATE TABLE IF NOT EXISTS public.user_course_settings (
+    user_id TEXT NOT NULL, -- Nomor WA
+    course_id UUID NOT NULL REFERENCES public.courses(id) ON DELETE CASCADE,
+    parallel_code TEXT NOT NULL, -- Contoh: 'k1', 'k2', 'a', 'b'
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    
+    PRIMARY KEY (user_id, course_id)
+);
+
+-- Index agar pencarian cepat saat command #todo
+CREATE INDEX IF NOT EXISTS idx_user_settings_user ON public.user_course_settings(user_id);
 -- Indexing untuk Performa Cepat
 CREATE INDEX IF NOT EXISTS idx_user_completions_user 
 ON public.user_completions (user_id, completed_at DESC);
