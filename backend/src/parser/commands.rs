@@ -11,6 +11,7 @@ use crate::database::crud::{
 };
 
 use crate::models::BotCommand;
+use crate::tui::JobLogger;
 use chrono::{DateTime, Duration, FixedOffset, Datelike, NaiveDate, Utc};
 use sqlx::PgPool;
 use std::time::Instant;
@@ -35,10 +36,11 @@ pub async fn handle_command(
     user_name: &str,
     chat_id: &str,
     pool: &PgPool,
+    logger: &JobLogger,
 ) -> CommandResponse {
     match cmd {
         BotCommand::Ping => {
-            println!("🏓 Ping command received from {}\n", user_phone);
+            logger.log(&format!("🏓 Ping command received from {}", user_phone));
             
             let start_time = Instant::now();
             
@@ -160,12 +162,12 @@ pub async fn handle_command(
         }
 
         BotCommand::Tugas => {
-            println!("📋 Tugas command received from {}", user_phone);
+            logger.log(&format!("📋 Tugas command received from {}", user_phone));
 
-            match get_active_assignments_sorted(pool).await {
+            match get_active_assignments_sorted(pool, Some(logger)).await {
                 Ok(assignments) => format_assignments_list(assignments, "*[Daftar Tugas Aktif]*", false, false),
                 Err(e) => {
-                    eprintln!("❌ Error fetching assignments: {}", e);
+                    logger.log(&format!("❌ Error fetching assignments: {}", e));
                     CommandResponse::Text(
                         "❌ Maaf, terjadi kesalahan saat mengambil data tugas.\n_Coba lagi sebentar ya._"
                             .to_string(),
@@ -175,21 +177,21 @@ pub async fn handle_command(
         }
 
         BotCommand::SetKelas(matkul, kode) => {
-            println!("⚙️ SetKelas command: {} {} from {}", matkul, kode, user_phone);
+            logger.log(&format!("⚙️ SetKelas command: {} {} from {}", matkul, kode, user_phone));
             match set_user_course_parallel(pool, user_phone, &matkul, &kode).await {
                 Ok(msg) => CommandResponse::Text(msg),
                 Err(e) => {
-                    eprintln!("❌ Error set kelas: {}", e);
+                    logger.log(&format!("❌ Error set kelas: {}", e));
                     CommandResponse::Text("❌ Gagal mengatur kelas. Pastikan nama matkul benar.".to_string())
                 }
             }
         }
 
         BotCommand::Todo => {
-            println!("✅ Todo command received from {} ({})", user_name, user_phone);
+            logger.log(&format!("✅ Todo command received from {} ({})", user_name, user_phone));
 
             // Panggil fungsi yang baru (yang mengembalikan tuple assignments + settings)
-            match get_active_assignments_for_user(pool, user_phone).await {
+            match get_active_assignments_for_user(pool, user_phone, Some(logger)).await {
                 Ok((assignments, user_settings)) => {
                     let has_settings = !user_settings.is_empty();
                     
@@ -233,7 +235,7 @@ pub async fn handle_command(
                     response
                 }
                 Err(e) => {
-                    eprintln!("❌ Error fetching assignments: {}", e);
+                    logger.log(&format!("❌ Error fetching assignments: {}", e));
                     CommandResponse::Text(
                         "❌ Maaf, terjadi kesalahan saat mengambil data tugas.".to_string(),
                     )
@@ -242,9 +244,9 @@ pub async fn handle_command(
         }
 
         BotCommand::Today => {
-            println!("📅 Today command received from {}", user_phone);
+            logger.log(&format!("📅 Today command received from {}", user_phone));
 
-            match get_active_assignments_for_user(pool, user_phone).await {
+            match get_active_assignments_for_user(pool, user_phone, Some(logger)).await {
                 Ok((assignments, _)) => {
                     let gmt7 = FixedOffset::east_opt(7 * 3600).unwrap();
                     let today = get_gmt7_now().date_naive();
@@ -263,7 +265,7 @@ pub async fn handle_command(
                     format_assignments_list(today_assignments, "*[Tugas Hari Ini]*", false, true)
                 }
                 Err(e) => {
-                    eprintln!("❌ Error fetching assignments: {}", e);
+                    logger.log(&format!("❌ Error fetching assignments: {}", e));
                     CommandResponse::Text(
                         "❌ Maaf, terjadi kesalahan saat mengambil data tugas.\n_Coba lagi sebentar ya._"
                             .to_string(),
@@ -273,9 +275,9 @@ pub async fn handle_command(
         }
 
         BotCommand::Week => {
-            println!("📆 Week command received from {}", user_phone);
+            logger.log(&format!("📆 Week command received from {}", user_phone));
 
-            match get_active_assignments_for_user(pool, user_phone).await {
+            match get_active_assignments_for_user(pool, user_phone, Some(logger)).await {
                 Ok((assignments, _)) => {
                     let now = get_gmt7_now();
                     let week_end = now + Duration::days(7);
@@ -296,7 +298,7 @@ pub async fn handle_command(
                     format_assignments_list(week_assignments, "📆 *Tugas Minggu Ini (7 Hari)*", false, true)
                 }
                 Err(e) => {
-                    eprintln!("❌ Error fetching assignments: {}", e);
+                    logger.log(&format!("❌ Error fetching assignments: {}", e));
                     CommandResponse::Text(
                         "❌ Maaf, terjadi kesalahan saat mengambil data tugas.\n_Coba lagi sebentar ya._"
                             .to_string(),
@@ -306,10 +308,10 @@ pub async fn handle_command(
         }
 
         BotCommand::Expand(index) => {
-            println!(
-                "🔍 Expand command for assignment {} from {} in chat {}\n",
+            logger.log(&format!(
+                "🔍 Expand command for assignment {} from {} in chat {}",
                 index, user_phone, chat_id
-            );
+            ));
 
             let academic_channels = std::env::var("ACADEMIC_CHANNELS").unwrap_or_default();
             let is_academic_channel = academic_channels
@@ -325,7 +327,7 @@ pub async fn handle_command(
                 );
             }
 
-            match get_active_assignments_for_user(pool, user_phone).await {
+            match get_active_assignments_for_user(pool, user_phone, Some(logger)).await {
                 Ok((assignments, _)) => {
                     let incomplete: Vec<_> = assignments
                         .into_iter()
@@ -386,7 +388,7 @@ pub async fn handle_command(
                     }
                 }
                 Err(e) => {
-                    eprintln!("❌ Error fetching assignments: {}", e);
+                    logger.log(&format!("❌ Error fetching assignments: {}", e));
                     CommandResponse::Text(
                         "❌ Maaf, terjadi kesalahan saat mengambil data tugas.\n_Coba lagi sebentar ya._"
                             .to_string(),
@@ -396,9 +398,9 @@ pub async fn handle_command(
         }
 
         BotCommand::Done(id) => {
-            println!("✅ Done command for assignment {} from {}\n", id, user_phone);
+            logger.log(&format!("✅ Done command for assignment {} from {}", id, user_phone));
             
-            match get_active_assignments_for_user(pool, user_phone).await {
+            match get_active_assignments_for_user(pool, user_phone, Some(logger)).await {
                 Ok((assignments, _)) => {
                     let incomplete: Vec<_> = assignments
                         .into_iter()
@@ -431,7 +433,7 @@ pub async fn handle_command(
         }
 
         BotCommand::Undo => {
-            println!("↩️  Undo command from {}\n", user_phone);
+            logger.log(&format!("↩️  Undo command from {}", user_phone));
             
             match get_last_completed_assignment(pool, user_phone).await {
                 Ok(Some(assignment)) => {
@@ -452,7 +454,7 @@ pub async fn handle_command(
                     )
                 }
                 Err(e) => {
-                    eprintln!("❌ Error fetching last completed: {}", e);
+                    logger.log(&format!("❌ Error fetching last completed: {}", e));
                     CommandResponse::Text(
                         "❌ Gagal mengambil data tugas terakhir."
                             .to_string(),
@@ -462,7 +464,7 @@ pub async fn handle_command(
         }
 
         BotCommand::Delete(index) => {
-            println!("🗑️ Delete command received from {} in chat {}", user_phone, chat_id);
+            logger.log(&format!("🗑️ Delete command received from {} in chat {}", user_phone, chat_id));
 
             let academic_channels = std::env::var("ACADEMIC_CHANNELS").unwrap_or_default();
             let is_authorized = academic_channels
@@ -479,7 +481,7 @@ pub async fn handle_command(
                 );
             }
 
-            match get_active_assignments_sorted(pool).await {
+            match get_active_assignments_sorted(pool, Some(logger)).await {
                 Ok(assignments) => {
                     let idx = (index as usize).saturating_sub(1);
 
@@ -507,20 +509,20 @@ pub async fn handle_command(
                         },
                         Ok(false) => CommandResponse::Text("❌ Gagal menghapus. Tugas mungkin sudah hilang.".to_string()),
                         Err(e) => {
-                            eprintln!("❌ DB Error on delete: {}", e);
+                            logger.log(&format!("❌ DB Error on delete: {}", e));
                             CommandResponse::Text("❌ Terjadi kesalahan sistem.".to_string())
                         }
                     }
                 }
                 Err(e) => {
-                    eprintln!("❌ Error fetching list for delete: {}", e);
+                    logger.log(&format!("❌ Error fetching list for delete: {}", e));
                     CommandResponse::Text("❌ Gagal mengambil daftar tugas.".to_string())
                 }
             }
         }
 
         BotCommand::Help => {
-            println!("❓ Help command received from {}\n", user_phone);
+            logger.log(&format!("❓ Help command received from {}", user_phone));
             CommandResponse::Text(
                 "*[MABOT — Academic Bot]*\n\n\
 *Perintah Umum:*\n\
@@ -547,7 +549,7 @@ github.com/gimigkk/marbot-academic-bot"
         }
 
         BotCommand::MissingArgument(cmd) => {
-            println!("⚠️  Missing argument for command '{}' from {}\n", cmd, user_phone);
+            logger.log(&format!("⚠️  Missing argument for command '{}' from {}", cmd, user_phone));
             
             let usage_msg = match cmd.as_str() {
                 "expand" => {
@@ -594,7 +596,7 @@ github.com/gimigkk/marbot-academic-bot"
         }
 
         BotCommand::UnknownCommand(cmd) => {
-            println!("❓ Unknown command '{}' from {}\n", cmd, user_phone);
+            logger.log(&format!("❓ Unknown command '{}' from {}", cmd, user_phone));
             CommandResponse::Text(format!(
                 "❓ Command tidak dikenali: *{}*\n\nKetik *#help* untuk melihat daftar command yang tersedia.",
                 sanitize_wa_md(&cmd)
