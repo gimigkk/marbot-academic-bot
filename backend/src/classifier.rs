@@ -43,7 +43,7 @@ fn parse_command(text: &str) -> Option<BotCommand> {
     match command.as_str() {
         "test" | "tes" | "ping" => Some(BotCommand::Ping),
         
-        // --- FITUR: Set Kelas ---
+        // --- Set Kelas ---
         "setkelas" | "set" => {
             if parts.len() >= 3 {
                 let matkul = parts[1].to_string();
