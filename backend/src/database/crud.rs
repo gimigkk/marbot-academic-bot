@@ -434,8 +434,10 @@ pub async fn get_active_assignments_for_user(
 ) -> Result<(Vec<AssignmentWithCourse>, HashMap<String, String>), sqlx::Error> {
     let now = Utc::now();
     
-    println!("🔍 Fetching assignments for user: {}", user_id);
+    // ... query sql sama seperti sebelumnya ...
+    // ... tidak ada perubahan pada SQL query ...
     
+    // (Bagian fetch existing)
     let assignments = sqlx::query_as::<_, AssignmentWithCourse>(
         r#"
         SELECT 
@@ -468,10 +470,8 @@ pub async fn get_active_assignments_for_user(
     .fetch_all(pool)
     .await?;
     
-    println!("✅ Found {} assignments for user {}", assignments.len(), user_id);
-    
-    // Ambil setting user mapping Course NAME ke Parallel Code (karena struct AssignmentWithCourse punya course_name)
-    let user_settings = sqlx::query!(
+    // Ambil setting user
+    let user_settings_rows = sqlx::query!(
         "SELECT c.name, ucs.parallel_code 
          FROM user_course_settings ucs
          JOIN courses c ON ucs.course_id = c.id
@@ -482,25 +482,10 @@ pub async fn get_active_assignments_for_user(
     .await?;
     
     let mut settings_map = HashMap::new();
-    for s in user_settings {
+    for s in user_settings_rows {
+        // s.parallel_code sekarang bisa berisi "k1" atau "k1,p2"
         settings_map.insert(s.name, s.parallel_code);
     }
-    
-    for (i, a) in assignments.iter().enumerate() {
-        let deadline_str = match a.deadline {
-            Some(d) => d.to_string(),
-            None => "⚠️ NO DEADLINE".to_string()
-        };
-        let parallel_display = if a.parallel_codes.is_empty() {
-            "N/A".to_string()
-        } else {
-            format!("[{}]", a.parallel_codes.join(", "))
-        };
-        println!("  {}. {} - Deadline: {} - Parallels: {} - Completed: {}", 
-            i + 1, a.title, deadline_str, parallel_display, a.is_completed);
-    }
-
-    println!("");
     
     Ok((assignments, settings_map))
 }
@@ -830,16 +815,71 @@ pub async fn set_user_course_parallel(
     pool: &PgPool,
     user_id: &str,
     course_name_query: &str,
-    parallel_code: &str,
+    parallel_codes: &[String],
 ) -> Result<String, sqlx::Error> {
-    // 1. Cari Course dulu berdasarkan nama/alias (reuse fungsi yang sudah ada)
+    // 1. Cari Course dulu berdasarkan nama/alias
     let course = get_course_by_name_or_alias(pool, course_name_query).await?;
     
     match course {
         Some(c) => {
-            let clean_code = parallel_code.to_lowercase();
+            let course_name_lower = c.name.to_lowercase();
             
-            // 2. Upsert (Insert atau Update jika sudah ada)
+            // --- VALIDASI LOGIC KHUSUS (BIG 5 COURSES) ---
+            let special_courses = vec![
+                "pemrograman", 
+                "struktur data", 
+                "metode kuantitatif", 
+                "rekayasa perangkat lunak", 
+                "desain pengalaman pengguna"
+            ];
+
+            let is_special_course = special_courses.iter().any(|k| course_name_lower.contains(k));
+
+            // Bersihkan input codes (lowercase)
+            let clean_codes: Vec<String> = parallel_codes.iter()
+                .map(|s| s.to_lowercase())
+                .collect();
+
+            if is_special_course {
+                // Validasi 1: Harus ada 2 kode
+                if clean_codes.len() != 2 {
+                    return Ok(format!(
+                        "⚠️ *Perhatian!*\n\
+                        Mata kuliah *{}* memiliki kelas Kuliah (K) dan Praktikum (P).\n\n\
+                        Harap masukkan kedua kode kelas.\n\
+                        *Contoh:* `#setkelas {} k1 p2`", 
+                        c.name, course_name_query
+                    ));
+                }
+
+                // Validasi 2: Harus kombinasi K dan P (atau sebaliknya)
+                let has_k = clean_codes.iter().any(|code| code.starts_with('k'));
+                let has_p = clean_codes.iter().any(|code| code.starts_with('p'));
+
+                if !has_k || !has_p {
+                    return Ok(format!(
+                        "❌ *Format Salah!*\n\
+                        Untuk *{}*, kamu harus memasukkan satu kode Kuliah (awalan K) dan satu Praktikum (awalan P).\n\
+                        Jangan masukkan dua-duanya K atau dua-duanya P.",
+                        c.name
+                    ));
+                }
+            } else {
+                // Mata kuliah biasa (Non-Praktikum/Opsional)
+                // Jika user iseng masukin 2 kode padahal bukan matkul praktikum, kita ambil kode pertama saja atau tolak.
+                if clean_codes.len() > 1 {
+                     return Ok(format!(
+                        "⚠️ Mata kuliah *{}* sepertinya tidak memerlukan kelas praktikum.\n\
+                        Harap masukkan satu kode kelas saja (misal: k1).",
+                        c.name
+                    ));
+                }
+            }
+
+            // Simpan ke DB sebagai string comma-separated (misal: "k1,p2" atau "k1")
+            let final_code_str = clean_codes.join(",");
+            
+            // 2. Upsert
             sqlx::query!(
                 r#"
                 INSERT INTO user_course_settings (user_id, course_id, parallel_code)
@@ -849,12 +889,12 @@ pub async fn set_user_course_parallel(
                 "#,
                 user_id,
                 c.id,
-                clean_code
+                final_code_str
             )
             .execute(pool)
             .await?;
             
-            Ok(format!("✅ Berhasil! Kelas untuk *{}* diatur ke *{}*.", c.name, clean_code.to_uppercase()))
+            Ok(format!("✅ Berhasil! Kelas untuk *{}* diatur ke *[{}]*.", c.name, final_code_str.to_uppercase()))
         },
         None => Ok(format!("❌ Mata kuliah *{}* tidak ditemukan.", course_name_query))
     }

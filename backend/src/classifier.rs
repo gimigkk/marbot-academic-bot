@@ -43,11 +43,22 @@ fn parse_command(text: &str) -> Option<BotCommand> {
     match command.as_str() {
         "test" | "tes" | "ping" => Some(BotCommand::Ping),
         
-        // --- Set Kelas ---
+        // --- Set Kelas (DIUBAH) ---
         "setkelas" | "set" => {
             if parts.len() >= 3 {
                 let matkul = parts[1].to_string();
-                let kode = parts[2].to_string();
+                
+                // Pecah kode-kode kelas menjadi Vector
+                // Gabungkan semua argumen setelah nama mata kuliah
+                let kode_string = parts[2..].join(" ");
+                
+                // Proses pemecahan kode (mendukung spasi atau koma)
+                let kode: Vec<String> = kode_string
+                    .replace(',', ' ')        // Ganti koma dengan spasi
+                    .split_whitespace()       // Pisah berdasarkan spasi
+                    .map(|s| s.to_string())   // Ubah ke String
+                    .collect();
+                
                 Some(BotCommand::SetKelas(matkul, kode))
             } else {
                 Some(BotCommand::MissingArgument("setkelas".to_string()))
