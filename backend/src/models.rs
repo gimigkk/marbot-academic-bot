@@ -143,10 +143,18 @@ pub enum BotCommand {
     Undo,
     Help,
     Delete(u32),
+    SetKelas(String, String),
     UnknownCommand(String),
-    MissingArgument(String), // New variant for commands with missing arguments
+    MissingArgument(String),
 }
 
+
+// struct untuk mapping setting user (untuk crud)
+#[derive(Debug, sqlx::FromRow)]
+pub struct UserCourseSetting {
+    pub course_id: uuid::Uuid,
+    pub parallel_code: String,
+}
 // ===== AI EXTRACTION RESULTS =====
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

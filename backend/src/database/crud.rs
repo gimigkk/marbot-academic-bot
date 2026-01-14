@@ -431,7 +431,7 @@ pub async fn get_active_assignments_sorted(pool: &PgPool) -> Result<Vec<Assignme
 pub async fn get_active_assignments_for_user(
     pool: &PgPool, 
     user_id: &str
-) -> Result<Vec<AssignmentWithCourse>, sqlx::Error> {
+) -> Result<(Vec<AssignmentWithCourse>, HashMap<String, String>), sqlx::Error> {
     let now = Utc::now();
     
     println!("🔍 Fetching assignments for user: {}", user_id);
@@ -470,6 +470,22 @@ pub async fn get_active_assignments_for_user(
     
     println!("✅ Found {} assignments for user {}", assignments.len(), user_id);
     
+    // Ambil setting user mapping Course NAME ke Parallel Code (karena struct AssignmentWithCourse punya course_name)
+    let user_settings = sqlx::query!(
+        "SELECT c.name, ucs.parallel_code 
+         FROM user_course_settings ucs
+         JOIN courses c ON ucs.course_id = c.id
+         WHERE ucs.user_id = $1",
+        user_id
+    )
+    .fetch_all(pool)
+    .await?;
+    
+    let mut settings_map = HashMap::new();
+    for s in user_settings {
+        settings_map.insert(s.name, s.parallel_code);
+    }
+    
     for (i, a) in assignments.iter().enumerate() {
         let deadline_str = match a.deadline {
             Some(d) => d.to_string(),
@@ -486,9 +502,8 @@ pub async fn get_active_assignments_for_user(
 
     println!("");
     
-    Ok(assignments)
+    Ok((assignments, settings_map))
 }
-
 
 /// Find course by name (case-insensitive)
 pub async fn get_course_by_name(
