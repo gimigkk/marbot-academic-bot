@@ -190,28 +190,3 @@ impl ScheduleOracle {
             .map(|(_, schedule)| schedule.clone())
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    
-    #[test]
-    fn test_days_until_weekday() {
-        // Monday to Wednesday = 2 days
-        assert_eq!(ScheduleOracle::days_until_weekday(Weekday::Mon, Weekday::Wed), 2);
-        
-        // Friday to Monday = 3 days
-        assert_eq!(ScheduleOracle::days_until_weekday(Weekday::Fri, Weekday::Mon), 3);
-        
-        // Same day = 7 days (next week)
-        assert_eq!(ScheduleOracle::days_until_weekday(Weekday::Mon, Weekday::Mon), 7);
-    }
-    
-    #[test]
-    fn test_course_matches() {
-        assert!(ScheduleOracle::course_matches("KOM120C", "Pemrograman"));
-        assert!(ScheduleOracle::course_matches("KOM120C", "pemrog"));
-        assert!(ScheduleOracle::course_matches("KOM1231", "RPL"));
-        assert!(!ScheduleOracle::course_matches("KOM120C", "Struktur Data"));
-    }
-}

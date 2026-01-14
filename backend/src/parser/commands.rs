@@ -39,32 +39,121 @@ pub async fn handle_command(
             println!("🏓 Ping command received from {}\n", user_phone);
             
             let start_time = Instant::now();
+            
+            // 1. Database Health Check
             let db_start = Instant::now();
-
             let db_status = sqlx::query("SELECT 1").execute(pool).await;
             let db_duration = db_start.elapsed();
-
+            
             let (db_icon, db_msg) = match db_status {
                 Ok(_) => ("🟢", format!("{:.2?}", db_duration)),
                 Err(_) => ("🔴", "Error / Disconnected".to_string()),
             };
-
+            
+            // 2. Count Active Assignments
+            let assignment_count = sqlx::query_scalar::<_, i64>(
+                "SELECT COUNT(*) FROM assignments WHERE deleted_at IS NULL"
+            )
+            .fetch_one(pool)
+            .await
+            .unwrap_or(0);
+            
+            // 3. Count Active Users (users who have assignments)
+            let active_users = sqlx::query_scalar::<_, i64>(
+                "SELECT COUNT(DISTINCT user_phone) FROM user_assignments 
+                WHERE is_completed = FALSE"
+            )
+            .fetch_one(pool)
+            .await
+            .unwrap_or(0);
+            
+            // 4. Get upcoming deadline (next task due)
+            let next_deadline = sqlx::query_scalar::<_, Option<DateTime<Utc>>>(
+                "SELECT deadline FROM assignments 
+                WHERE deleted_at IS NULL AND deadline IS NOT NULL 
+                ORDER BY deadline ASC LIMIT 1"
+            )
+            .fetch_one(pool)
+            .await
+            .ok()
+            .flatten();
+            
+            let next_deadline_str = if let Some(deadline) = next_deadline {
+                let gmt7 = FixedOffset::east_opt(7 * 3600).unwrap();
+                let deadline_gmt7 = deadline.with_timezone(&gmt7);
+                let now_gmt7 = Utc::now().with_timezone(&gmt7);
+                let hours_until = (deadline_gmt7 - now_gmt7).num_hours();
+                
+                if hours_until < 0 {
+                    format!("⚠️ {} (overdue)", deadline_gmt7.format("%d %b, %H:%M"))
+                } else if hours_until < 24 {
+                    format!("🔥 {} ({} hrs)", deadline_gmt7.format("%d %b, %H:%M"), hours_until)
+                } else {
+                    format!("📅 {} ({} days)", deadline_gmt7.format("%d %b, %H:%M"), hours_until / 24)
+                }
+            } else {
+                "✨ No deadlines".to_string()
+            };
+            
+            // 5. Today's completed tasks
+            let today_completed = sqlx::query_scalar::<_, i64>(
+                "SELECT COUNT(*) FROM user_assignments 
+                WHERE is_completed = TRUE 
+                AND completed_at >= CURRENT_DATE"
+            )
+            .fetch_one(pool)
+            .await
+            .unwrap_or(0);
+            
+            // 6. Gemini AI Status (check if API key is configured)
+            let gemini_status = if std::env::var("GEMINI_API_KEY").is_ok() {
+                "🟢 Configured"
+            } else {
+                "🔴 Missing"
+            };
+            
+            // 7. Get current time in GMT+7
+            let gmt7 = FixedOffset::east_opt(7 * 3600).unwrap();
+            let current_time = Utc::now().with_timezone(&gmt7);
+            let time_str = current_time.format("%H:%M:%S WIB").to_string();
+            
+            // 8. Fun motivation based on time of day
+            use chrono::Timelike;
+            let hour = current_time.hour();
+            let motivation = match hour {
+                0..=5 => "🌙 Masih begadang? Semangat!",
+                6..=11 => "☀️ Selamat pagi! Semoga lancar hari ini",
+                12..=17 => "🌤️ Selamat siang! Jangan lupa istirahat",
+                18..=21 => "🌆 Selamat sore! Deadline checks?",
+                _ => "🌃 Selamat malam! Jangan begadang ya",
+            };
+            
             let bot_duration = start_time.elapsed();
-
+            
             let response_text = format!(
-                "🏓 *PONG! - System Diagnostic*\n\n\
-                🖥️ *Server Status:*\n\
-                • Bot Logic: 🟢 Online\n\
-                • Database: {} Connected\n\n\
-                ⏱️ *Real-time Latency:*\n\
-                • 🗄️ Database Query: {}\n\
-                • ⚙️ Bot Processing: {:.2?}\n\n\
-                ",
-                db_icon,
-                db_msg,
-                bot_duration
+                "🏓 *PONG!*\n\
+                _{}_\n\n\
+                🖥️ *System Health:*\n\
+                • Bot: 🟢 Online ({:.2?})\n\
+                • Database: {} {}\n\
+                • AI Engine: {}\n\n\
+                📊 *Live Stats:*\n\
+                • Active Tasks: {}\n\
+                • Active Users: {}\n\
+                • Completed Today: {} ✓\n\
+                • Next Deadline: {}\n\n\
+                🕐 {} | _v1.0.0_",
+                motivation,
+                bot_duration,
+                db_icon, db_msg,
+                gemini_status,
+                assignment_count,
+                active_users,
+                today_completed,
+                next_deadline_str,
+                time_str
             );
-
+            
             CommandResponse::Text(response_text)
         }
 
@@ -89,7 +178,7 @@ pub async fn handle_command(
             match get_active_assignments_for_user(pool, user_phone).await {
                 Ok(assignments) => {
                     // Display sender's WhatsApp name instead of phone number
-                    let header = format!("*[To-Do] {}*", user_name);
+                    let header = format!("*[To-Do]* _{}_", user_name);
                     format_assignments_list(assignments, &header, false, true)
                 }
                 Err(e) => {

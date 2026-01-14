@@ -90,7 +90,7 @@ pub(super) fn parse_classification(ai_text: &str) -> Result<AIClassification, St
     
     match serde_json::from_str::<AIClassification>(cleaned) {
         Ok(classification) => {
-            // ✅ Clean up parallel codes after deserialization
+            // Clean up parallel codes after deserialization
             Ok(classification.clean_parallel_codes())
         }
         Err(e) => {

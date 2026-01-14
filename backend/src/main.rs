@@ -136,19 +136,34 @@ async fn check_waha_health() -> String {
 async fn main() {
     dotenv::dotenv().ok();
 
-    // 1. Tampilan Awal (Clear Screen & Banner)
-    print!("\x1b[2J\x1b[1;1H");
-
-    // Print MAR in white and BOT in Claude's orange side by side
+    // 1. Print MAR and BOT with white blocks and orange shadow
     let mar_lines: Vec<&str> = BANNER_ART.lines().collect();
     let bot_lines: Vec<&str> = BANNER_ART_BOT.lines().collect();
 
     for i in 0..mar_lines.len().max(bot_lines.len()) {
         if i < mar_lines.len() {
-            print!("\x1b[97m{}", mar_lines[i]);  // Bright white for MAR
+            // Replace █ with white, ╔═╗║ etc. with orange shadow
+            let line = mar_lines[i]
+                .replace('█', "\x1b[38;2;255;255;255m█\x1b[38;2;198;97;63m")
+                .replace('╗', "\x1b[38;2;198;97;63m╗")
+                .replace('║', "\x1b[38;2;198;97;63m║")
+                .replace('╔', "\x1b[38;2;198;97;63m╔")
+                .replace('═', "\x1b[38;2;198;97;63m═")
+                .replace('╝', "\x1b[38;2;198;97;63m╝")
+                .replace('╚', "\x1b[38;2;198;97;63m╚");
+            print!("{}", line);
         }
         if i < bot_lines.len() {
-            print!("\x1b[38;2;224;128;79m{}", bot_lines[i]);  // Claude's orange #E0804F
+            // Same for BOT
+            let line = bot_lines[i]
+                .replace('█', "\x1b[38;2;255;255;255m█\x1b[38;2;198;97;63m")
+                .replace('╗', "\x1b[38;2;198;97;63m╗")
+                .replace('║', "\x1b[38;2;198;97;63m║")
+                .replace('╔', "\x1b[38;2;198;97;63m╔")
+                .replace('═', "\x1b[38;2;198;97;63m═")
+                .replace('╝', "\x1b[38;2;198;97;63m╝")
+                .replace('╚', "\x1b[38;2;198;97;63m╚");
+            print!("{}", line);
         }
         println!("\x1b[0m");
     }
@@ -156,7 +171,7 @@ async fn main() {
     println!("\x1b[90m{}\x1b[0m", BANNER_SUBTITLE);
     println!("\x1b[1;30m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\x1b[0m");
 
-    // 2. Cek Environment Variables
+    // 2. Check Environment Variables
     let gemini_status = if std::env::var("GEMINI_API_KEY").is_ok() {
         "\x1b[32m✅ READY\x1b[0m"
     } else {
@@ -164,29 +179,28 @@ async fn main() {
     };
 
     println!(" 🔧 \x1b[1mSYSTEM CHECK\x1b[0m");
-    println!("    ├─ 🧠 Gemini AI    : {}", gemini_status);
+    println!("    ├─ 🧠 Gemini AI\t: {}", gemini_status);
 
     // WAHA Health Check
-    print!("    ├─ 🔌 WAHA API     : 🔌 Checking...");
+    print!("    ├─ 🔌 WAHA API\t: 🔌 Checking...");
     std::io::stdout().flush().unwrap();
 
     let waha_status = check_waha_health().await;
-    print!("\r    ├─ 🔌 WAHA API     : {}\x1b[K\n", waha_status);
+    print!("\r    ├─ 🔌 WAHA API\t: {}\x1b[K\n", waha_status);
     std::io::stdout().flush().unwrap();
 
-    // 3. Koneksi Database
-    print!("    ├─ 🗄️  Database     : 🔌 Connecting...");
+    // 3. Database Connection
+    print!("    ├─ 💾 Database\t: 🔌 Connecting...");
     std::io::stdout().flush().unwrap();
 
     let pool = match database::pool::create_pool().await {
         Ok(p) => {
-            // Use \x1b[K to clear from cursor to end of line
-            print!("\r    ├─ 🗄️  Database     : \x1b[32m✅ CONNECTED\x1b[0m\x1b[K\n");
+            print!("\r    ├─ 💾 Database\t: \x1b[32m✅ CONNECTED\x1b[0m\x1b[K\n");
             std::io::stdout().flush().unwrap();
             p
         }
         Err(e) => {
-            print!("\r    ├─ 🗄️  Database     : \x1b[31m❌ FAILED\x1b[0m\x1b[K\n");
+            print!("\r    ├─ 💾 Database\t: \x1b[31m❌ FAILED\x1b[0m\x1b[K\n");
             std::io::stdout().flush().unwrap();
             eprintln!("       └─ Error: {}", e);
             return;
@@ -195,20 +209,18 @@ async fn main() {
 
     let whitelist = Arc::new(Whitelist::new());
     let cache = Arc::new(Mutex::new(HashSet::new()));
-    
-    
+
     let spam_tracker = Arc::new(Mutex::new(HashMap::new())); 
 
-    // 4. Jalankan Scheduler
+    // 4. Run Scheduler
     let pool_for_scheduler = pool.clone();
     tokio::spawn(async move {
-        
         tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
         if let Err(e) = scheduler::start_scheduler(pool_for_scheduler).await {
             eprintln!("\n\x1b[31m❌ Scheduler Error: {:?}\x1b[0m", e);
         }
     });
-    println!("    └─ ⏰ Scheduler    : \x1b[32m✅ RUNNING\x1b[0m");
+    println!("    └─ ⏰ Scheduler\t: \x1b[32m✅ RUNNING\x1b[0m");
 
     let state = AppState { 
         cache,
@@ -227,8 +239,8 @@ async fn main() {
 
     println!("\x1b[1;30m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\x1b[0m");
     println!(" 🚀 \x1b[1;32mMARBOT IS ONLINE!\x1b[0m");
-    println!("    📡 Listening on    : \x1b[36mhttp://0.0.0.0:{}\x1b[0m", port);
-    println!("    📍 Webhook URL     : \x1b[36mhttp://localhost:{}/webhook\x1b[0m", port);
+    println!("    📡 Listening on\t: \x1b[36mhttp://0.0.0.0:{}\x1b[0m", port);
+    println!("    📍 Webhook URL\t: \x1b[36mhttp://localhost:{}/webhook\x1b[0m", port);
     println!("\x1b[1;30m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\x1b[0m");
     println!("\nWaiting for incoming messages...\n");
 
