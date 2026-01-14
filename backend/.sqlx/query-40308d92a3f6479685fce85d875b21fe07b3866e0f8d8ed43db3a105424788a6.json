@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT c.name, ucs.parallel_code \n         FROM user_course_settings ucs\n         JOIN courses c ON ucs.course_id = c.id\n         WHERE ucs.user_id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "parallel_code",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "40308d92a3f6479685fce85d875b21fe07b3866e0f8d8ed43db3a105424788a6"
+}
