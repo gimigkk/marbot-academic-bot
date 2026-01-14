@@ -431,7 +431,7 @@ pub async fn get_active_assignments_sorted(pool: &PgPool) -> Result<Vec<Assignme
 pub async fn get_active_assignments_for_user(
     pool: &PgPool, 
     user_id: &str
-) -> Result<Vec<AssignmentWithCourse>, sqlx::Error> {
+) -> Result<(Vec<AssignmentWithCourse>, HashMap<String, String>), sqlx::Error> {
     let now = Utc::now();
     
     println!("🔍 Fetching assignments for user: {}", user_id);
@@ -470,6 +470,22 @@ pub async fn get_active_assignments_for_user(
     
     println!("✅ Found {} assignments for user {}", assignments.len(), user_id);
     
+    // Ambil setting user mapping Course NAME ke Parallel Code (karena struct AssignmentWithCourse punya course_name)
+    let user_settings = sqlx::query!(
+        "SELECT c.name, ucs.parallel_code 
+         FROM user_course_settings ucs
+         JOIN courses c ON ucs.course_id = c.id
+         WHERE ucs.user_id = $1",
+        user_id
+    )
+    .fetch_all(pool)
+    .await?;
+    
+    let mut settings_map = HashMap::new();
+    for s in user_settings {
+        settings_map.insert(s.name, s.parallel_code);
+    }
+    
     for (i, a) in assignments.iter().enumerate() {
         let deadline_str = match a.deadline {
             Some(d) => d.to_string(),
@@ -486,9 +502,8 @@ pub async fn get_active_assignments_for_user(
 
     println!("");
     
-    Ok(assignments)
+    Ok((assignments, settings_map))
 }
-
 
 /// Find course by name (case-insensitive)
 pub async fn get_course_by_name(
@@ -808,6 +823,41 @@ pub fn parse_deadline(deadline_str: &str) -> Result<DateTime<Utc>, String> {
     }
     
     Err(format!("Failed to parse deadline '{}'. Expected format: 'YYYY-MM-DD HH:MM' or 'YYYY-MM-DD'", deadline_str))
+}
+
+/// Set user preference for a specific course parallel
+pub async fn set_user_course_parallel(
+    pool: &PgPool,
+    user_id: &str,
+    course_name_query: &str,
+    parallel_code: &str,
+) -> Result<String, sqlx::Error> {
+    // 1. Cari Course dulu berdasarkan nama/alias (reuse fungsi yang sudah ada)
+    let course = get_course_by_name_or_alias(pool, course_name_query).await?;
+    
+    match course {
+        Some(c) => {
+            let clean_code = parallel_code.to_lowercase();
+            
+            // 2. Upsert (Insert atau Update jika sudah ada)
+            sqlx::query!(
+                r#"
+                INSERT INTO user_course_settings (user_id, course_id, parallel_code)
+                VALUES ($1, $2, $3)
+                ON CONFLICT (user_id, course_id) 
+                DO UPDATE SET parallel_code = $3, created_at = NOW()
+                "#,
+                user_id,
+                c.id,
+                clean_code
+            )
+            .execute(pool)
+            .await?;
+            
+            Ok(format!("✅ Berhasil! Kelas untuk *{}* diatur ke *{}*.", c.name, clean_code.to_uppercase()))
+        },
+        None => Ok(format!("❌ Mata kuliah *{}* tidak ditemukan.", course_name_query))
+    }
 }
 
 // ========================================

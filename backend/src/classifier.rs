@@ -42,6 +42,19 @@ fn parse_command(text: &str) -> Option<BotCommand> {
     
     match command.as_str() {
         "test" | "tes" | "ping" => Some(BotCommand::Ping),
+        
+        // --- FITUR: Set Kelas ---
+        "setkelas" | "set" => {
+            if parts.len() >= 3 {
+                let matkul = parts[1].to_string();
+                let kode = parts[2].to_string();
+                Some(BotCommand::SetKelas(matkul, kode))
+            } else {
+                Some(BotCommand::MissingArgument("setkelas".to_string()))
+            }
+        },
+        // -----------------------------
+
         "tugas" => {
             // Handle both "#tugas" alone and "#tugas 123"
             if parts.len() > 1 {
@@ -50,7 +63,7 @@ fn parse_command(text: &str) -> Option<BotCommand> {
                 }
             }
             Some(BotCommand::Tugas)
-        }
+        },
         "todo" => Some(BotCommand::Todo),  
         "today" => Some(BotCommand::Today),
         "week" => Some(BotCommand::Week),
@@ -64,7 +77,7 @@ fn parse_command(text: &str) -> Option<BotCommand> {
                 // Missing argument - return special error variant
                 Some(BotCommand::MissingArgument("done".to_string()))
             }
-        }
+        },
         "delete" | "hapus" => {
             if parts.len() > 1 {
                 let id = parts[1].parse().ok()?;
@@ -73,7 +86,7 @@ fn parse_command(text: &str) -> Option<BotCommand> {
                 // Missing argument - return special error variant
                 Some(BotCommand::MissingArgument("delete".to_string()))
             }
-        }
+        },
         "expand" => {
             if parts.len() > 1 {
                 let id = parts[1].parse().ok()?;
@@ -82,12 +95,12 @@ fn parse_command(text: &str) -> Option<BotCommand> {
                 // Missing argument - return special error variant
                 Some(BotCommand::MissingArgument("expand".to_string()))
             }
-        }
+        },
         // Handle numeric-only commands like "# 123" or "#123"
         _ if command.chars().all(|c| c.is_numeric()) => {
             let id = command.parse().ok()?;
             Some(BotCommand::Expand(id))
-        }
+        },
         _ => None,
     }
 }
