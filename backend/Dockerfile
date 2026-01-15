@@ -13,10 +13,6 @@ RUN apt-get update && apt-get install -y \
     libssl-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Accept DATABASE_URL as build argument for online query verification
-ARG DATABASE_URL
-ENV DATABASE_URL=$DATABASE_URL
-
 # Build in release mode (connects to DB to verify queries)
 RUN cargo build --release
 

@@ -1,4 +1,4 @@
-use sqlx::{PgPool, Result};
+use sqlx::{PgPool, Result, Row};
 use uuid::Uuid;
 use chrono::{DateTime, Utc, FixedOffset, TimeZone, NaiveDateTime};
 use std::collections::HashMap;
@@ -33,21 +33,21 @@ pub async fn create_assignment(
     let mut tx = pool.begin().await?;
     
     // A. Find Course
-    let course = sqlx::query!(
+    let course = sqlx::query(
         r#"
         SELECT id, name 
         FROM courses 
         WHERE id = $1
         LIMIT 1
-        "#,
-        new_assignment.course_id
+        "#
     )
+    .bind(new_assignment.course_id)
     .fetch_optional(&mut *tx)
     .await?;
 
     // Validate Course
     let real_course_name = match course {
-        Some(c) => c.name,
+        Some(row) => row.get::<String, _>("name"),
         None => match new_assignment.course_id {
             Some(id) => {
                 tx.commit().await?;
@@ -109,15 +109,15 @@ pub async fn mark_assignment_complete(
     assignment_id: Uuid,
     user_id: &str
 ) -> Result<bool, sqlx::Error> {
-    let result = sqlx::query!(
+    let result = sqlx::query(
         r#"
         INSERT INTO user_completions (assignment_id, user_id)
         VALUES ($1, $2)
         ON CONFLICT (user_id, assignment_id) DO NOTHING
-        "#,
-        assignment_id,
-        user_id
+        "#
     )
+    .bind(assignment_id)
+    .bind(user_id)
     .execute(pool)
     .await?;
 
@@ -130,14 +130,14 @@ pub async fn unmark_assignment_complete(
     assignment_id: Uuid,
     user_id: &str
 ) -> Result<bool, sqlx::Error> {
-    let result = sqlx::query!(
+    let result = sqlx::query(
         r#"
         DELETE FROM user_completions 
         WHERE assignment_id = $1 AND user_id = $2
-        "#,
-        assignment_id,
-        user_id
+        "#
     )
+    .bind(assignment_id)
+    .bind(user_id)
     .execute(pool)
     .await?;
 
@@ -500,20 +500,22 @@ pub async fn get_active_assignments_for_user(
     
     log!(logger, "✅ Found {} assignments for user {}", assignments.len(), user_id);
     
-    // Ambil setting user mapping Course NAME ke Parallel Code (karena struct AssignmentWithCourse punya course_name)
-    let user_settings = sqlx::query!(
+    // Ambil setting user mapping Course NAME ke Parallel Code
+    let user_settings_rows = sqlx::query(
         "SELECT c.name, ucs.parallel_code 
          FROM user_course_settings ucs
          JOIN courses c ON ucs.course_id = c.id
-         WHERE ucs.user_id = $1",
-        user_id
+         WHERE ucs.user_id = $1"
     )
+    .bind(user_id)
     .fetch_all(pool)
     .await?;
     
     let mut settings_map = HashMap::new();
-    for s in user_settings {
-        settings_map.insert(s.name, s.parallel_code);
+    for row in user_settings_rows {
+        let name: String = row.get("name");
+        let parallel_code: String = row.get("parallel_code");
+        settings_map.insert(name, parallel_code);
     }
     
     for (i, a) in assignments.iter().enumerate() {
@@ -817,10 +819,10 @@ pub async fn delete_assignment(
     pool: &PgPool,
     id: Uuid,
 ) -> Result<bool, sqlx::Error> {
-    let result = sqlx::query!(
-        "DELETE FROM assignments WHERE id = $1",
-        id
+    let result = sqlx::query(
+        "DELETE FROM assignments WHERE id = $1"
     )
+    .bind(id)
     .execute(pool)
     .await?;
 
@@ -870,17 +872,17 @@ pub async fn set_user_course_parallel(
             let clean_code = parallel_code.to_lowercase();
             
             // 2. Upsert (Insert atau Update jika sudah ada)
-            sqlx::query!(
+            sqlx::query(
                 r#"
                 INSERT INTO user_course_settings (user_id, course_id, parallel_code)
                 VALUES ($1, $2, $3)
                 ON CONFLICT (user_id, course_id) 
                 DO UPDATE SET parallel_code = $3, created_at = NOW()
-                "#,
-                user_id,
-                c.id,
-                clean_code
+                "#
             )
+            .bind(user_id)
+            .bind(c.id)
+            .bind(&clean_code)
             .execute(pool)
             .await?;
             

@@ -60,45 +60,31 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-buildx-
       
-      - name: 🏗️ Build release binary in Docker (online mode)
-        id: build
-        continue-on-error: true
+      - name: 🏗️ Build release binary in Docker
         working-directory: backend
-        env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
         run: |
-          echo "🔨 Building inside Docker (rust:1.92-slim-bookworm) with online mode..."
-          echo "📡 Will connect to database for query verification"
+          echo "🔨 Building inside Docker (no database needed)..."
           
-          # Build using Docker with DATABASE_URL for online query verification
           docker run --rm \
             -v $(pwd):/workspace \
             -w /workspace \
-            -e DATABASE_URL="${DATABASE_URL}" \
             rust:1.92-slim-bookworm \
             bash -c "
               set -e
-              echo '📦 Installing build dependencies...'
               apt-get update && apt-get install -y pkg-config libssl-dev
-              
-              echo '🔨 Building release binary...'
-              echo '📡 Connecting to database for sqlx query verification...'
               cargo build --release
-              
-              echo '✅ Build complete!'
-              ls -lh target/release/marbot
             "
           
-          echo "📊 Binary information:"
           ls -lh target/release/marbot
-          file target/release/marbot
-          ldd target/release/marbot || echo "Static binary"
       
       - name: 🔐 Generate SHA256 checksum
         id: checksum
         if: steps.build.outcome == 'success'
         working-directory: backend
         run: |
+          # Fix permissions first (Docker ran as root)
+          sudo chown -R $USER:$USER target/release
+          
           cd target/release
           sha256sum marbot > marbot.sha256
           CHECKSUM=$(cat marbot.sha256 | awk '{print $1}')
