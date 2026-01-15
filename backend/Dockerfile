@@ -1,12 +1,11 @@
 # Build stage
-FROM rust:slim-bookworm AS builder
+FROM rust:1.83-slim-bookworm AS builder
 
 WORKDIR /app
 COPY Cargo.toml Cargo.lock ./
 COPY src ./src
 COPY migrations ./migrations
 COPY schedule.json ./schedule.json
-COPY .sqlx ./.sqlx 
 
 # Install build dependencies
 RUN apt-get update && apt-get install -y \
@@ -14,10 +13,11 @@ RUN apt-get update && apt-get install -y \
     libssl-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Use offline mode
-ENV SQLX_OFFLINE=true
+# Accept DATABASE_URL as build argument for online query verification
+ARG DATABASE_URL
+ENV DATABASE_URL=$DATABASE_URL
 
-# Build in release mode
+# Build in release mode (connects to DB to verify queries)
 RUN cargo build --release
 
 # Runtime stage
