@@ -4,7 +4,7 @@ use chrono::{DateTime, FixedOffset, NaiveDateTime, Utc};
 use regex::Regex;
 use serde::Deserialize;
 use serde_json::json;
-use sqlx::PgPool;
+use sqlx::{PgPool, Row};
 use once_cell::sync::Lazy;
 
 use super::schedule_oracle::ScheduleOracle;
@@ -241,7 +241,7 @@ async fn lookup_assignment_by_message_id(
     pool: &PgPool,
     message_id: &str,
 ) -> Result<QuotedAssignmentInfo, sqlx::Error> {
-    let record = sqlx::query!(
+    let record = sqlx::query(
         r#"
         SELECT 
             a.id,
@@ -251,30 +251,23 @@ async fn lookup_assignment_by_message_id(
         FROM assignments a
         JOIN courses c ON a.course_id = c.id
         WHERE $1 = ANY(a.message_ids)
-        "#,
-        message_id
+        "#
     )
+    .bind(message_id)
     .fetch_one(pool)
     .await?;
     
     Ok(QuotedAssignmentInfo {
-        assignment_id: record.id,
-        course_name: record.course_name,
-        title: record.title,
-        parallel_codes: record.parallel_codes.unwrap_or_default(),
+        assignment_id: record.get("id"),
+        course_name: record.get("course_name"),
+        title: record.get("title"),
+        parallel_codes: record.get::<Option<Vec<String>>, _>("parallel_codes").unwrap_or_default(),
     })
 }
 
 /// Get formatted list of all available courses
 async fn get_courses_list(pool: &PgPool) -> Result<String, sqlx::Error> {
-    #[derive(Debug)]
-    struct CourseRow {
-        name: String,
-        aliases: Option<Vec<String>>,
-    }
-    
-    let courses = sqlx::query_as!(
-        CourseRow,
+    let rows = sqlx::query(
         r#"
         SELECT name, aliases
         FROM courses
@@ -284,17 +277,20 @@ async fn get_courses_list(pool: &PgPool) -> Result<String, sqlx::Error> {
     .fetch_all(pool)
     .await?;
     
-    let formatted = courses
+    let formatted = rows
         .iter()
-        .map(|c| {
-            if let Some(ref aliases) = c.aliases {
-                if !aliases.is_empty() {
-                    format!("{} [aka: {}]", c.name, aliases.join(", "))
+        .map(|row| {
+            let name: String = row.get("name");
+            let aliases: Option<Vec<String>> = row.get("aliases");
+            
+            if let Some(ref aliases_vec) = aliases {
+                if !aliases_vec.is_empty() {
+                    format!("{} [aka: {}]", name, aliases_vec.join(", "))
                 } else {
-                    c.name.clone()
+                    name.clone()
                 }
             } else {
-                c.name.clone()
+                name.clone()
             }
         })
         .collect::<Vec<_>>()
@@ -311,7 +307,7 @@ async fn get_sender_history(
 ) -> Result<SenderHistory, sqlx::Error> {
     
     // Query with temporal and frequency data
-    let records = sqlx::query!(
+    let records = sqlx::query(
         r#"
         SELECT 
             c.name as course_name, 
@@ -326,16 +322,16 @@ async fn get_sender_history(
                     WHEN a.created_at > NOW() - INTERVAL '30 days' THEN 0.5
                     ELSE 0.2
                 END
-            )::double precision as "recency_weight!"
+            )::double precision as recency_weight
         FROM assignments a
         JOIN courses c ON a.course_id = c.id
         WHERE a.sender_id = $1 
           AND a.parallel_codes IS NOT NULL
           AND a.created_at > NOW() - INTERVAL '60 days'
         GROUP BY c.name, a.parallel_codes
-        "#,
-        sender_id
+        "#
     )
+    .bind(sender_id)
     .fetch_all(pool)
     .await?;
     
@@ -343,11 +339,12 @@ async fn get_sender_history(
     let mut patterns: Vec<ParallelPattern> = records
         .into_iter()
         .filter_map(|record| {
-            record.parallel_codes.map(|parallel_codes| {
-                let count = record.count.unwrap_or(0) as i32;
-                let recency_weight = record.recency_weight as f32;
-                // SQLx returns DateTime<Utc>, but we store NaiveDateTime
-                let last_used = record.last_used.unwrap().naive_utc();
+            let parallel_codes: Option<Vec<String>> = record.get("parallel_codes");
+            parallel_codes.map(|parallel_codes| {
+                let count = record.get::<Option<i64>, _>("count").unwrap_or(0) as i32;
+                let recency_weight = record.get::<f64, _>("recency_weight") as f32;
+                let last_used: DateTime<Utc> = record.get("last_used");
+                let last_used_naive = last_used.naive_utc();
                 
                 // BASE SCORE: frequency × recency
                 let base_score = (count as f32) * recency_weight;
@@ -361,10 +358,10 @@ async fn get_sender_history(
                 let relevance_score = base_score * context_boost;
                 
                 ParallelPattern {
-                    course_name: record.course_name,
+                    course_name: record.get("course_name"),
                     parallel_codes,
                     count,
-                    last_used,
+                    last_used: last_used_naive,
                     relevance_score,
                 }
             })
@@ -477,7 +474,7 @@ async fn call_context_resolver_ai(
 
 // ===== GEMINI CONTEXT RESOLUTION =====
 
-async fn try_gemini_context(prompt: &str, logger: &JobLogger) -> Result<AIHints, String> {
+async fn try_gemini_context(prompt: &str, _logger: &JobLogger) -> Result<AIHints, String> {
     let api_key = std::env::var("GEMINI_API_KEY")
         .map_err(|_| "GEMINI_API_KEY not set".to_string())?;
     
@@ -557,7 +554,7 @@ async fn try_gemini_context(prompt: &str, logger: &JobLogger) -> Result<AIHints,
 
 // ===== GROQ REASONING CONTEXT RESOLUTION =====
 
-async fn try_groq_reasoning_context(prompt: &str, logger: &JobLogger) -> Result<AIHints, String> {
+async fn try_groq_reasoning_context(prompt: &str, _logger: &JobLogger) -> Result<AIHints, String> {
     let api_key = std::env::var("GROQ_API_KEY")
         .map_err(|_| "GROQ_API_KEY not set".to_string())?;
     
