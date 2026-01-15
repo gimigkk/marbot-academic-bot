@@ -9,7 +9,6 @@ pub use logger::{JobLogger, generate_job_id, TUI_ACTIVE};
 
 use std::sync::Arc;
 use tokio::sync::mpsc;
-use std::path::Path;
 
 /// Initialize TUI system
 pub fn init() -> (Arc<TuiState>, mpsc::UnboundedSender<state::LogEntry>) {
@@ -29,23 +28,45 @@ pub fn spawn_log_collector(tui_state: Arc<TuiState>) {
     });
 }
 
-/// Spawn TUI listener - watches for trigger file
+/// Spawn TUI listener (waits for F2 key)
 pub fn spawn_tui_listener(tui_state: Arc<TuiState>) {
     tokio::spawn(async move {
-        let trigger_path = "/tmp/marbot_tui";
-        
-        loop {
-            if Path::new(trigger_path).exists() {
-                let _ = std::fs::remove_file(trigger_path);
-                
-                logger::TUI_ACTIVE.store(true, std::sync::atomic::Ordering::Relaxed);
-                
-                let _ = render::run_tui(tui_state.clone()).await;
-                
-                logger::TUI_ACTIVE.store(false, std::sync::atomic::Ordering::Relaxed);
-            }
-            
-            tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-        }
+        wait_for_hotkey(tui_state).await;
     });
+}
+
+/// Wait for F2 key press and launch TUI
+async fn wait_for_hotkey(tui_state: Arc<TuiState>) {
+    use crossterm::event::{self, Event, KeyCode, KeyModifiers};
+    use std::time::Duration;
+    
+    //println!("\n💡 Press \x1b[1;33mF2\x1b[0m anytime to enter TUI mode\n");
+    
+    loop {
+        // Non-blocking poll (don't block the async runtime)
+        if event::poll(Duration::from_millis(100)).unwrap_or(false) {
+            if let Ok(Event::Key(key)) = event::read() {
+                // F2 key pressed
+                if key.code == KeyCode::F(2) && key.modifiers == KeyModifiers::NONE {
+                    println!("\n🎨 Entering TUI mode...\n");
+                    
+                    // Activate TUI
+                    logger::TUI_ACTIVE.store(true, std::sync::atomic::Ordering::Relaxed);
+                    
+                    // Run TUI (blocking)
+                    if let Err(e) = render::run_tui(tui_state.clone()).await {
+                        eprintln!("❌ TUI Error: {}", e);
+                    }
+                    
+                    // Deactivate TUI when exited
+                    logger::TUI_ACTIVE.store(false, std::sync::atomic::Ordering::Relaxed);
+                    
+                    println!("\n✅ Exited TUI mode. Press \x1b[1;33mF2\x1b[0m to re-enter.\n");
+                }
+            }
+        }
+        
+        // Small sleep to prevent busy-waiting
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
 }
