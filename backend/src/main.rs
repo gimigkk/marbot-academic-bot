@@ -5,6 +5,7 @@ use axum::{
     Router,
 };
 use axum::http::StatusCode;
+use axum::response::Html;
 use std::collections::HashSet;
 use std::net::SocketAddr;
 use std::sync::Arc;  
@@ -68,6 +69,57 @@ struct AppState {
     whitelist: Arc<Whitelist>,
     pool: PgPool,
     log_tx: mpsc::UnboundedSender<tui::state::LogEntry>,
+}
+
+async fn serve_tui(State(state): State<AppState>) -> Html<String> {
+    let general_log = if let Some(tui_state) = crate::TUI_STATE.get() {
+        tui_state.get_general_log().await
+    } else {
+        Vec::new()
+    };
+    
+    let jobs = if let Some(tui_state) = crate::TUI_STATE.get() {
+        tui_state.get_jobs().await
+    } else {
+        Vec::new()
+    };
+    
+    let logs_html = general_log.iter()
+        .rev()
+        .take(50)
+        .map(|l| format!("<div>[{}] {}</div>", l.job_id, l.message))
+        .collect::<Vec<_>>()
+        .join("");
+    
+    let jobs_html = jobs.iter()
+        .map(|j| format!("<div>📝 {} - {:?}</div>", j.chat_id, j.status))
+        .collect::<Vec<_>>()
+        .join("");
+    
+    let html = format!(r#"
+<!DOCTYPE html>
+<html>
+<head>
+    <title>MARBot Monitor</title>
+    <meta http-equiv="refresh" content="2">
+    <style>
+        body {{ background:#1a1a1a; color:#00ff00; font-family:monospace; padding:20px; }}
+        h1 {{ color:#00ffff; }}
+        .logs {{ background:#000; padding:10px; border:1px solid #00ff00; max-height:400px; overflow-y:scroll; }}
+        .jobs {{ background:#000; padding:10px; border:1px solid #ffff00; margin-top:20px; }}
+    </style>
+</head>
+<body>
+    <h1>🚀 MARBot Live Monitor</h1>
+    <h2>📋 Recent Logs</h2>
+    <div class="logs">{}</div>
+    <h2>📦 Active Jobs</h2>
+    <div class="jobs">{}</div>
+</body>
+</html>
+    "#, logs_html, jobs_html);
+    
+    Html(html)
 }
 
 /// Health check endpoint for Docker
@@ -246,6 +298,7 @@ async fn main() {
     let app = Router::new()
         .route("/webhook", post(webhook))
         .route("/health", get(health_check))
+        .route("/tui", get(serve_tui)) 
         .with_state(state);
 
     let port = 3000;
