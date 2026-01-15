@@ -26,18 +26,17 @@ pub mod whitelist;
 pub mod database;
 pub mod clarification;
 pub mod tui;
+pub mod web_dashboard;
 
 use crate::database::crud;
 use crate::parser::commands::CommandResponse;
+use crate::tui::TuiState;
 
 use models::{MessageType, AIClassification, WebhookPayload, SendTextRequest, NewAssignment, UnrecognizedCategory};
 use classifier::classify_message;
 use parser::commands::handle_command;
 use parser::ai_extractor::{extract_with_ai, check_duplicate_assignment}; 
 use whitelist::Whitelist;
-
-type MessageCache = Arc<Mutex<HashSet<String>>>;
-type SpamTracker = Arc<Mutex<HashMap<String, (u32, Instant)>>>;
 
 static TUI_STATE: OnceCell<Arc<tui::state::TuiState>> = OnceCell::new();
 
@@ -61,13 +60,17 @@ const BANNER_SUBTITLE: &str = r#"
          [WhatsApp Academic Assistant v1.0]          
               Created by Gilang & Arya"#;
 
+type MessageCache = Arc<Mutex<HashSet<String>>>;
+type SpamTracker = Arc<Mutex<HashMap<String, (u32, Instant)>>>;
+
 #[derive(Clone)]
-struct AppState {
-    cache: MessageCache,
-    spam_tracker: SpamTracker, 
-    whitelist: Arc<Whitelist>,
-    pool: PgPool,
-    log_tx: mpsc::UnboundedSender<tui::state::LogEntry>,
+pub struct AppState {
+    pub cache: MessageCache,
+    pub spam_tracker: SpamTracker, 
+    pub whitelist: Arc<Whitelist>,
+    pub pool: PgPool,
+    pub log_tx: mpsc::UnboundedSender<tui::state::LogEntry>,
+    pub tui_state: Arc<TuiState>,
 }
 
 /// Health check endpoint for Docker
@@ -222,7 +225,6 @@ async fn main() {
     TUI_STATE.set(tui_state.clone()).ok();
     
     tui::spawn_log_collector(tui_state.clone());
-    tui::spawn_tui_listener(tui_state.clone());
 
     // 5. Run Scheduler
     let pool_for_scheduler = pool.clone();
@@ -241,11 +243,14 @@ async fn main() {
         whitelist, 
         pool,
         log_tx,
+        tui_state: tui_state.clone(),  
     };
     
     let app = Router::new()
         .route("/webhook", post(webhook))
         .route("/health", get(health_check))
+        .route("/tui", get(web_dashboard::serve_dashboard_page))
+        .route("/tui/api/data", get(web_dashboard::get_dashboard_data))
         .with_state(state);
 
     let port = 3000;
@@ -255,9 +260,10 @@ async fn main() {
     println!(" 🚀 \x1b[1;32mMARBOT IS ONLINE!\x1b[0m");
     println!("    📡 Listening on\t: \x1b[36mhttp://0.0.0.0:{}\x1b[0m", port);
     println!("    📍 Webhook URL\t: \x1b[36mhttp://localhost:{}/webhook\x1b[0m", port);
+    println!("    🎨 Dashboard\t: \x1b[36mhttp://43.133.129.209:{}/tui\x1b[0m", port);
     println!("\x1b[1;30m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\x1b[0m");
-    println!("\n💡 Press \x1b[1;33mF2\x1b[0m anytime to enter TUI mode");
     println!("\nWaiting for incoming messages...\n");
+
 
     let listener = TcpListener::bind(addr).await.unwrap();
 
@@ -635,7 +641,7 @@ async fn webhook(
         }
 
         MessageType::NeedsAI(text) => {
-            logger.log("🤖 Processing with AI...");
+            logger.log(">> Processing with AI...");
             
             // Image handling (same as before)
             let image_base64 = if payload.payload.has_media.unwrap_or(false) {

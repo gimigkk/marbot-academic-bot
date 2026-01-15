@@ -2,6 +2,8 @@ version: '3.8'
 
 services:
   backend:
+    # Use the image that was built by update.sh
+    # update.sh builds it with the correct Dockerfile based on deploy mode
     image: marbot-academic-bot-backend:latest
     container_name: marbot-backend
     environment:
@@ -9,11 +11,10 @@ services:
       - WAHA_URL=${WAHA_URL}
       - WAHA_API_KEY=${WAHA_API_KEY}
       - DEBUG_GROUP_ID=${DEBUG_GROUP_ID}
+      # Add other env vars as needed
     ports:
       - "3000:3000"
     restart: unless-stopped
-    stdin_open: true    # ← ADD THIS - allows stdin
-    tty: true           # ← ADD THIS - allocates pseudo-TTY
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
       interval: 30s

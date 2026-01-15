@@ -44,7 +44,7 @@ pub async fn extract_with_ai(
     let current_datetime = get_current_datetime();
     let current_date = get_current_date();
 
-    logger.log("┌── 🤖 AI PROCESSING ──────────────────────────");
+    logger.log("┌──[AI PROCESSING]──────────────────────────");
 
     let message_display = text
         .replace('\n', "\\n")
@@ -58,7 +58,7 @@ pub async fn extract_with_ai(
         format!("\"{}\"", message_display)
     };
 
-    logger.log(&format!("│ 📝 Message   : {}", message_truncated));
+    logger.log(&format!("│ 📝 Message\t: {}", message_truncated));
 
     if let Some(quoted) = quoted_message {
         let quoted_display = quoted
@@ -143,14 +143,14 @@ pub async fn extract_with_ai(
             };
 
             logger.log("│");
-            logger.log(&format!("│ ✅ Context : Detected={} ({}), Schedules=[{}]",
+            logger.log(&format!("│ ✅ Context\t: Detected={} ({}), Schedules=[{}]",
                 parallel_summary, ctx.parallel_source, courses_summary));
 
             Some(ctx)
         }
         Err(e) => {
             logger.log("│");
-            logger.log(&format!("│ ⚠️  Context failed: {}", e));
+            logger.log(&format!("│ ⚠️  Context failed\t: {}", e));
             None
         }
     };
@@ -165,12 +165,12 @@ pub async fn extract_with_ai(
         context.as_ref()
     );
 
-    logger.log("│ 🤖 Stage 2 : Extracting with AI...");
+    //logger.log("│   Stage 2 : Extracting with AI...");
     if image_base64.is_some() {
-        logger.log("│ 🖼️  Image : Attached (may be irrelevant meme)");
+        logger.log("│ 🖼️  Image\t: Attached (may be irrelevant meme)");
     }
-    logger.log(&format!("│ 📊 Context : {} active assignments", active_assignments.len()));
-    logger.log(&format!("│ 📅 Time    : {}", current_datetime));
+    logger.log(&format!("│ 📊 Context\t: {} active assignments", active_assignments.len()));
+    logger.log(&format!("│ 📅 Time\t: {}", current_datetime));
     logger.log("│");
 
     for attempt in 0..MAX_RETRIES {
@@ -185,7 +185,7 @@ pub async fn extract_with_ai(
                     match classification {
                         AIClassification::Unrecognized { reason, .. } => {
                             let reason_display = reason.as_deref().unwrap_or("No reason provided");
-                            logger.log(&format!("│ ℹ️  Vision Result: Unrecognized ({})", reason_display));
+                            logger.log(&format!("│ ℹ️  Vision Result\t: Unrecognized ({})", reason_display));
                             logger.log("│ 🔄 Retrying with Gemini text-only...");
                             logger.log("│");
 
@@ -363,7 +363,7 @@ async fn try_gemini_models(prompt: &str, logger: &JobLogger) -> Result<AIClassif
 
         if status.is_success() {
             clear_trying_line(logger);
-            logger.log(&format!("│ ✅ SUCCESS : {} (Gemini {}/{})", model, index, GEMINI_MODELS.len()));
+            logger.log(&format!("│ ✅ SUCCESS\t: {} (Gemini {}/{})", model, index, GEMINI_MODELS.len()));
 
             let gemini_response: GeminiResponse = response.json().await
                 .map_err(|e| format!("Failed to deserialize: {}", e))?;
@@ -443,7 +443,7 @@ async fn try_groq_reasoning(prompt: &str, logger: &JobLogger) -> Result<AIClassi
         if status.is_success() {
             all_rate_limited = false;
             clear_trying_line(logger);
-            logger.log(&format!("│ ✅ SUCCESS : {} (Groq Reasoning {}/{})", model, index, GROQ_REASONING_MODELS.len()));
+            logger.log(&format!("│ ✅ SUCCESS\t: {} (Groq Reasoning {}/{})", model, index, GROQ_REASONING_MODELS.len()));
 
             let groq_response: GroqResponse = response.json().await
                 .map_err(|e| format!("Failed to deserialize: {}", e))?;
@@ -524,7 +524,7 @@ async fn try_groq_standard_text(prompt: &str, logger: &JobLogger) -> Result<AICl
 
         if status.is_success() {
             clear_trying_line(logger);
-            logger.log(&format!("│ ✅ SUCCESS : {} (Groq Standard {}/{})", model, index, GROQ_TEXT_MODELS.len()));
+            logger.log(&format!("│ ✅ SUCCESS\t: {} (Groq Standard {}/{})", model, index, GROQ_TEXT_MODELS.len()));
 
             let groq_response: GroqResponse = response.json().await
                 .map_err(|e| format!("Failed to deserialize: {}", e))?;
@@ -606,7 +606,7 @@ async fn try_groq_vision(prompt: &str, image_base64: &str, logger: &JobLogger) -
 
         if status.is_success() {
             clear_trying_line(logger);
-            logger.log(&format!("│ ✅ SUCCESS : {} (Vision {}/{})", model, index, GROQ_VISION_MODELS.len()));
+            logger.log(&format!("│ ✅ SUCCESS\t: {} (Vision {}/{})", model, index, GROQ_VISION_MODELS.len()));
 
             let groq_response: GroqResponse = response.json().await
                 .map_err(|e| format!("Failed to deserialize: {}", e))?;
@@ -792,7 +792,7 @@ async fn try_gemini_duplicate_check(prompt: &str, logger: &JobLogger) -> Result<
 
         if status.is_success() {
             clear_trying_line(logger);
-            logger.log(&format!("│ ✅ SUCCESS : {} (Gemini {}/{})", model, index, GEMINI_MODELS.len()));
+            logger.log(&format!("│ ✅ SUCCESS\t: {} (Gemini {}/{})", model, index, GEMINI_MODELS.len()));
 
             let gemini_response: GeminiResponse = response.json().await
                 .map_err(|e| format!("Parse error: {}", e))?;
@@ -868,7 +868,7 @@ async fn try_groq_duplicate_check(prompt: &str, logger: &JobLogger) -> Result<Op
 
         if status.is_success() {
             clear_trying_line(logger);
-            logger.log(&format!("│ ✅ SUCCESS : {} (Groq {}/{})", model, index, GROQ_REASONING_MODELS.len()));
+            logger.log(&format!("│ ✅ SUCCESS\t: {} (Groq {}/{})", model, index, GROQ_REASONING_MODELS.len()));
 
             let groq_response: GroqResponse = response.json().await
                 .map_err(|e| format!("Parse error: {}", e))?;
@@ -910,7 +910,7 @@ pub async fn match_update_to_assignment(
 ) -> Result<Option<Uuid>, String> {
     let prompt = build_matching_prompt(changes, keywords, active_assignments, course_map, parallel_codes);
 
-    logger.log("┌── 🤖 AI MATCHING ────────────────────────────");
+    logger.log("┌──[AI MATCHING]────────────────────────────");
     logger.log(&format!("│ 🔍 Keywords  : {:?}", keywords));
 
     if !parallel_codes.is_empty() {
@@ -1002,7 +1002,7 @@ async fn try_gemini_matching(prompt: &str, logger: &JobLogger) -> Result<Option<
 
         if status.is_success() {
             clear_trying_line(logger);
-            logger.log(&format!("│ ✅ SUCCESS : {} (Gemini {}/{})", model, index, GEMINI_MODELS.len()));
+            logger.log(&format!("│ ✅ SUCCESS\t: {} (Gemini {}/{})", model, index, GEMINI_MODELS.len()));
 
             let gemini_response: GeminiResponse = response.json().await
                 .map_err(|e| format!("Failed to deserialize: {}", e))?;
@@ -1067,7 +1067,7 @@ async fn try_groq_matching(prompt: &str, logger: &JobLogger) -> Result<Option<Uu
 
         if status.is_success() {
             clear_trying_line(logger);
-            logger.log(&format!("│ ✅ SUCCESS : {} (Groq {}/{})", model, index, GROQ_REASONING_MODELS.len()));
+            logger.log(&format!("│ ✅ SUCCESS\t: {} (Groq {}/{})", model, index, GROQ_REASONING_MODELS.len()));
 
             let groq_response: GroqResponse = response.json().await
                 .map_err(|e| format!("Failed to deserialize: {}", e))?;
@@ -1091,7 +1091,7 @@ fn log_classification_success(classification: &AIClassification, logger: &JobLog
     logger.log("│");
     match classification {
         AIClassification::MultipleAssignments { assignments, .. } => {
-            logger.log(&format!("│ ✅ Result  : {} assignments detected", assignments.len()));
+            logger.log(&format!("│ ✅ Result\t: {} assignments detected", assignments.len()));
             for (i, a) in assignments.iter().enumerate() {
                 let parallels = if a.parallel_codes.is_empty() {
                     "N/A".to_string()
@@ -1108,7 +1108,7 @@ fn log_classification_success(classification: &AIClassification, logger: &JobLog
             } else {
                 format!("[{}]", parallel_codes.join(", "))
             };
-            logger.log(&format!("│ ✅ Result  : Single assignment ({} - {}, parallels: {})", course_display, title, parallels));
+            logger.log(&format!("│ ✅ Result\t: Single assignment ({} - {}, parallels: {})", course_display, title, parallels));
         }
         AIClassification::AssignmentUpdate { reference_keywords, parallel_codes, .. } => {
             let parallels = if parallel_codes.is_empty() {
@@ -1116,17 +1116,17 @@ fn log_classification_success(classification: &AIClassification, logger: &JobLog
             } else {
                 format!("[{}]", parallel_codes.join(", "))
             };
-            logger.log(&format!("│ ✅ Result  : Update detected (keywords: {:?}, parallels: {})", reference_keywords, parallels));
+            logger.log(&format!("│ ✅ Result\t: Update detected (keywords: {:?}, parallels: {})", reference_keywords, parallels));
         }
         AIClassification::Unrecognized { reason, category } => {
             use crate::models::UnrecognizedCategory;
             match category {
                 UnrecognizedCategory::Informal => {
-                    logger.log("│ ℹ️  Result  : Informal chat (no academic context)");
+                    logger.log("│ ℹ️ Result\t: Informal chat (no academic context)");
                 }
                 UnrecognizedCategory::AcademicRelated => {
                     let reason_display = reason.as_deref().unwrap_or("No reason provided");
-                    logger.log(&format!("│ ℹ️  Result  : Academic-related but not assignment ({})", reason_display));
+                    logger.log(&format!("│ ℹ️ Result\t: Academic-related but not assignment ({})", reason_display));
                 }
             }
         }

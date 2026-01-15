@@ -451,8 +451,8 @@ async fn call_context_resolver_ai(
     match try_gemini_context(&prompt, logger).await {
         Ok(hints) => return Ok(hints),
         Err(e) => {
-            logger.log(&format!("│ \x1b[33m⚠️ CONTEXT\x1b[0m   : Gemini failed - {}", e));
-            logger.log("│ \x1b[36m🔄 CONTEXT\x1b[0m   : Falling back to Groq...");
+            logger.log(&format!("│ \x1b[33m⚠️ CONTEXT\x1b[0m\t: Gemini failed - {}", e));
+            logger.log("│ \x1b[36m🔄 CONTEXT\x1b[0m\t: Falling back to Groq...");
         }
     }
     
@@ -460,7 +460,7 @@ async fn call_context_resolver_ai(
     match try_groq_reasoning_context(&prompt, logger).await {
         Ok(hints) => return Ok(hints),
         Err(e) => {
-            logger.log(&format!("│ \x1b[33m⚠️ CONTEXT\x1b[0m   : Groq Reasoning failed - {}", e));
+            logger.log(&format!("│ \x1b[33m⚠️ CONTEXT\x1b[0m\t: Groq Reasoning failed - {}", e));
         }
     }
     
@@ -468,7 +468,7 @@ async fn call_context_resolver_ai(
     match try_groq_standard_context(&prompt, logger).await {
         Ok(hints) => return Ok(hints),
         Err(e) => {
-            logger.log(&format!("│ \x1b[31m❌ CONTEXT\x1b[0m   : All models failed - {}", e));
+            logger.log(&format!("│ \x1b[31m❌ CONTEXT\x1b[0m\t: All models failed - {}", e));
         }
     }
     
@@ -644,9 +644,9 @@ async fn try_groq_standard_context(prompt: &str, logger: &JobLogger) -> Result<A
                 .unwrap_or_else(|_| String::new());
             
             if let Some(retry_after) = extract_retry_after(&error_text) {
-                logger.log(&format!("│ \x1b[33m⚠️ CONTEXT\x1b[0m   : {} - ⏳ Rate limit (retry in {})", model, retry_after));
+                logger.log(&format!("│ \x1b[33m⚠️ CONTEXT\x1b[0m\t: {} - ⏳ Rate limit (retry in {})", model, retry_after));
             } else {
-                logger.log(&format!("│ \x1b[33m⚠️ CONTEXT\x1b[0m   : {} - ⏳ Rate limit", model));
+                logger.log(&format!("│ \x1b[33m⚠️ CONTEXT\x1b[0m\t: {} - ⏳ Rate limit", model));
             }
             
             if index < GROQ_TEXT_MODELS.len() - 1 {
@@ -665,7 +665,7 @@ async fn try_groq_standard_context(prompt: &str, logger: &JobLogger) -> Result<A
         }
         
         if status == reqwest::StatusCode::BAD_REQUEST {
-            logger.log(&format!("│ \x1b[31m❌ CONTEXT\x1b[0m   : {} - 400 Bad Request", model));
+            logger.log(&format!("│ \x1b[31m❌ CONTEXT\x1b[0m\t: {} - 400 Bad Request", model));
             if index < GROQ_TEXT_MODELS.len() - 1 {
                 continue;
             }
