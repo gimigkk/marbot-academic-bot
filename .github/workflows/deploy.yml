@@ -67,7 +67,7 @@ jobs:
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
         run: |
-          echo "🔨 Building inside Docker (rust:1.83-slim-bookworm) with online mode..."
+          echo "🔨 Building inside Docker (rust:1.85-slim-bookworm) with online mode..."
           echo "📡 Will connect to database for query verification"
           
           # Build using Docker with DATABASE_URL for online query verification
@@ -75,7 +75,7 @@ jobs:
             -v $(pwd):/workspace \
             -w /workspace \
             -e DATABASE_URL="${DATABASE_URL}" \
-            rust:1.83-slim-bookworm \
+            rust:1.85-slim-bookworm \
             bash -c "
               set -e
               echo '📦 Installing build dependencies...'
@@ -302,7 +302,7 @@ jobs:
       - name: ✅ Deployment successful
         run: |
           if [ "${{ steps.build-check.outputs.mode }}" == "prebuilt" ]; then
-            echo "✅ Binary built inside Docker (rust:1.83-slim-bookworm)"
+            echo "✅ Binary built inside Docker (rust:1.85-slim-bookworm)"
             echo "✅ GLIBC compatibility ensured"
             echo "✅ Online mode - queries verified against database"
             echo "✅ Binary integrity verified with SHA256"
@@ -377,7 +377,7 @@ jobs:
               echo "🎉 Deployment completed with prebuilt binary!" >> $GITHUB_STEP_SUMMARY
               echo "" >> $GITHUB_STEP_SUMMARY
               echo "**Build Method:** GitHub Actions (Docker-built, online mode)" >> $GITHUB_STEP_SUMMARY
-              echo "**Environment:** rust:1.83-slim-bookworm" >> $GITHUB_STEP_SUMMARY
+              echo "**Environment:** rust:1.85-slim-bookworm" >> $GITHUB_STEP_SUMMARY
               echo "**GLIBC:** Compatible with Debian Bookworm" >> $GITHUB_STEP_SUMMARY
               echo "**Query Verification:** Online (connected to database)" >> $GITHUB_STEP_SUMMARY
             else
