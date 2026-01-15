@@ -256,7 +256,7 @@ async fn main() {
     println!("    📡 Listening on\t: \x1b[36mhttp://0.0.0.0:{}\x1b[0m", port);
     println!("    📍 Webhook URL\t: \x1b[36mhttp://localhost:{}/webhook\x1b[0m", port);
     println!("\x1b[1;30m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\x1b[0m");
-    println!("\n💡 Run: \x1b[1;33mdocker attach marbot_backend\x1b[0m then type \x1b[1;33mtui\x1b[0m + Enter");
+    println!("\n💡 To view TUI, run: \x1b[1;33mdocker exec marbot_backend touch /tmp/marbot_tui && docker logs -f marbot_backend\x1b[0m");
     println!("\nWaiting for incoming messages...\n");
 
     let listener = TcpListener::bind(addr).await.unwrap();

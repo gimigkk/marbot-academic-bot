@@ -7,6 +7,8 @@ COPY src ./src
 COPY migrations ./migrations
 COPY schedule.json ./schedule.json
 
+RUN apt-get update && apt-get install -y screen && rm -rf /var/lib/apt/lists/*
+
 # Install build dependencies
 RUN apt-get update && apt-get install -y \
     pkg-config \
@@ -38,4 +40,4 @@ EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
   CMD curl -f http://localhost:3000/health || exit 1
 
-CMD ["/app/marbot"]
+CMD ["screen", "-DmS", "marbot", "/app/marbot"]
