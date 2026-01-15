@@ -52,47 +52,59 @@ jobs:
       - name: 📥 Checkout code
         uses: actions/checkout@v4
       
-      - name: 🦀 Setup Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+      - name: 📦 Cache Docker layers
+        uses: actions/cache@v3
         with:
-          targets: x86_64-unknown-linux-gnu
+          path: /tmp/.buildx-cache
+          key: ${{ runner.os }}-buildx-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-buildx-
       
-      - name: 📦 Cache Cargo dependencies
-        uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: "marbot-release"
-          cache-on-failure: true
-          workspaces: backend -> target
-      
-      - name: 🔧 Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y pkg-config libssl-dev
-      
-      - name: 🏗️ Build release binary
+      - name: 🏗️ Build release binary in Docker (online mode)
         id: build
         continue-on-error: true
         working-directory: backend
         env:
-          SQLX_OFFLINE: true
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
         run: |
-          echo "🔨 Building for x86_64-unknown-linux-gnu..."
-          cargo build --release --target x86_64-unknown-linux-gnu
+          echo "🔨 Building inside Docker (rust:1.83-slim-bookworm) with online mode..."
+          echo "📡 Will connect to database for query verification"
+          
+          # Build using Docker with DATABASE_URL for online query verification
+          docker run --rm \
+            -v $(pwd):/workspace \
+            -w /workspace \
+            -e DATABASE_URL="${DATABASE_URL}" \
+            rust:1.83-slim-bookworm \
+            bash -c "
+              set -e
+              echo '📦 Installing build dependencies...'
+              apt-get update && apt-get install -y pkg-config libssl-dev
+              
+              echo '🔨 Building release binary...'
+              echo '📡 Connecting to database for sqlx query verification...'
+              cargo build --release
+              
+              echo '✅ Build complete!'
+              ls -lh target/release/marbot
+            "
           
           echo "📊 Binary information:"
-          ls -lh target/x86_64-unknown-linux-gnu/release/marbot
-          file target/x86_64-unknown-linux-gnu/release/marbot
+          ls -lh target/release/marbot
+          file target/release/marbot
+          ldd target/release/marbot || echo "Static binary"
       
       - name: 🔐 Generate SHA256 checksum
         id: checksum
         if: steps.build.outcome == 'success'
         working-directory: backend
         run: |
-          cd target/x86_64-unknown-linux-gnu/release
+          cd target/release
           sha256sum marbot > marbot.sha256
           CHECKSUM=$(cat marbot.sha256 | awk '{print $1}')
           echo "checksum=$CHECKSUM" >> $GITHUB_OUTPUT
           echo "✅ SHA256: $CHECKSUM"
+          cat marbot.sha256
       
       - name: 📦 Upload binary artifact
         if: steps.build.outcome == 'success'
@@ -100,8 +112,8 @@ jobs:
         with:
           name: marbot-binary
           path: |
-            backend/target/x86_64-unknown-linux-gnu/release/marbot
-            backend/target/x86_64-unknown-linux-gnu/release/marbot.sha256
+            backend/target/release/marbot
+            backend/target/release/marbot.sha256
           retention-days: 1
           if-no-files-found: error
       
@@ -110,7 +122,7 @@ jobs:
         run: |
           if [ "${{ steps.build.outcome }}" == "success" ]; then
             echo "success=true" >> $GITHUB_OUTPUT
-            echo "✅ Build succeeded"
+            echo "✅ Build succeeded - binary built with Debian Bookworm GLIBC + online mode"
           else
             echo "success=false" >> $GITHUB_OUTPUT
             echo "⚠️ Build failed - will fallback to VPS build"
@@ -132,7 +144,7 @@ jobs:
         run: |
           if [ "${{ needs.build.outputs.build-success }}" == "true" ]; then
             echo "mode=prebuilt" >> $GITHUB_OUTPUT
-            echo "✅ Using prebuilt binary from GitHub Actions"
+            echo "✅ Using prebuilt binary from GitHub Actions (Docker build with online mode)"
           else
             echo "mode=vps-build" >> $GITHUB_OUTPUT
             echo "⚠️ GitHub Actions build failed - will build on VPS"
@@ -166,6 +178,7 @@ jobs:
           echo "prebuilt" > deploy/DEPLOY_MODE
           
           echo "✅ Prebuilt package ready"
+          echo "📊 Package contents:"
           ls -laR deploy/
       
       - name: 📦 Prepare VPS build deployment package
@@ -188,8 +201,13 @@ jobs:
         if: steps.build-check.outputs.mode == 'prebuilt'
         run: |
           cd deploy/backend
+          echo "🔍 Verifying SHA256 checksum..."
           sha256sum -c marbot.sha256
           echo "✅ Binary integrity verified before transfer"
+          
+          echo "🔍 Binary information:"
+          file marbot
+          ldd marbot || echo "Static binary"
       
       - name: 📤 Transfer deployment package to VPS
         uses: appleboy/scp-action@v1
@@ -211,12 +229,13 @@ jobs:
           AUTHOR: ${{ needs.prepare.outputs.author_name }}
           ADDITIONS: ${{ needs.prepare.outputs.additions }}
           DELETIONS: ${{ needs.prepare.outputs.deletions }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USERNAME }}
           key: ${{ secrets.VPS_SSH_KEY }}
           port: ${{ secrets.VPS_PORT }}
-          envs: COMMIT_SHA,COMMIT_MSG,AUTHOR,ADDITIONS,DELETIONS
+          envs: COMMIT_SHA,COMMIT_MSG,AUTHOR,ADDITIONS,DELETIONS,DATABASE_URL
           script: |
             set -e
             
@@ -242,11 +261,15 @@ jobs:
               
               # Verify binary integrity on VPS
               cd "$DEPLOY_DIR/backend"
+              echo "🔍 Verifying binary integrity on VPS..."
               sha256sum -c marbot.sha256 || {
                 echo "❌ Binary integrity check failed on VPS!"
                 exit 1
               }
               echo "✅ Binary integrity verified on VPS"
+              
+              echo "🔍 Binary information on VPS:"
+              file marbot
               
               cd "$PROJECT_DIR"
               
@@ -257,6 +280,8 @@ jobs:
               cp -r "$DEPLOY_DIR/backend/migrations" ./backend/
               cp "$DEPLOY_DIR/backend/schedule.json" ./backend/
               
+              chmod +x ./backend/marbot-new
+              
             else
               echo "⚠️ Preparing for VPS build"
               
@@ -266,7 +291,7 @@ jobs:
             fi
             
             # Run update script with environment variables
-            export COMMIT_SHA COMMIT_MSG AUTHOR ADDITIONS DELETIONS DEPLOY_MODE
+            export COMMIT_SHA COMMIT_MSG AUTHOR ADDITIONS DELETIONS DEPLOY_MODE DATABASE_URL
             bash update.sh
             
             # Cleanup
@@ -277,7 +302,9 @@ jobs:
       - name: ✅ Deployment successful
         run: |
           if [ "${{ steps.build-check.outputs.mode }}" == "prebuilt" ]; then
-            echo "✅ Binary built on GitHub Actions (x86_64-unknown-linux-gnu)"
+            echo "✅ Binary built inside Docker (rust:1.83-slim-bookworm)"
+            echo "✅ GLIBC compatibility ensured"
+            echo "✅ Online mode - queries verified against database"
             echo "✅ Binary integrity verified with SHA256"
             echo "✅ Deployed prebuilt binary"
           else
@@ -347,9 +374,12 @@ jobs:
             echo "" >> $GITHUB_STEP_SUMMARY
             
             if [ "${{ needs.build.outputs.build-success }}" == "true" ]; then
-              echo "🎉 Deployment completed with GitHub Actions build!" >> $GITHUB_STEP_SUMMARY
+              echo "🎉 Deployment completed with prebuilt binary!" >> $GITHUB_STEP_SUMMARY
               echo "" >> $GITHUB_STEP_SUMMARY
-              echo "**Build Method:** GitHub Actions (optimized)" >> $GITHUB_STEP_SUMMARY
+              echo "**Build Method:** GitHub Actions (Docker-built, online mode)" >> $GITHUB_STEP_SUMMARY
+              echo "**Environment:** rust:1.83-slim-bookworm" >> $GITHUB_STEP_SUMMARY
+              echo "**GLIBC:** Compatible with Debian Bookworm" >> $GITHUB_STEP_SUMMARY
+              echo "**Query Verification:** Online (connected to database)" >> $GITHUB_STEP_SUMMARY
             else
               echo "🎉 Deployment completed with VPS build fallback!" >> $GITHUB_STEP_SUMMARY
               echo "" >> $GITHUB_STEP_SUMMARY
