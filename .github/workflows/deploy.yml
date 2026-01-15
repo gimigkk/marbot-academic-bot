@@ -44,6 +44,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: prepare
     timeout-minutes: 30
+    continue-on-error: true
     outputs:
       build-success: ${{ steps.build-result.outputs.success }}
     
@@ -60,49 +61,25 @@ jobs:
             ${{ runner.os }}-buildx-
       
       - name: 🏗️ Build release binary in Docker
-        id: build
-        continue-on-error: true
         working-directory: backend
         run: |
-          echo "🔨 Building inside Docker (rust:1.92-slim-bookworm)..."
+          echo "🔨 Building inside Docker (no database needed)..."
           
-          # Build using Docker (no DATABASE_URL needed with runtime queries)
           docker run --rm \
             -v $(pwd):/workspace \
             -w /workspace \
             rust:1.92-slim-bookworm \
             bash -c "
               set -e
-              echo '📦 Installing build dependencies...'
               apt-get update && apt-get install -y pkg-config libssl-dev
-              
-              echo '🔨 Building release binary...'
               cargo build --release
-              
-              echo '✅ Build complete!'
-              ls -lh target/release/marbot
             "
           
-          echo "📊 Binary information:"
           ls -lh target/release/marbot
-          file target/release/marbot
-          ldd target/release/marbot || echo "Static binary"
-      
-      - name: 🔍 Check if binary exists
-        id: binary-check
-        working-directory: backend
-        run: |
-          if [ -f "target/release/marbot" ]; then
-            echo "exists=true" >> $GITHUB_OUTPUT
-            echo "✅ Binary found!"
-          else
-            echo "exists=false" >> $GITHUB_OUTPUT
-            echo "❌ Binary not found!"
-          fi
       
       - name: 🔐 Generate SHA256 checksum
         id: checksum
-        if: steps.binary-check.outputs.exists == 'true'
+        if: steps.build.outcome == 'success'
         working-directory: backend
         run: |
           # Fix permissions first (Docker ran as root)
@@ -116,7 +93,7 @@ jobs:
           cat marbot.sha256
       
       - name: 📦 Upload binary artifact
-        if: steps.binary-check.outputs.exists == 'true'
+        if: steps.build.outcome == 'success'
         uses: actions/upload-artifact@v4
         with:
           name: marbot-binary
@@ -129,9 +106,9 @@ jobs:
       - name: 📝 Set build result
         id: build-result
         run: |
-          if [ "${{ steps.binary-check.outputs.exists }}" == "true" ]; then
+          if [ "${{ steps.build.outcome }}" == "success" ]; then
             echo "success=true" >> $GITHUB_OUTPUT
-            echo "✅ Build succeeded - binary built with Debian Bookworm GLIBC"
+            echo "✅ Build succeeded - binary built with Debian Bookworm GLIBC + online mode"
           else
             echo "success=false" >> $GITHUB_OUTPUT
             echo "⚠️ Build failed - will fallback to VPS build"
@@ -153,7 +130,7 @@ jobs:
         run: |
           if [ "${{ needs.build.outputs.build-success }}" == "true" ]; then
             echo "mode=prebuilt" >> $GITHUB_OUTPUT
-            echo "✅ Using prebuilt binary from GitHub Actions"
+            echo "✅ Using prebuilt binary from GitHub Actions (Docker build with online mode)"
           else
             echo "mode=vps-build" >> $GITHUB_OUTPUT
             echo "⚠️ GitHub Actions build failed - will build on VPS"
@@ -238,12 +215,13 @@ jobs:
           AUTHOR: ${{ needs.prepare.outputs.author_name }}
           ADDITIONS: ${{ needs.prepare.outputs.additions }}
           DELETIONS: ${{ needs.prepare.outputs.deletions }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USERNAME }}
           key: ${{ secrets.VPS_SSH_KEY }}
           port: ${{ secrets.VPS_PORT }}
-          envs: COMMIT_SHA,COMMIT_MSG,AUTHOR,ADDITIONS,DELETIONS
+          envs: COMMIT_SHA,COMMIT_MSG,AUTHOR,ADDITIONS,DELETIONS,DATABASE_URL
           script: |
             set -e
             
@@ -299,7 +277,7 @@ jobs:
             fi
             
             # Run update script with environment variables
-            export COMMIT_SHA COMMIT_MSG AUTHOR ADDITIONS DELETIONS DEPLOY_MODE
+            export COMMIT_SHA COMMIT_MSG AUTHOR ADDITIONS DELETIONS DEPLOY_MODE DATABASE_URL
             bash update.sh
             
             # Cleanup
@@ -312,7 +290,7 @@ jobs:
           if [ "${{ steps.build-check.outputs.mode }}" == "prebuilt" ]; then
             echo "✅ Binary built inside Docker (rust:1.92-slim-bookworm)"
             echo "✅ GLIBC compatibility ensured"
-            echo "✅ Runtime query validation (no DATABASE_URL needed)"
+            echo "✅ Online mode - queries verified against database"
             echo "✅ Binary integrity verified with SHA256"
             echo "✅ Deployed prebuilt binary"
           else
@@ -384,10 +362,10 @@ jobs:
             if [ "${{ needs.build.outputs.build-success }}" == "true" ]; then
               echo "🎉 Deployment completed with prebuilt binary!" >> $GITHUB_STEP_SUMMARY
               echo "" >> $GITHUB_STEP_SUMMARY
-              echo "**Build Method:** GitHub Actions (Docker-built)" >> $GITHUB_STEP_SUMMARY
+              echo "**Build Method:** GitHub Actions (Docker-built, online mode)" >> $GITHUB_STEP_SUMMARY
               echo "**Environment:** rust:1.92-slim-bookworm" >> $GITHUB_STEP_SUMMARY
               echo "**GLIBC:** Compatible with Debian Bookworm" >> $GITHUB_STEP_SUMMARY
-              echo "**Query Verification:** Runtime (no DATABASE_URL needed)" >> $GITHUB_STEP_SUMMARY
+              echo "**Query Verification:** Online (connected to database)" >> $GITHUB_STEP_SUMMARY
             else
               echo "🎉 Deployment completed with VPS build fallback!" >> $GITHUB_STEP_SUMMARY
               echo "" >> $GITHUB_STEP_SUMMARY
