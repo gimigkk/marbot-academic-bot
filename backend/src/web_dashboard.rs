@@ -1,4 +1,5 @@
 // src/web_dashboard.rs
+
 use axum::{
     extract::State,
     response::{Html, IntoResponse},
@@ -19,6 +20,7 @@ pub struct JobResponse {
     duration_ms: u128,
     current_countdown: Option<CountdownResponse>,
     current_trying: Option<String>,
+    last_message_ms: Option<u128>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -55,7 +57,6 @@ pub async fn serve_dashboard_page() -> impl IntoResponse {
 pub async fn get_dashboard_data(
     State(state): State<AppState>,
 ) -> Json<DashboardData> {
-    // read the TUI state (async)
     let jobs = state.tui_state.get_jobs().await;
     let general_log = state.tui_state.get_general_log().await;
 
@@ -80,6 +81,7 @@ pub async fn get_dashboard_data(
                 remaining: cd.remaining,
             }),
             current_trying: job.current_trying.clone(),
+            last_message_ms: None,
         }
     }).collect();
 
@@ -109,382 +111,1116 @@ const DASHBOARD_HTML: &str = r#"<!doctype html>
 <meta name="viewport" content="width=device-width,initial-scale=1" />
 <title>MARBOT Dashboard</title>
 <style>
-    /* reset/base */
     * { box-sizing: border-box; margin: 0; padding: 0; }
+    
+    :root {
+        --sidebar-width: 260px;
+        --sidebar-collapsed-width: 64px;
+        --bg: #0a0a0a;
+        --sidebar-bg: #1a1a1a;
+        --border: #2a2a2a;
+        --text-primary: #e0e0e0;
+        --text-secondary: #999;
+        --text-tertiary: #666;
+        --hover-bg: #141414;
+        --selected-bg: #141414;
+        --accent: #c66143;
+    }
+
     html, body { height: 100%; }
     body {
-        background: #0a0a0a;
-        color: #e0e0e0;
-        font-family: 'JetBrains Mono', monospace;
+        background: var(--bg);
+        color: var(--text-primary);
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        overflow: hidden;
+    }
+
+    .app-container {
+        display: flex;
         height: 100vh;
-    }
-
-    .container {
-        display: grid;
-        grid-template-rows: auto 1fr auto;
-        gap: 10px;
-        padding: 10px;
-        height: 100vh;
-    }
-
-    .header {
-        display:flex;
-        justify-content:space-between;
-        align-items:center;
-        padding: 12px 16px;
-        background: linear-gradient(135deg,#1a1a1a,#2a2a2a);
-        border-radius: 8px;
-        border: 1px solid #333;
-    }
-
-    .header h1 {
-        font-size: 1.4rem;
-        background: linear-gradient(90deg,#fff 0%,#c66143 100%);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        background-clip: text;
-        font-weight: 700;
-    }
-
-    .stats { display:flex; gap:16px; align-items:center; }
-    .stat { display:flex; gap:8px; align-items:center; }
-    .stat-label { color:#888; font-size:0.9rem; }
-    .stat-value { font-weight:700; font-size:1.05rem; }
-    .stat-value.active { color:#4ade80; }
-    .stat-value.completed { color:#38bdf8; }
-    .stat-value.failed { color:#f87171; }
-
-    .main-content {
-        display:grid;
-        grid-template-columns: 30% 70%;
-        gap:10px;
-        overflow: hidden; /* ensure outer container doesn't leak scrollbars */
-    }
-
-    /* Panel base - make sure each panel clips to its radius and creates its own compositing layer */
-    .panel {
-        background: #1a1a1a;
-        border: 1px solid #333;
-        border-radius: 8px;
-        display:flex;
-        flex-direction: column;
-        overflow: hidden;               /* clip children & scrollbars */
-        background-clip: padding-box;   /* prevent background/border bleed */
-        -webkit-background-clip: padding-box;
         position: relative;
-        transform: translateZ(0);       /* compositor layer hint (helps overlay-scrollbar clipping on some Linux setups) */
     }
 
-    .panel-header {
-        padding: 12px 14px;
-        background: #252525;
-        border-bottom: 1px solid #333;
-        display:flex;
-        justify-content:space-between;
-        align-items:center;
-        font-weight:700;
+    /* COLLAPSE BUTTON - Fixed position */
+    .collapse-btn {
+        position: fixed;
+        left: 16px;
+        top: 16px;
+        width: 32px;
+        height: 32px;
+        border-radius: 6px;
+        border: 1px solid var(--border);
+        background: var(--sidebar-bg);
+        color: var(--text-secondary);
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 18px;
+        transition: all 0.2s ease;
+        padding: 0;
+        z-index: 100;
+        flex-shrink: 0;
     }
 
-    .panel .panel-content {
-        padding: 12px;
-        overflow: hidden; /* inner scroll containers control scrolling */
+    .collapse-btn:hover {
+        background: var(--hover-bg);
+        color: var(--text-primary);
     }
 
-    .tabs { display:flex; gap:10px; margin-bottom:10px; }
-    .tab {
-        padding: 8px 14px;
-        background:#252525;
-        border:1px solid #333;
-        border-radius:6px;
-        user-select:none;
-        cursor:pointer;
-        font-size:0.9rem;
+    .collapse-btn svg {
+        width: 18px;
+        height: 18px;
+        transition: transform 0.3s ease;
     }
-    .tab:hover { background:#2a2a2a; }
-    .tab.active { background:#c66143; border-color:#c66143; color:white; }
+
+    .sidebar.collapsed ~ .collapse-btn svg {
+        transform: rotate(180deg);
+    }
+
+    /* SIDEBAR */
+    .sidebar {
+        width: 260px;
+        background: var(--sidebar-bg);
+        border-right: 1px solid var(--border);
+        display: flex;
+        flex-direction: column;
+        transition: none;
+        position: relative;
+        z-index: 10;
+        flex-shrink: 0;
+        overflow: hidden;
+    }
+
+    .sidebar.resizing {
+        transition: none;
+        user-select: none;
+    }
+
+    .sidebar.collapsed {
+        width: var(--sidebar-collapsed-width) !important;
+    }
+
+    .sidebar.collapsing {
+        transition: width 0.3s ease;
+    }
+
+    .sidebar.expanding {
+        transition: width 0.3s ease;
+    }
+
+    .sidebar.collapsing .sidebar-content,
+    .sidebar.collapsing .sidebar-footer,
+    .sidebar.collapsing .view-toggle-container {
+        opacity: 0;
+        transition: opacity 0.15s ease;
+    }
+
+    .sidebar.expanding .sidebar-content,
+    .sidebar.expanding .sidebar-footer,
+    .sidebar.expanding .view-toggle-container {
+        transition: opacity 0.15s ease 0.3s;
+    }
+
+    .resize-handle {
+        position: absolute;
+        right: 0;
+        top: 0;
+        bottom: 0;
+        width: 8px;
+        cursor: col-resize;
+        z-index: 10;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: background 0.2s ease;
+    }
+
+    .resize-handle::before {
+        content: '';
+        position: absolute;
+        width: 2px;
+        height: 32px;
+        background: var(--text-tertiary);
+        border-radius: 1px;
+        opacity: 0;
+        transition: opacity 0.2s ease;
+    }
+
+    .resize-handle:hover::before,
+    .resize-handle.active::before {
+        opacity: 0.5;
+    }
+
+    .resize-handle:hover,
+    .resize-handle.active {
+        background: rgba(198, 97, 67, 0.1);
+    }
+
+    .sidebar.collapsed .resize-handle {
+        display: none;
+    }
+
+    .sidebar-spacer {
+        height: 64px;
+        flex-shrink: 0;
+    }
+
+    .sidebar.collapsed .sidebar-content,
+    .sidebar.collapsed .sidebar-footer,
+    .sidebar.collapsed .view-toggle-container {
+        opacity: 0;
+        pointer-events: none;
+        visibility: hidden;
+    }
+
+    .sidebar-content {
+        flex: 1;
+        overflow-y: auto;
+        padding: 8px 16px;
+        transition: opacity 0.2s ease, visibility 0.2s ease;
+    }
+
+    .sidebar-content::-webkit-scrollbar { width: 6px; }
+    .sidebar-content::-webkit-scrollbar-track { background: transparent; }
+    .sidebar-content::-webkit-scrollbar-thumb { background: #333; border-radius: 3px; }
+    .sidebar-content::-webkit-scrollbar-thumb:hover { background: #444; }
+
+    .sidebar-footer {
+        padding: 16px;
+        border-top: 1px solid var(--border);
+        font-size: 12px;
+        color: var(--text-secondary);
+        transition: opacity 0.2s ease, visibility 0.2s ease;
+    }
+
+    .view-toggle-container {
+        padding: 8px 16px;
+        transition: opacity 0.2s ease, visibility 0.2s ease;
+    }
+
+    .stats-row {
+        display: flex;
+        justify-content: space-between;
+        margin-bottom: 12px;
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 11px;
+    }
+
+    .stat-item {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+    }
+
+    .stat-label {
+        color: var(--text-tertiary);
+    }
+
+    .stat-value {
+        font-weight: 600;
+    }
+
+    .stat-value.active { color: #4ade80; }
+    .stat-value.completed { color: #38bdf8; }
+    .stat-value.failed { color: #f87171; }
+
+    /* SINGLE TOGGLE BUTTON */
+    .view-toggle-btn {
+        width: 100%;
+        padding: 10px 16px;
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        color: var(--text-primary);
+        cursor: pointer;
+        transition: all 0.2s ease;
+        font-size: 13px;
+        font-weight: 500;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        position: relative;
+        overflow: hidden;
+    }
+
+    .view-toggle-btn:hover {
+        background: var(--hover-bg);
+        border-color: var(--accent);
+    }
+
+    .view-toggle-btn::before {
+        content: '';
+        position: absolute;
+        left: 0;
+        top: 0;
+        bottom: 0;
+        width: 3px;
+        background: var(--accent);
+        transition: opacity 0.2s ease;
+        opacity: 0;
+    }
+
+    .view-toggle-btn:hover::before {
+        opacity: 1;
+    }
+
+    .toggle-label {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+
+    .toggle-label svg {
+        width: 16px;
+        height: 16px;
+        transition: transform 0.3s ease;
+    }
+
+    .view-toggle-btn.general .toggle-label svg {
+        transform: rotate(180deg);
+    }
+
+    .toggle-arrow {
+        font-size: 10px;
+        color: var(--text-tertiary);
+    }
+
+    /* Icon-only toggle for collapsed state */
+    .toggle-collapsed {
+        display: none;
+        padding: 16px;
+        align-items: center;
+        justify-content: center;
+        opacity: 0;
+        visibility: hidden;
+        transition: opacity 0.15s ease 0.3s, visibility 0s 0.3s;
+    }
+
+    .sidebar.collapsed .view-toggle-container {
+        display: none;
+    }
+
+    .sidebar.collapsed .toggle-collapsed {
+        display: flex;
+        opacity: 1;
+        visibility: visible;
+    }
+
+    .sidebar.collapsing .toggle-collapsed {
+        opacity: 0;
+        visibility: hidden;
+        transition: opacity 0.15s ease, visibility 0s 0.15s;
+    }
+
+    .sidebar.expanding .toggle-collapsed {
+        opacity: 0;
+        visibility: hidden;
+        transition: opacity 0.15s ease;
+    }
+
+    .toggle-icon-btn {
+        width: 32px;
+        height: 32px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 6px;
+        background: var(--sidebar-bg);
+        border: 1px solid var(--border);
+        color: var(--text-secondary);
+        cursor: pointer;
+        transition: all 0.2s ease;
+    }
+
+    .toggle-icon-btn:hover {
+        background: var(--hover-bg);
+        color: var(--text-primary);
+        border-color: var(--accent);
+    }
+
+    .toggle-icon-btn svg {
+        width: 18px;
+        height: 18px;
+    }
+
+    .job-list {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        margin: 0 -4px;
+    }
 
     .job-item {
-        padding:10px;
-        margin-bottom:8px;
-        background:#252525;
-        border-radius:6px;
-        border-left:3px solid #333;
-        cursor:pointer;
-        user-select:none;
-        transition: background 120ms ease, border-color 120ms ease;
-    }
-    .job-item:hover:not(.grayed) { background:#2a2a2a; }
-    .job-item.selected { background:#2a2a2a; border-left-color:#c66143; }
-    .job-item.grayed { opacity:0.45; pointer-events:none; cursor:default; }
-
-    .job-item.active { border-left-color: #4ade80; }
-    .job-item.completed { border-left-color: #38bdf8; }
-    .job-item.failed { border-left-color: #f87171; }
-
-    .job-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:6px; }
-    .job-status { display:flex; align-items:center; gap:8px; font-size:0.95rem; }
-    .job-chat { color:#888; font-size:0.9rem; }
-    .job-duration { color:#666; min-width:48px; text-align:right; font-size:0.9rem; }
-
-    /* Right panel specific: ensure scrollbar is clipped to rounded corner */
-    .main-content .panel:last-child {
+        padding: 10px 12px 10px 16px;
         border-radius: 8px;
-        overflow: hidden; /* clip scrollbars & children to rounded shape */
+        cursor: pointer;
+        transition: all 0.2s ease;
+        position: relative;
     }
 
-    /* The scrolling area inside the right panel */
-    .main-content .panel:last-child .panel-content {
-        padding: 12px;
-        overflow-y: auto;          /* vertical scrolling */
-        overflow-x: hidden;        /* prevent horizontal overflow that breaks radii */
-        border-radius: 0 8px 8px 0;/* visually round only the right side */
-        background: transparent;   /* let outer panel background show */
-        -webkit-overflow-scrolling: touch;
-        scrollbar-gutter: stable both-edges; /* reserve scrollbar space so overlay scrollbars stay inside */
+    .job-item:hover {
+        background: var(--hover-bg);
+    }
+
+    .job-item.selected {
+        background: var(--selected-bg);
+    }
+
+    .job-item.grayed {
+        opacity: 0.4;
+        pointer-events: none;
+    }
+
+    .job-item::before {
+        content: '';
+        position: absolute;
+        left: 0;
+        top: 8px;
+        bottom: 8px;
+        width: 3px;
+        border-radius: 0 2px 2px 0;
+        background: transparent;
+        transition: background 0.2s ease;
+    }
+
+    .job-item.selected::before { background: var(--accent); }
+    .job-item.active::before { background: #4ade80; }
+    .job-item.completed::before { background: #38bdf8; }
+    .job-item.failed::before { background: #f87171; }
+
+    .job-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 4px;
+    }
+
+    .job-name {
+        font-size: 13px;
+        font-weight: 500;
+        color: var(--text-primary);
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+
+    .job-status-icon {
+        width: 12px;
+        height: 12px;
+        flex-shrink: 0;
+    }
+
+    .job-status-icon svg {
+        width: 100%;
         height: 100%;
     }
 
-    .terminal-wrapper {
-        background: #1a1a1a;
+    .job-duration {
+        font-size: 11px;
+        color: var(--text-tertiary);
+        font-family: 'JetBrains Mono', monospace;
+    }
+
+    .job-chat {
+        font-size: 12px;
+        color: var(--text-tertiary);
         overflow: hidden;
-        border-radius: 6px;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .empty-sidebar {
+        padding: 24px 0;
+        text-align: center;
+        color: var(--text-tertiary);
+        font-size: 13px;
+    }
+
+    /* Collapsed footer with icon stats */
+    .footer-collapsed {
+        display: none;
+        flex-direction: column;
+        gap: 8px;
+        padding: 16px;
+        border-top: 1px solid var(--border);
+        align-items: center;
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 11px;
+        opacity: 0;
+        visibility: hidden;
+        transition: opacity 0.15s ease 0.3s, visibility 0s 0.3s;
+    }
+
+    .sidebar.collapsed .footer-collapsed {
+        display: flex;
+        opacity: 1;
+        visibility: visible;
+    }
+
+    .sidebar.collapsing .footer-collapsed {
+        opacity: 0;
+        visibility: hidden;
+        transition: opacity 0.15s ease, visibility 0s 0.15s;
+    }
+
+    .sidebar.expanding .footer-collapsed {
+        opacity: 0;
+        visibility: hidden;
+        transition: opacity 0.15s ease;
+    }
+
+    .footer-stat-item {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 2px;
+    }
+
+    .footer-stat-value {
+        font-size: 16px;
+        font-weight: 600;
+    }
+
+    .footer-stat-item.active .footer-stat-value { color: #4ade80; }
+    .footer-stat-item.completed .footer-stat-value { color: #38bdf8; }
+    .footer-stat-item.failed .footer-stat-value { color: #f87171; }
+
+    .footer-stat-label {
+        font-size: 9px;
+        color: var(--text-tertiary);
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
+
+    /* MAIN CONTENT */
+    .main-content {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        min-width: 0;
+        position: relative;
+    }
+
+    .topbar {
+        height: 64px;
+        border-bottom: 1px solid var(--border);
+        display: flex;
+        align-items: center;
+        padding: 0 20px;
+        gap: 12px;
+        background: var(--bg);
+    }
+
+    .topbar-title {
+        font-size: 15px;
+        font-weight: 600;
+        color: var(--text-primary);
+    }
+
+    .topbar-title .app-name {
+        color: var(--accent);
+        margin-right: 8px;
+    }
+
+    .terminal-container {
+        flex: 1;
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
     }
 
     .terminal {
-        padding: 10px;
         font-family: 'JetBrains Mono', monospace;
-        font-size: 0.85rem;
-        line-height: 1.35;
+        font-size: 13px;
+        line-height: 1.5;
         white-space: pre-wrap;
         word-break: break-word;
-        color: #e0e0e0;
+        color: var(--text-primary);
+        padding: 16px;
+        overflow-y: auto;
+        flex: 1;
     }
 
-    .countdown-line { color:#eab308; margin-top:6px; }
+    .terminal::-webkit-scrollbar { width: 8px; }
+    .terminal::-webkit-scrollbar-track { background: transparent; }
+    .terminal::-webkit-scrollbar-thumb { background: #333; border-radius: 4px; }
+    .terminal::-webkit-scrollbar-thumb:hover { background: #444; }
+
+    .countdown-line { 
+        color: #eab308; 
+        margin-top: 8px;
+        font-weight: 500;
+    }
 
     .empty-state {
-        display:flex;
-        flex-direction:column;
-        align-items:center;
-        justify-content:center;
-        height:100%;
-        color:#666;
-        gap:8px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        height: 100%;
+        color: var(--text-tertiary);
+        gap: 8px;
     }
 
-    .footer {
-        background:#1a1a1a;
-        padding:10px 14px;
-        border:1px solid #333;
-        border-radius:8px;
-        font-size:0.9rem;
-        color:#888;
-        display:flex;
-        align-items:center;
+    .empty-state-text { 
+        font-size: 14px;
+        font-weight: 500;
+    }
+    
+    .empty-state-subtext { 
+        font-size: 12px; 
+        opacity: 0.7; 
     }
 
-    /* ANSI classes */
-    .ansi-30{color:#000;}
-    .ansi-31{color:#f87171;}
-    .ansi-32{color:#4ade80;}
-    .ansi-33{color:#eab308;}
-    .ansi-34{color:#38bdf8;}
-    .ansi-35{color:#e879f9;}
-    .ansi-36{color:#22d3ee;}
-    .ansi-37{color:#fff;}
-    .ansi-90{color:#888;}
+    /* ANSI colors */
+    .ansi-30{color:#000;}.ansi-31{color:#f87171;}.ansi-32{color:#4ade80;}
+    .ansi-33{color:#eab308;}.ansi-34{color:#38bdf8;}.ansi-35{color:#e879f9;}
+    .ansi-36{color:#22d3ee;}.ansi-37{color:#fff;}.ansi-90{color:#888;}
     .ansi-1{font-weight:700;}
 
-    /* Scrollbar styling (WebKit) */
-    .main-content .panel .panel-content::-webkit-scrollbar { width: 8px; }
-    .main-content .panel .panel-content::-webkit-scrollbar-track { background: transparent; border-radius: 8px; }
-    .main-content .panel .panel-content::-webkit-scrollbar-thumb { background: #333; border-radius: 6px; }
-    .main-content .panel .panel-content::-webkit-scrollbar-thumb:hover { background: #444; }
+    @media (max-width: 768px) {
+        .sidebar {
+            position: absolute;
+            left: 0;
+            top: 0;
+            bottom: 0;
+            z-index: 100;
+        }
+        
+        .sidebar.collapsed {
+            transform: translateX(-100%);
+        }
 
-    /* Firefox */
-    .main-content .panel .panel-content { scrollbar-width: thin; scrollbar-color: #333 #1a1a1a; }
-
-    @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-    .spinner { display:inline-block; animation: spin 1000ms linear infinite; }
-    .spinner.paused { animation-play-state: paused; }
-
-    @media (max-width: 900px) {
-        .main-content { grid-template-columns: 1fr; }
+        .collapse-btn {
+            left: 8px;
+            top: 8px;
+        }
     }
 </style>
 </head>
 <body>
-<div class="container">
-    <div class="header">
-        <h1>MARBOT Dashboard</h1>
-        <div class="stats">
-            <div class="stat"><span class="stat-label">Active:</span><span class="stat-value active" id="stat-active">0</span></div>
-            <div class="stat"><span class="stat-label">Completed:</span><span class="stat-value completed" id="stat-completed">0</span></div>
-            <div class="stat"><span class="stat-label">Failed:</span><span class="stat-value failed" id="stat-failed">0</span></div>
-        </div>
-    </div>
+<div class="app-container">
+    <!-- COLLAPSE BUTTON - Fixed position -->
+    <button class="collapse-btn" id="collapse-sidebar" title="Toggle sidebar">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+            <rect x="3" y="3" width="18" height="18" rx="2"/>
+            <line x1="9" y1="3" x2="9" y2="21"/>
+        </svg>
+    </button>
 
-    <div class="main-content">
-        <div class="panel">
-            <div class="panel-header"><span>Navigation</span></div>
-            <div class="panel-content">
-                <div class="tabs">
-                    <div class="tab active" data-view="tasks">Tasks</div>
-                    <div class="tab" data-view="general">General</div>
+    <!-- SIDEBAR -->
+    <aside class="sidebar" id="sidebar">
+        <div class="resize-handle" id="resize-handle"></div>
+        <div class="sidebar-spacer"></div>
+
+        <!-- Single toggle button for desktop -->
+        <div class="view-toggle-container">
+            <button class="view-toggle-btn" id="view-toggle-btn">
+                <span class="toggle-label">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <rect x="3" y="3" width="7" height="7" rx="1"/>
+                        <rect x="3" y="14" width="7" height="7" rx="1"/>
+                        <rect x="14" y="3" width="7" height="7" rx="1"/>
+                        <rect x="14" y="14" width="7" height="7" rx="1"/>
+                    </svg>
+                    <span id="toggle-text">Tasks</span>
+                </span>
+                <span class="toggle-arrow">→</span>
+            </button>
+        </div>
+
+        <!-- Icon button for collapsed state -->
+        <div class="toggle-collapsed">
+            <button class="toggle-icon-btn" id="toggle-icon-btn" title="Toggle view">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <rect x="3" y="3" width="7" height="7" rx="1"/>
+                    <rect x="3" y="14" width="7" height="7" rx="1"/>
+                    <rect x="14" y="3" width="7" height="7" rx="1"/>
+                    <rect x="14" y="14" width="7" height="7" rx="1"/>
+                </svg>
+            </button>
+        </div>
+
+        <div class="sidebar-content" id="sidebar-content">
+            <div class="empty-sidebar">No tasks yet</div>
+        </div>
+
+        <div class="sidebar-footer">
+            <div class="stats-row">
+                <div class="stat-item">
+                    <span class="stat-label">Active:</span>
+                    <span class="stat-value active" id="stat-active">0</span>
                 </div>
-                <div id="task-list"></div>
+                <div class="stat-item">
+                    <span class="stat-label">Done:</span>
+                    <span class="stat-value completed" id="stat-completed">0</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-label">Failed:</span>
+                    <span class="stat-value failed" id="stat-failed">0</span>
+                </div>
+            </div>
+            <div style="text-align: center; opacity: 0.5; font-size: 10px;">
+                <span id="last-update">-</span>
             </div>
         </div>
 
-        <div class="panel">
-            <div class="panel-header"><span id="right-panel-title">Task Details</span></div>
-            <div class="panel-content" id="detail-content">
+        <div class="footer-collapsed">
+            <div class="footer-stat-item active">
+                <span class="footer-stat-value" id="stat-active-collapsed">0</span>
+                <span class="footer-stat-label">Active</span>
+            </div>
+            <div class="footer-stat-item completed">
+                <span class="footer-stat-value" id="stat-completed-collapsed">0</span>
+                <span class="footer-stat-label">Done</span>
+            </div>
+            <div class="footer-stat-item failed">
+                <span class="footer-stat-value" id="stat-failed-collapsed">0</span>
+                <span class="footer-stat-label">Failed</span>
+            </div>
+        </div>
+    </aside>
+
+    <!-- MAIN CONTENT -->
+    <main class="main-content" id="main-content">
+        <div class="topbar">
+            <div class="topbar-title">
+                <span class="app-name">MARBOT</span>
+                <span id="topbar-subtitle">Task Logs</span>
+            </div>
+        </div>
+
+        <div class="terminal-container">
+            <div class="terminal" id="terminal-content">
                 <div class="empty-state">
-                    <div style="font-size:2rem;">📋</div>
-                    <div>No tasks yet</div>
-                    <div style="font-size:0.9rem;">Tasks will appear when jobs start</div>
+                    <div class="empty-state-text">No tasks yet</div>
+                    <div class="empty-state-subtext">Tasks will appear when jobs start</div>
                 </div>
             </div>
         </div>
-    </div>
-
-    <div class="footer">
-        <span>Auto-refresh: <strong>LIVE</strong></span>
-        <span style="margin-left:20px;">Last updated: <strong id="last-update">-</strong></span>
-    </div>
+    </main>
 </div>
 
 <script>
 (() => {
     const API = '/tui/api/data';
     const POLL_MS = 1000;
+    const STORAGE_KEY = 'marbot:lastSelectedJob';
+    const SIDEBAR_COLLAPSED_KEY = 'marbot:sidebarCollapsed';
+    const VIEW_KEY = 'marbot:currentView';
+
     let currentView = 'tasks';
     let selectedJobId = null;
     let allJobs = [];
     let generalLog = [];
     let clientSideCountdowns = {};
     let jobStartTimes = {};
-    let lastJobStructure = '';
+    let isConnected = true;
 
-    const tabs = document.querySelectorAll('.tab');
-    const taskListEl = document.getElementById('task-list');
-    const detailEl = document.getElementById('detail-content');
-    const rightTitle = document.getElementById('right-panel-title');
+    // Store job order by assignment index
+    const jobSortOrder = {};
+    let nextSortIndex = 0;
 
-    tabs.forEach(tab => {
-        tab.addEventListener('click', () => {
-            tabs.forEach(t => t.classList.remove('active'));
-            tab.classList.add('active');
-            currentView = tab.dataset.view;
-            if (currentView === 'general') selectedJobId = null;
-            renderView(true);
-        });
+    const jobDetailHtmlCache = {};
+    const jobDetailSig = {};
+    let generalHtmlCache = { sig: null, html: null };
+
+    const sidebar = document.getElementById('sidebar');
+    const collapseBtn = document.getElementById('collapse-sidebar');
+    const resizeHandle = document.getElementById('resize-handle');
+    const viewToggleBtn = document.getElementById('view-toggle-btn');
+    const toggleIconBtn = document.getElementById('toggle-icon-btn');
+    const toggleText = document.getElementById('toggle-text');
+    const sidebarContent = document.getElementById('sidebar-content');
+    const terminalContent = document.getElementById('terminal-content');
+    const topbarSubtitle = document.getElementById('topbar-subtitle');
+    const lastUpdateEl = document.getElementById('last-update');
+
+    let renderedJobIds = new Set();
+    let isResizing = false;
+    let resizeStartX = 0;
+    let resizeStartWidth = 0;
+
+    // Initialize sidebar and view state
+    try {
+        const collapsed = localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === 'true';
+        if (collapsed) {
+            sidebar.classList.add('collapsed');
+        }
+        const savedWidth = localStorage.getItem('marbot:sidebarWidth');
+        if (savedWidth && !collapsed) {
+            sidebar.style.width = savedWidth + 'px';
+        }
+        const savedView = localStorage.getItem(VIEW_KEY);
+        if (savedView === 'general') {
+            currentView = 'general';
+        }
+    } catch (e) {}
+
+    collapseBtn.addEventListener('click', () => {
+        const wasCollapsed = sidebar.classList.contains('collapsed');
+        
+        if (wasCollapsed) {
+            // Expanding
+            sidebar.classList.add('expanding');
+            sidebar.classList.remove('collapsed');
+            
+            setTimeout(() => {
+                try {
+                    const savedWidth = localStorage.getItem('marbot:sidebarWidth');
+                    if (savedWidth) {
+                        sidebar.style.width = savedWidth + 'px';
+                    } else {
+                        sidebar.style.width = '260px';
+                    }
+                } catch (e) {
+                    sidebar.style.width = '260px';
+                }
+                
+                setTimeout(() => {
+                    sidebar.classList.remove('expanding');
+                }, 450);
+            }, 10);
+        } else {
+            // Collapsing
+            sidebar.classList.add('collapsing');
+            
+            setTimeout(() => {
+                sidebar.classList.add('collapsed');
+                
+                setTimeout(() => {
+                    sidebar.classList.remove('collapsing');
+                }, 300);
+            }, 150);
+        }
+        
+        try {
+            localStorage.setItem(SIDEBAR_COLLAPSED_KEY, !wasCollapsed);
+        } catch (e) {}
     });
 
-    taskListEl.addEventListener('click', (e) => {
+    // Resize functionality
+    resizeHandle.addEventListener('mousedown', (e) => {
+        isResizing = true;
+        resizeStartX = e.clientX;
+        resizeStartWidth = sidebar.offsetWidth;
+        sidebar.classList.add('resizing');
+        resizeHandle.classList.add('active');
+        document.body.style.cursor = 'col-resize';
+        document.body.style.userSelect = 'none';
+        e.preventDefault();
+    });
+
+    document.addEventListener('mousemove', (e) => {
+        if (!isResizing) return;
+        const delta = e.clientX - resizeStartX;
+        const newWidth = Math.max(200, Math.min(600, resizeStartWidth + delta));
+        sidebar.style.width = newWidth + 'px';
+    });
+
+    document.addEventListener('mouseup', () => {
+        if (isResizing) {
+            isResizing = false;
+            sidebar.classList.remove('resizing');
+            resizeHandle.classList.remove('active');
+            document.body.style.cursor = '';
+            document.body.style.userSelect = '';
+            try {
+                localStorage.setItem('marbot:sidebarWidth', sidebar.offsetWidth);
+            } catch (e) {}
+        }
+    });
+
+    function getStatusIcon(status) {
+        const icons = {
+            active: isConnected ? `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="10"/>
+                <polyline points="12 6 12 12 16 14"/>
+            </svg>` : `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="6" y="4" width="4" height="16"/>
+                <rect x="14" y="4" width="4" height="16"/>
+            </svg>`,
+            completed: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="20 6 9 17 4 12"/>
+            </svg>`,
+            failed: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <line x1="18" y1="6" x2="6" y2="18"/>
+                <line x1="6" y1="6" x2="18" y2="18"/>
+            </svg>`
+        };
+        return icons[status] || `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10"/>
+            <line x1="12" y1="8" x2="12" y2="12"/>
+            <line x1="12" y1="16" x2="12.01" y2="16"/>
+        </svg>`;
+    }
+
+    function switchView(view) {
+        currentView = view;
+        
+        const toggleLabelSvg = viewToggleBtn.querySelector('.toggle-label svg');
+        
+        // Update button appearance
+        if (view === 'tasks') {
+            viewToggleBtn.classList.remove('general');
+            toggleText.textContent = 'Tasks';
+            topbarSubtitle.textContent = 'Task Logs';
+            toggleLabelSvg.innerHTML = `<rect x="3" y="3" width="7" height="7" rx="1"/>
+                <rect x="3" y="14" width="7" height="7" rx="1"/>
+                <rect x="14" y="3" width="7" height="7" rx="1"/>
+                <rect x="14" y="14" width="7" height="7" rx="1"/>`;
+            toggleIconBtn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="3" y="3" width="7" height="7" rx="1"/>
+                <rect x="3" y="14" width="7" height="7" rx="1"/>
+                <rect x="14" y="3" width="7" height="7" rx="1"/>
+                <rect x="14" y="14" width="7" height="7" rx="1"/>
+            </svg>`;
+            try {
+                const cached = localStorage.getItem(STORAGE_KEY);
+                if (cached) selectedJobId = cached;
+            } catch (e) {}
+        } else {
+            viewToggleBtn.classList.add('general');
+            toggleText.textContent = 'General';
+            topbarSubtitle.textContent = 'General Logs';
+            toggleLabelSvg.innerHTML = `<line x1="3" y1="12" x2="21" y2="12"/>
+                <line x1="3" y1="6" x2="21" y2="6"/>
+                <line x1="3" y1="18" x2="21" y2="18"/>`;
+            toggleIconBtn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <line x1="3" y1="12" x2="21" y2="12"/>
+                <line x1="3" y1="6" x2="21" y2="6"/>
+                <line x1="3" y1="18" x2="21" y2="18"/>
+            </svg>`;
+        }
+
+        try {
+            localStorage.setItem(VIEW_KEY, view);
+        } catch (e) {}
+
+        renderView(true);
+    }
+
+    viewToggleBtn.addEventListener('click', () => {
+        switchView(currentView === 'tasks' ? 'general' : 'tasks');
+    });
+
+    toggleIconBtn.addEventListener('click', () => {
+        switchView(currentView === 'tasks' ? 'general' : 'tasks');
+    });
+
+    // Initialize view
+    switchView(currentView);
+
+    try {
+        const stored = localStorage.getItem(STORAGE_KEY);
+        if (stored) selectedJobId = stored;
+    } catch (e) {}
+
+    sidebarContent.addEventListener('click', (e) => {
         if (currentView !== 'tasks') return;
         const jobItem = e.target.closest('.job-item');
         if (!jobItem || jobItem.classList.contains('grayed')) return;
         const id = jobItem.dataset.jobId;
         if (id && id !== selectedJobId) {
             selectedJobId = id;
+            try { localStorage.setItem(STORAGE_KEY, id); } catch (e) {}
             renderView(true);
         }
     });
 
-    function ansiToHtml(text) {
-        if (!text) return '';
-        // escape HTML first
-        let escaped = String(text).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-        // apply 24-bit color (38;2;r;g;b)
-        escaped = escaped.replace(/\x1b\[38;2;(\d+);(\d+);(\d+)m/g, (m,r,g,b) => `<span style="color: rgb(${r},${g},${b})">`);
-        // apply SGR numeric codes (like 0,1,31..)
-        escaped = escaped.replace(/\x1b\[(\d+)m/g, (m,code) => code === '0' ? '</span>' : `<span class="ansi-${code}">`);
-        // replace newlines with <br>
-        return escaped.replace(/\n/g, '<br>');
+    function escapeHtml(s) {
+        if (!s) return '';
+        return String(s).replace(/[&<>"']/g, (m) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
     }
 
-    function getStatusIcon(status) {
-        const isPaused = currentView === 'general';
-        const spinnerClass = isPaused ? 'spinner paused' : 'spinner';
-        switch (status) {
-            case 'active': return `<span class="${spinnerClass}">⚙</span>`;
-            case 'completed': return '✓';
-            case 'failed': return '✗';
-            default: return '?';
-        }
+    function shorten(s, n=30) {
+        if (!s) return '';
+        return s.length > n ? s.slice(0, n-3) + '...' : s;
+    }
+
+    function ansiToHtml(text) {
+        if (!text) return '';
+        let escaped = String(text).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+        escaped = escaped.replace(/\x1b\[38;2;(\d+);(\d+);(\d+)m/g, (m,r,g,b) => `<span style="color: rgb(${r},${g},${b})">`);
+        escaped = escaped.replace(/\x1b\[(\d+)m/g, (m,code) => code === '0' ? '</span>' : `<span class="ansi-${code}">`);
+        return escaped.replace(/\n/g, '<br>');
     }
 
     function getClientDuration(jobId, status) {
         const rec = jobStartTimes[jobId];
         if (!rec) return '0s';
         if (status === 'active') {
+            if (!isConnected) return rec.frozen || Math.floor((rec.frozenMs || 0) / 1000) + 's';
             const elapsed = Date.now() - (rec.start || rec);
             return Math.floor(elapsed / 1000) + 's';
-        } else {
-            return rec.finalDuration || '0s';
         }
+        return rec.finalDuration || '0s';
     }
 
-    function createJobStructureSignature(displayJobs) {
-        return displayJobs.map(j => `${j.id}:${j.status}:${j.id===selectedJobId}`).join('|');
+    function extractTimestampFromLog(line) {
+        if (!line) return null;
+        let m = line.match(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z/);
+        if (m) {
+            const t = Date.parse(m[0]);
+            if (!isNaN(t)) return t;
+        }
+        return null;
     }
 
-    function renderTaskList(force=false) {
-        if (!taskListEl) return;
+    function getJobLatestMs(job) {
+        if (job.last_message_ms) {
+            const n = Number(job.last_message_ms);
+            if (!isNaN(n) && n > 0) return n;
+        }
+        const logs = job.logs || [];
+        if (logs.length) {
+            const last = logs[logs.length - 1];
+            const parsed = extractTimestampFromLog(last);
+            if (parsed) return parsed;
+        }
+        return Date.now() - (Number(job.duration_ms) || 0);
+    }
+
+    function jobSignature(job) {
+        const logsLen = job.logs ? job.logs.length : 0;
+        const trying = job.current_trying || '';
+        const lastMs = getJobLatestMs(job);
+        return `${job.id}:${logsLen}:${trying}:${job.duration_ms}:${lastMs}`;
+    }
+
+    function renderSidebar() {
         if (allJobs.length === 0) {
-            taskListEl.innerHTML = '<div class="empty-state">No tasks</div>';
-            lastJobStructure = '';
+            if (sidebarContent.querySelector('.empty-sidebar')) return;
+            sidebarContent.innerHTML = '<div class="empty-sidebar">No tasks</div>';
+            renderedJobIds.clear();
             return;
         }
 
-        const sorted = [...allJobs].sort((a,b) => {
-            const order = {active: 0, failed: 1, completed: 2};
-            if (order[a.status] !== order[b.status]) return order[a.status] - order[b.status];
-            return b.id.localeCompare(a.id);
+        // Assign sort indices to new jobs only (newest first)
+        allJobs.forEach(job => {
+            if (jobSortOrder[job.id] === undefined) {
+                jobSortOrder[job.id] = nextSortIndex++;
+            }
         });
 
-        const displayJobs = sorted.slice(0, 50);
-        const signature = createJobStructureSignature(displayJobs);
+        // Sort by assigned index (higher index = newer = displayed first)
+        const sorted = [...allJobs].sort((a, b) => {
+            return jobSortOrder[b.id] - jobSortOrder[a.id];
+        });
 
-        if (!force && signature === lastJobStructure) {
-            displayJobs.forEach(job => {
-                const el = taskListEl.querySelector(`[data-duration-id="${job.id}"]`);
-                if (el) {
-                    const dur = getClientDuration(job.id, job.status);
-                    if (el.textContent !== dur) el.textContent = dur;
-                }
-            });
-            return;
+        const displayJobs = sorted.slice(0, 30);
+        const currentJobIds = new Set(displayJobs.map(j => j.id));
+
+        let jobList = sidebarContent.querySelector('.job-list');
+        if (!jobList) {
+            jobList = document.createElement('div');
+            jobList.className = 'job-list';
+            sidebarContent.innerHTML = '';
+            sidebarContent.appendChild(jobList);
+            renderedJobIds.clear();
         }
 
-        const html = displayJobs.map(job => {
-            const duration = getClientDuration(job.id, job.status);
-            const selected = job.id === selectedJobId ? 'selected' : '';
-            const grayed = currentView === 'general' ? 'grayed' : '';
-            return `
-                <div class="job-item ${job.status} ${selected} ${grayed}" data-job-id="${job.id}">
-                    <div class="job-header">
-                        <div class="job-status">
-                            <span class="status-icon ${job.status}">${getStatusIcon(job.status)}</span>
-                            <span>${escapeHtml(job.sender)}</span>
+        // Remove jobs that are no longer in the list
+        const existingItems = jobList.querySelectorAll('.job-item');
+        existingItems.forEach(item => {
+            const id = item.dataset.jobId;
+            if (!currentJobIds.has(id)) {
+                item.remove();
+                renderedJobIds.delete(id);
+            }
+        });
+
+        // Add or update jobs
+        displayJobs.forEach((job, index) => {
+            let jobItem = jobList.querySelector(`[data-job-id="${job.id}"]`);
+            
+            if (!jobItem) {
+                // Create new job item
+                jobItem = document.createElement('div');
+                jobItem.className = 'job-item';
+                jobItem.dataset.jobId = job.id;
+                
+                const duration = getClientDuration(job.id, job.status);
+                const grayed = currentView === 'general' ? 'grayed' : '';
+                
+                jobItem.classList.add(job.status);
+                if (grayed) jobItem.classList.add(grayed);
+                if (job.id === selectedJobId) jobItem.classList.add('selected');
+                
+                jobItem.innerHTML = `
+                    <div class="job-row">
+                        <div class="job-name">
+                            <span class="job-status-icon">${getStatusIcon(job.status)}</span>
+                            <span class="job-sender">${escapeHtml(job.sender)}</span>
                         </div>
                         <span class="job-duration" data-duration-id="${job.id}">${duration}</span>
                     </div>
-                    <div class="job-chat">${escapeHtml(shorten(job.chat_id,30))}</div>
-                </div>
-            `;
-        }).join('');
-        taskListEl.innerHTML = html;
-        lastJobStructure = signature;
+                    <div class="job-chat">${escapeHtml(shorten(job.chat_id, 28))}</div>
+                `;
+                
+                // Insert at correct position
+                if (index === 0) {
+                    jobList.insertBefore(jobItem, jobList.firstChild);
+                } else {
+                    const prevJob = displayJobs[index - 1];
+                    const prevItem = jobList.querySelector(`[data-job-id="${prevJob.id}"]`);
+                    if (prevItem && prevItem.nextSibling) {
+                        jobList.insertBefore(jobItem, prevItem.nextSibling);
+                    } else {
+                        jobList.appendChild(jobItem);
+                    }
+                }
+                
+                renderedJobIds.add(job.id);
+            } else {
+                // Update existing job item
+                const durationEl = jobItem.querySelector('.job-duration');
+                if (durationEl && job.status === 'active') {
+                    const newDuration = getClientDuration(job.id, job.status);
+                    if (durationEl.textContent !== newDuration) {
+                        durationEl.textContent = newDuration;
+                    }
+                }
+                
+                // Update status icon
+                const statusIcon = jobItem.querySelector('.job-status-icon');
+                if (statusIcon) {
+                    statusIcon.innerHTML = getStatusIcon(job.status);
+                }
+                
+                // Update classes
+                jobItem.className = 'job-item ' + job.status;
+                if (currentView === 'general') jobItem.classList.add('grayed');
+                if (job.id === selectedJobId) jobItem.classList.add('selected');
+                
+                // Update position if needed (maintain order)
+                const currentIndex = Array.from(jobList.children).indexOf(jobItem);
+                if (currentIndex !== index) {
+                    if (index === 0) {
+                        jobList.insertBefore(jobItem, jobList.firstChild);
+                    } else {
+                        const prevJob = displayJobs[index - 1];
+                        const prevItem = jobList.querySelector(`[data-job-id="${prevJob.id}"]`);
+                        if (prevItem && prevItem.nextSibling) {
+                            jobList.insertBefore(jobItem, prevItem.nextSibling);
+                        } else {
+                            jobList.appendChild(jobItem);
+                        }
+                    }
+                }
+            }
+        });
     }
 
     function updateClientSideCountdown(jobId, attempt, remaining) {
         clientSideCountdowns[jobId] = { attempt, remaining, lastUpdate: Date.now() };
     }
+
     function getClientSideCountdown(jobId) {
         const c = clientSideCountdowns[jobId];
         if (!c) return null;
+        if (!isConnected) return { attempt: c.attempt, remaining: c.remaining };
         const elapsed = Math.floor((Date.now() - c.lastUpdate) / 1000);
         const rem = Math.max(0, c.remaining - elapsed);
         if (rem === 0) { delete clientSideCountdowns[jobId]; return null; }
@@ -493,9 +1229,12 @@ const DASHBOARD_HTML: &str = r#"<!doctype html>
 
     function renderJobDetail() {
         const job = allJobs.find(j => j.id === selectedJobId);
-        if (!detailEl) return;
         if (!job) {
-            detailEl.innerHTML = '<div class="empty-state"><div style="font-size:2rem;">📋</div><div>Select a task to view details</div></div>';
+            terminalContent.innerHTML = `
+                <div class="empty-state">
+                    <div class="empty-state-text">Select a task to view details</div>
+                </div>
+            `;
             return;
         }
 
@@ -506,44 +1245,73 @@ const DASHBOARD_HTML: &str = r#"<!doctype html>
             updateClientSideCountdown(job.id, job.current_countdown.attempt, job.current_countdown.remaining);
         }
         const countdown = getClientSideCountdown(job.id);
+        const countdownHtml = countdown ? `<div class="countdown-line">RETRY #${countdown.attempt} - Waiting ${countdown.remaining} seconds...</div>` : '';
+
+        const sig = jobSignature(job);
+
+        if (jobDetailHtmlCache[job.id] && jobDetailSig[job.id] === sig) {
+            terminalContent.innerHTML = jobDetailHtmlCache[job.id];
+            return;
+        }
 
         const lines = [...job.logs];
         if (job.current_trying) lines.push(job.current_trying);
-
         const raw = lines.join('\n');
-        const html = ansiToHtml(raw);
-        const countdownHtml = countdown ? `<div class="countdown-line">│ ⏳ RETRY #${countdown.attempt} - Waiting ${countdown.remaining} seconds...</div>` : '';
 
-        detailEl.innerHTML = `<div class="terminal-wrapper"><div class="terminal">${html}${countdownHtml}</div></div>`;
+        try {
+            const html = ansiToHtml(raw) + countdownHtml;
+            jobDetailHtmlCache[job.id] = html;
+            jobDetailSig[job.id] = sig;
+            terminalContent.innerHTML = html;
+        } catch (e) {
+            const fallback = escapeHtml(raw).replace(/\n/g, '<br>') + countdownHtml;
+            terminalContent.innerHTML = fallback;
+        }
 
-        const nearBottom = detailEl.scrollHeight - detailEl.scrollTop <= detailEl.clientHeight + 20;
-        if (nearBottom) detailEl.scrollTop = detailEl.scrollHeight;
+        const nearBottom = terminalContent.scrollHeight - terminalContent.scrollTop <= terminalContent.clientHeight + 20;
+        if (nearBottom) terminalContent.scrollTop = terminalContent.scrollHeight;
     }
 
     function renderGeneralLog() {
-        if (!detailEl) return;
         if (!generalLog || generalLog.length === 0) {
-            detailEl.innerHTML = '<div class="empty-state"><div style="font-size:2rem;">📋</div><div>No general logs</div></div>';
+            terminalContent.innerHTML = `
+                <div class="empty-state">
+                    <div class="empty-state-text">No general logs</div>
+                </div>
+            `;
             return;
         }
+
+        const genSig = generalLog.length + ':' + (generalLog[generalLog.length-1]?.message || '');
+        if (generalHtmlCache.sig === genSig && generalHtmlCache.html) {
+            terminalContent.innerHTML = generalHtmlCache.html;
+            return;
+        }
+
         const sel = window.getSelection();
         if (sel && sel.toString().length > 0) return;
 
         const lines = generalLog.map(l => `[#${l.job_id.replace('req_','')}] ${l.message}`);
-        const html = ansiToHtml(lines.join('\n'));
-        detailEl.innerHTML = `<div class="terminal-wrapper"><div class="terminal">${html}</div></div>`;
+        const raw = lines.join('\n');
 
-        const nearBottom = detailEl.scrollHeight - detailEl.scrollTop <= detailEl.clientHeight + 20;
-        if (nearBottom) detailEl.scrollTop = detailEl.scrollHeight;
+        try {
+            const html = ansiToHtml(raw);
+            generalHtmlCache = { sig: genSig, html };
+            terminalContent.innerHTML = html;
+        } catch (e) {
+            const fallback = escapeHtml(raw).replace(/\n/g, '<br>');
+            terminalContent.innerHTML = fallback;
+        }
+
+        const nearBottom = terminalContent.scrollHeight - terminalContent.scrollTop <= terminalContent.clientHeight + 20;
+        if (nearBottom) terminalContent.scrollTop = terminalContent.scrollHeight;
     }
 
     function renderView(force=false) {
-        renderTaskList(force);
+        renderSidebar();
         if (currentView === 'tasks') {
-            rightTitle.textContent = 'Task Logs';
             renderJobDetail();
         } else {
-            rightTitle.textContent = 'General Logs';
             renderGeneralLog();
         }
     }
@@ -565,12 +1333,30 @@ const DASHBOARD_HTML: &str = r#"<!doctype html>
         document.getElementById('stat-active').textContent = data.stats.active;
         document.getElementById('stat-completed').textContent = data.stats.completed;
         document.getElementById('stat-failed').textContent = data.stats.failed;
+        document.getElementById('stat-active-collapsed').textContent = data.stats.active;
+        document.getElementById('stat-completed-collapsed').textContent = data.stats.completed;
+        document.getElementById('stat-failed-collapsed').textContent = data.stats.failed;
 
-        if (allJobs.length > 0 && !selectedJobId && currentView === 'tasks') {
-            const newest = allJobs.reduce((latest, job) => !latest || job.id > latest.id ? job : latest, null);
-            if (newest && !prevIds.has(newest.id)) selectedJobId = newest.id;
-            else if (!selectedJobId) selectedJobId = newest ? newest.id : null;
-        }
+        try {
+            const cached = localStorage.getItem(STORAGE_KEY);
+            if (cached && allJobs.find(j => j.id === cached)) {
+                selectedJobId = cached;
+            } else if (allJobs.length > 0 && !selectedJobId && currentView === 'tasks') {
+                const newest = allJobs.reduce((latest, job) => {
+                    if (!latest) return job;
+                    return getJobLatestMs(job) > getJobLatestMs(latest) ? job : latest;
+                }, null);
+                if (newest && !prevIds.has(newest.id)) selectedJobId = newest.id;
+            }
+        } catch (e) {}
+
+        allJobs.forEach(job => {
+            const sig = jobSignature(job);
+            if (jobDetailSig[job.id] && jobDetailSig[job.id] !== sig) {
+                delete jobDetailHtmlCache[job.id];
+                delete jobDetailSig[job.id];
+            }
+        });
     }
 
     async function fetchData() {
@@ -578,39 +1364,36 @@ const DASHBOARD_HTML: &str = r#"<!doctype html>
             const res = await fetch(API, { cache: 'no-store' });
             if (!res.ok) throw new Error('Network error');
             const data = await res.json();
+            if (!isConnected) {
+                isConnected = true;
+                console.info('reconnected');
+            }
             processFetchedData(data);
             renderView();
             const now = new Date();
-            document.getElementById('last-update').textContent = now.toLocaleTimeString('en-US', { hour12:false });
+            lastUpdateEl.textContent = now.toLocaleTimeString('en-US', { hour12:false });
         } catch (err) {
-            console.error('fetchData error', err);
+            if (isConnected) {
+                isConnected = false;
+                lastUpdateEl.textContent = 'OFFLINE';
+            }
+            console.error('fetch error', err);
         }
     }
 
     setInterval(() => {
-        if (currentView === 'tasks') {
-            renderTaskList();
-            if (selectedJobId) {
-                const job = allJobs.find(j => j.id === selectedJobId);
-                if (job && (job.current_countdown || clientSideCountdowns[job.id])) {
-                    renderJobDetail();
-                }
+        if (currentView === 'tasks' && selectedJobId) {
+            renderSidebar();
+            const job = allJobs.find(j => j.id === selectedJobId);
+            if (job && (job.current_countdown || clientSideCountdowns[job.id])) {
+                renderJobDetail();
             }
         }
     }, 1000);
 
+    renderView(true);
     fetchData();
     setInterval(fetchData, POLL_MS);
-
-    /* helpers */
-    function escapeHtml(s) {
-        if (!s) return '';
-        return String(s).replace(/[&<>"']/g, (m) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
-    }
-    function shorten(s, n=30) {
-        if (!s) return '';
-        return s.length > n ? s.slice(0,n) + '...' : s;
-    }
 })();
 </script>
 </body>

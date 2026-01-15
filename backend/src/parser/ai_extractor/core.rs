@@ -12,12 +12,11 @@ use super::parsing::*;
 use super::{GROQ_REASONING_MODELS, GROQ_VISION_MODELS, GROQ_TEXT_MODELS, GEMINI_MODELS};
 use super::context_builder::build_context;
 
-use std::sync::Mutex;
-
 // TUI integration
 use crate::tui::JobLogger;
 
-static PRINT_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
+// not used, no more TUI
+//static PRINT_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 
 pub static SCHEDULE_ORACLE: Lazy<ScheduleOracle> = Lazy::new(|| {
     ScheduleOracle::load_from_file("schedule.json")
@@ -267,7 +266,7 @@ pub async fn extract_with_ai(
 async fn retry_with_countdown(attempt: u32, logger: &JobLogger) {
     let delay = 10 * attempt as u64;
 
-    logger.log("│");
+    //logger.log("│");
 
     for remaining in (1..=delay).rev() {
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
@@ -349,7 +348,7 @@ async fn try_gemini_models(prompt: &str, logger: &JobLogger) -> Result<AIClassif
             Err(e) => {
                 all_rate_limited = false;
                 clear_trying_line(logger);
-                logger.log(&format!("│ ❌ FAILED : {} - Network error", model));
+                logger.log(&format!("│ ❌ FAILED\t: {} - Network error", model));
                 if index < GEMINI_MODELS.len() { continue; } else { return Err(format!("Network error: {}", e)); }
             }
         };
@@ -424,7 +423,7 @@ async fn try_groq_reasoning(prompt: &str, logger: &JobLogger) -> Result<AIClassi
             Err(_) => {
                 all_rate_limited = false;
                 clear_trying_line(logger);
-                logger.log(&format!("│ ❌ FAILED : {} - Network error", model));
+                logger.log(&format!("│ ❌ FAILED\t: {} - Network error", model));
                 if index < GROQ_REASONING_MODELS.len() { continue; } else {
                     logger.log("│ 🔄 Falling back to standard models...");
                     logger.log("│");
@@ -510,7 +509,7 @@ async fn try_groq_standard_text(prompt: &str, logger: &JobLogger) -> Result<AICl
             Ok(r) => r,
             Err(_) => {
                 clear_trying_line(logger);
-                logger.log(&format!("│ ❌ FAILED : {} - Network error", model));
+                logger.log(&format!("│ ❌ FAILED\t: {} - Network error", model));
                 if index < GROQ_TEXT_MODELS.len() { continue; } else { return Err("All Groq standard models failed".to_string()); }
             }
         };
@@ -540,7 +539,7 @@ async fn try_groq_standard_text(prompt: &str, logger: &JobLogger) -> Result<AICl
         }
 
         clear_trying_line(logger);
-        logger.log(&format!("│ ❌ FAILED : {} - HTTP {}", model, status));
+        logger.log(&format!("│ ❌ FAILED\t: {} - HTTP {}", model, status));
         if index < GROQ_TEXT_MODELS.len() { continue; }
     }
 
@@ -592,7 +591,7 @@ async fn try_groq_vision(prompt: &str, image_base64: &str, logger: &JobLogger) -
             Ok(r) => r,
             Err(_) => {
                 clear_trying_line(logger);
-                logger.log(&format!("│ ❌ FAILED : {} - Network error", model));
+                logger.log(&format!("│ ❌ FAILED\t: {} - Network error", model));
                 if index < GROQ_VISION_MODELS.len() { continue; } else { return Err("All Groq vision models failed".to_string()); }
             }
         };
@@ -622,7 +621,7 @@ async fn try_groq_vision(prompt: &str, image_base64: &str, logger: &JobLogger) -
         }
 
         clear_trying_line(logger);
-        logger.log(&format!("│ ❌ FAILED : {} - HTTP {}", model, status));
+        logger.log(&format!("│ ❌ FAILED\t: {} - HTTP {}", model, status));
         if index < GROQ_VISION_MODELS.len() { continue; }
     }
 
@@ -778,7 +777,7 @@ async fn try_gemini_duplicate_check(prompt: &str, logger: &JobLogger) -> Result<
             Err(_) => {
                 all_rate_limited = false;
                 clear_trying_line(logger);
-                logger.log(&format!("│ ❌ FAILED : {} - Network error", model));
+                logger.log(&format!("│ ❌ FAILED\t: {} - Network error", model));
                 continue;
             }
         };
@@ -816,7 +815,7 @@ async fn try_gemini_duplicate_check(prompt: &str, logger: &JobLogger) -> Result<
 
         all_rate_limited = false;
         clear_trying_line(logger);
-        logger.log(&format!("│ ❌ FAILED : {} - HTTP {}", model, status));
+        logger.log(&format!("│ ❌ FAILEDt\t {} - HTTP {}", model, status));
     }
 
     if all_rate_limited { return Err("rate limit".to_string()); }
@@ -854,7 +853,7 @@ async fn try_groq_duplicate_check(prompt: &str, logger: &JobLogger) -> Result<Op
             Ok(r) => r,
             Err(_) => {
                 clear_trying_line(logger);
-                logger.log(&format!("│ ❌ FAILED : {} - Network error", model));
+                logger.log(&format!("│ ❌ FAILED\t: {} - Network error", model));
                 continue;
             }
         };
@@ -891,7 +890,7 @@ async fn try_groq_duplicate_check(prompt: &str, logger: &JobLogger) -> Result<Op
         }
 
         clear_trying_line(logger);
-        logger.log(&format!("│ ❌ FAILED : {} - HTTP {}", model, status));
+        logger.log(&format!("│ ❌ FAILED\t: {} - HTTP {}", model, status));
     }
 
     Err("All Groq models failed".to_string())
@@ -911,10 +910,10 @@ pub async fn match_update_to_assignment(
     let prompt = build_matching_prompt(changes, keywords, active_assignments, course_map, parallel_codes);
 
     logger.log("┌──[AI MATCHING]────────────────────────────");
-    logger.log(&format!("│ 🔍 Keywords  : {:?}", keywords));
+    logger.log(&format!("│ 🔍 Keywords\t: {:?}", keywords));
 
     if !parallel_codes.is_empty() {
-        logger.log(&format!("│ 🧩 Parallels : [{}]", parallel_codes.join(", ")));
+        logger.log(&format!("│ 🧩 Parallels\t: [{}]", parallel_codes.join(", ")));
     }
     logger.log("│");
 
@@ -988,7 +987,7 @@ async fn try_gemini_matching(prompt: &str, logger: &JobLogger) -> Result<Option<
             Err(_) => {
                 all_rate_limited = false;
                 clear_trying_line(logger);
-                logger.log(&format!("│ ❌ FAILED : {} - Network error", model));
+                logger.log(&format!("│ ❌ FAILED\t: {} - Network error", model));
                 continue;
             }
         };
@@ -1015,7 +1014,7 @@ async fn try_gemini_matching(prompt: &str, logger: &JobLogger) -> Result<Option<
 
         all_rate_limited = false;
         clear_trying_line(logger);
-        logger.log(&format!("│ ❌ FAILED : {} - HTTP {}", model, status));
+        logger.log(&format!("│ ❌ FAILED\t: {} - HTTP {}", model, status));
     }
 
     if all_rate_limited { return Err("rate limit".to_string()); }
@@ -1053,7 +1052,7 @@ async fn try_groq_matching(prompt: &str, logger: &JobLogger) -> Result<Option<Uu
             Ok(r) => r,
             Err(_) => {
                 clear_trying_line(logger);
-                logger.log(&format!("│ ❌ FAILED : {} - Network error", model));
+                logger.log(&format!("│ ❌ FAILED\t: {} - Network error", model));
                 continue;
             }
         };
@@ -1079,7 +1078,7 @@ async fn try_groq_matching(prompt: &str, logger: &JobLogger) -> Result<Option<Uu
         }
 
         clear_trying_line(logger);
-        logger.log(&format!("│ ❌ FAILED : {} - HTTP {}", model, status));
+        logger.log(&format!("│ ❌ FAILED\t: {} - HTTP {}", model, status));
     }
 
     Err("All Groq models failed for matching".to_string())
