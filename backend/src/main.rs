@@ -256,7 +256,7 @@ async fn main() {
     println!("    📡 Listening on\t: \x1b[36mhttp://0.0.0.0:{}\x1b[0m", port);
     println!("    📍 Webhook URL\t: \x1b[36mhttp://localhost:{}/webhook\x1b[0m", port);
     println!("\x1b[1;30m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\x1b[0m");
-    println!("\n💡 Press \x1b[1;33mF2\x1b[0m anytime to enter TUI mode");
+    println!("\n💡 Type '\x1b[1;33mtui\x1b[0m' + Enter or press \x1b[1;33mCtrl+T\x1b[0m to enter TUI mode");
     println!("\nWaiting for incoming messages...\n");
 
     let listener = TcpListener::bind(addr).await.unwrap();
