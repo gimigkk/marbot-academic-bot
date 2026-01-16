@@ -4,31 +4,52 @@ use sqlx::PgPool;
 use crate::database::crud;
 use crate::models::SendTextRequest;
 use chrono::{DateTime, Datelike, NaiveDate, Utc};
+use crate::tui::{JobLogger, state::LogEntry};
+use tokio::sync::mpsc;
 
-pub async fn start_scheduler(pool: PgPool) -> Result<(), JobSchedulerError> {
+pub async fn start_scheduler(
+    pool: PgPool,
+    log_tx: mpsc::UnboundedSender<LogEntry>,
+) -> Result<(), JobSchedulerError> {
     let sched = JobScheduler::new().await?;
 
     // 1. REMINDER HARIAN (UTC TIME)
     // 07:00 WIB = 00:00 UTC
     let pool_pagi = pool.clone();
+    let log_tx_pagi = log_tx.clone();
     sched.add(Job::new_async("0 0 0 * * *", move |_uuid, _l| {
         let pool = pool_pagi.clone();
+        let log_tx = log_tx_pagi.clone();
         Box::pin(async move {
-            println!("⏰ REMINDER PAGI (00:00 UTC / 07:00 WIB):");
-            if let Err(e) = run_reminder_task(pool, "☀️ Selamat pagi Ilkomers!").await {
-                eprintln!("❌ Error reminder pagi: {}", e);
+            let job_id = crate::tui::generate_job_id();
+            let logger = JobLogger::new(job_id, log_tx);
+            
+            logger.log("⏰ REMINDER PAGI (00:00 UTC / 07:00 WIB)");
+            if let Err(e) = run_reminder_task(pool, "☀️ Selamat pagi Ilkomers!", &logger).await {
+                logger.log(&format!("❌ Error reminder pagi: {}", e));
+                logger.set_status(crate::tui::state::JobStatus::Failed);
+            } else {
+                logger.set_status(crate::tui::state::JobStatus::Completed);
             }
         })
     })?).await?;
 
     // 17:00 WIB = 10:00 UTC
     let pool_sore = pool.clone();
+    let log_tx_sore = log_tx.clone();
     sched.add(Job::new_async("0 0 10 * * *", move |_uuid, _l| {
         let pool = pool_sore.clone();
+        let log_tx = log_tx_sore.clone();
         Box::pin(async move {
-            println!("⏰ REMINDER SORE (10:00 UTC / 17:00 WIB):");
-            if let Err(e) = run_reminder_task(pool, "🌇 Selamat sore Ilkomers!").await {
-                eprintln!("❌ Error reminder sore: {}", e);
+            let job_id = crate::tui::generate_job_id();
+            let logger = JobLogger::new(job_id, log_tx);
+            
+            logger.log("⏰ REMINDER SORE (10:00 UTC / 17:00 WIB)");
+            if let Err(e) = run_reminder_task(pool, "🌇 Selamat sore Ilkomers!", &logger).await {
+                logger.log(&format!("❌ Error reminder sore: {}", e));
+                logger.set_status(crate::tui::state::JobStatus::Failed);
+            } else {
+                logger.set_status(crate::tui::state::JobStatus::Completed);
             }
         })
     })?).await?;
@@ -36,11 +57,19 @@ pub async fn start_scheduler(pool: PgPool) -> Result<(), JobSchedulerError> {
     // 2. REMINDER DEADLINE MEPET (H-1 JAM)
     // Cek setiap 10 menit (Menit ke-1, 11, 21, dst)
     let pool_urgent = pool.clone();
+    let log_tx_urgent = log_tx.clone();
     sched.add(Job::new_async("0 1/10 * * * *", move |_uuid, _l| {
         let pool = pool_urgent.clone();
+        let log_tx = log_tx_urgent.clone();
         Box::pin(async move {
-            if let Err(e) = check_urgent_deadlines(pool).await {
-                eprintln!("❌ Error checking urgent deadlines: {}", e);
+            let job_id = crate::tui::generate_job_id();
+            let logger = JobLogger::new(job_id, log_tx);
+            
+            if let Err(e) = check_urgent_deadlines(pool, &logger).await {
+                logger.log(&format!("❌ Error checking urgent deadlines: {}", e));
+                logger.set_status(crate::tui::state::JobStatus::Failed);
+            } else {
+                logger.set_status(crate::tui::state::JobStatus::Completed);
             }
         })
     })?).await?;
@@ -51,11 +80,15 @@ pub async fn start_scheduler(pool: PgPool) -> Result<(), JobSchedulerError> {
 
 // --- LOGIC REMINDER HARIAN ---
 
-async fn run_reminder_task(pool: PgPool, greeting: &str) -> Result<(), Box<dyn std::error::Error>> {
-    let assignments = crud::get_active_assignments_sorted(&pool).await?;
+async fn run_reminder_task(
+    pool: PgPool,
+    greeting: &str,
+    logger: &JobLogger,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let assignments = crud::get_active_assignments_sorted(&pool, Some(logger)).await?;
 
     if assignments.is_empty() {
-        println!("📭 Tidak ada tugas aktif, skip reminder.");
+        logger.log("📭 Tidak ada tugas aktif, skip reminder");
         return Ok(());
     }
 
@@ -89,11 +122,14 @@ async fn run_reminder_task(pool: PgPool, greeting: &str) -> Result<(), Box<dyn s
     }
 
     message.push_str("_Semangat!_ 💪");
-    send_to_channels(message).await
+    send_to_channels(message, logger).await
 }
 
 // REMINDER H-1 JAM  ---
-async fn check_urgent_deadlines(pool: PgPool) -> Result<(), Box<dyn std::error::Error>> {
+async fn check_urgent_deadlines(
+    pool: PgPool,
+    logger: &JobLogger,
+) -> Result<(), Box<dyn std::error::Error>> {
     let now = Utc::now();
     let one_hour_later = now + chrono::Duration::hours(1);
 
@@ -118,7 +154,7 @@ async fn check_urgent_deadlines(pool: PgPool) -> Result<(), Box<dyn std::error::
         return Ok(());
     }
 
-    println!("🚨 Menemukan {} tugas deadline < 1 jam!", urgent_tasks.len());
+    logger.log(&format!("🚨 Menemukan {} tugas deadline < 1 jam", urgent_tasks.len()));
 
     for task in urgent_tasks {
         let deadline_wib = task.deadline
@@ -140,7 +176,7 @@ async fn check_urgent_deadlines(pool: PgPool) -> Result<(), Box<dyn std::error::
         );
 
         // Kirim Pesan
-        send_to_channels(message).await?;
+        send_to_channels(message, logger).await?;
 
         // Tandai sudah dikirim
         sqlx::query!(
@@ -150,14 +186,17 @@ async fn check_urgent_deadlines(pool: PgPool) -> Result<(), Box<dyn std::error::
         .execute(&pool)
         .await?;
         
-        println!("✅ Reminder urgent dikirim untuk: {}", task.title);
+        logger.log(&format!("✅ Reminder urgent dikirim untuk: {}", task.title));
     }
 
     Ok(())
 }
 
 // --- HELPER FUNCTIONS ---
-async fn send_to_channels(message: String) -> Result<(), Box<dyn std::error::Error>> {
+async fn send_to_channels(
+    message: String,
+    logger: &JobLogger,
+) -> Result<(), Box<dyn std::error::Error>> {
     let channels_env = std::env::var("ACADEMIC_CHANNELS").unwrap_or_default();
     let target_channels: Vec<&str> = channels_env
         .split(',')
@@ -166,7 +205,7 @@ async fn send_to_channels(message: String) -> Result<(), Box<dyn std::error::Err
         .collect();
 
     if target_channels.is_empty() {
-        println!("⚠️ ACADEMIC_CHANNELS kosong, skip kirim.");
+        logger.log("⚠️ ACADEMIC_CHANNELS kosong, skip kirim");
         return Ok(());
     }
 

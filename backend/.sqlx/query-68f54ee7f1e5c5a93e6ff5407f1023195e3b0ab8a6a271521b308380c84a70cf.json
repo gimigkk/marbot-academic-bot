@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                INSERT INTO user_course_settings (user_id, course_id, parallel_code)\n                VALUES ($1, $2, $3)\n                ON CONFLICT (user_id, course_id) \n                DO UPDATE SET parallel_code = $3, created_at = NOW()\n                ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "68f54ee7f1e5c5a93e6ff5407f1023195e3b0ab8a6a271521b308380c84a70cf"
+}

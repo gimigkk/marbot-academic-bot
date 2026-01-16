@@ -9,6 +9,7 @@ use crate::parser::ai_extractor::{
     extract_ai_text,
     extract_groq_text,
 };
+use crate::tui::JobLogger;
 use uuid::Uuid;
 use std::collections::HashMap;
 use std::io::{Write, stdout};
@@ -160,37 +161,81 @@ pub fn generate_no_date_message() -> String {
     "⚠️ *TANGGAL TIDAK DITEMUKAN*\nKamu menyebutkan jam, tapi aku tidak tahu untuk tanggal berapa.".to_string()
 }
 
-// ===== RETRY HELPERS (from core.rs) =====
+// ===== Unified logging helpers =====
 
-async fn retry_with_countdown(attempt: u32) {
-    let delay = 10 * attempt as u64;
-    
-    println!("│");
-    println!("│ {}⏳ RETRY #{}{} - Waiting {} seconds...", YELLOW, attempt, RESET, delay);
-
-    for remaining in (1..=delay).rev().skip(1) {
-        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-        
-        {
-            let _guard = PRINT_LOCK.lock().unwrap();
-            print!("\x1b[1A\x1b[2K│ {}⏳ RETRY #{}{} - Waiting {} seconds...\n", 
-                   YELLOW, attempt, RESET, remaining);
-            let _ = stdout().flush();
-        }
+/// Helper wrapper: when `logger` is Some -> use JobLogger methods, otherwise fall back to stdout printing.
+fn logger_log(logger: Option<&JobLogger>, msg: &str) {
+    if let Some(l) = logger {
+        l.log(msg);
+    } else {
+        println!("{}", msg);
     }
-
-    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-
-    {
-        let _guard = PRINT_LOCK.lock().unwrap();
-        print!("\x1b[1A\x1b[2K");
-        let _ = stdout().flush();
-    }
-
-    println!("│");
 }
 
-fn print_trying_line(model: &str, index: usize, total: usize, last_trying: &mut bool) {
+fn logger_log_simple(logger: Option<&JobLogger>, msg: &str) {
+    // used for simple lines that shouldn't be prefixed in TUI
+    logger_log(logger, msg)
+}
+
+fn logger_log_countdown(logger: Option<&JobLogger>, attempt: u32, remaining: u64) {
+    if let Some(l) = logger {
+        l.log_countdown(attempt, remaining);
+    } else {
+        // stdout version will be handled by retry_with_countdown
+        let _guard = PRINT_LOCK.lock().unwrap();
+        print!("\x1b[1A\x1b[2K│ {}⏳ RETRY #{}{} - Waiting {} seconds...\n", YELLOW, attempt, RESET, remaining);
+        let _ = stdout().flush();
+    }
+}
+
+async fn retry_with_countdown(attempt: u32, logger: Option<&JobLogger>) {
+    let delay = 10 * attempt as u64;
+
+    if logger.is_some() {
+        // TUI style
+        logger_log(logger, "│");
+        logger_log(logger, &format!("│ {}⏳ RETRY #{}{} - Waiting {} seconds...", YELLOW, attempt, RESET, delay));
+
+        for remaining in (1..=delay).rev() {
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+            logger_log_countdown(logger, attempt, remaining);
+        }
+
+        logger_log(logger, "│");
+    } else {
+        // stdout style with in-place update
+        println!("│");
+        println!("│ {}⏳ RETRY #{}{} - Waiting {} seconds...", YELLOW, attempt, RESET, delay);
+
+        for remaining in (1..=delay).rev().skip(1) {
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+
+            {
+                let _guard = PRINT_LOCK.lock().unwrap();
+                print!("\x1b[1A\x1b[2K│ {}⏳ RETRY #{}{} - Waiting {} seconds...\n", 
+                       YELLOW, attempt, RESET, remaining);
+                let _ = stdout().flush();
+            }
+        }
+
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+
+        {
+            let _guard = PRINT_LOCK.lock().unwrap();
+            print!("\x1b[1A\x1b[2K");
+            let _ = stdout().flush();
+        }
+
+        println!("│");
+    }
+}
+
+fn log_trying_line_tui(model: &str, index: usize, total: usize, logger: &JobLogger) {
+    let formatted = format!("│ {}🔄 TRYING{} : {} ({} / {})", BLUE, RESET, model, index, total);
+    logger.log(&formatted);
+}
+
+fn print_trying_line_stdout(model: &str, index: usize, total: usize, last_trying: &mut bool) {
     let formatted = format!("{}🔄 TRYING{} : {} ({} / {})", BLUE, RESET, model, index, total);
 
     let _guard = PRINT_LOCK.lock().unwrap();
@@ -204,7 +249,7 @@ fn print_trying_line(model: &str, index: usize, total: usize, last_trying: &mut 
     stdout().flush().ok();
 }
 
-fn clear_previous_trying(last_trying: &mut bool) {
+fn clear_previous_trying_stdout(last_trying: &mut bool) {
     if *last_trying {
         let _guard = PRINT_LOCK.lock().unwrap();
         print!("\x1b[1A\x1b[2K");
@@ -226,16 +271,35 @@ pub struct AIClarificationResult {
     pub is_cancellation: bool,
 }
 
+/// Public API: TUI-aware version (preferred when you have a JobLogger)
 pub async fn parse_clarification_response(
+    text: &str, 
+    assignment: &AssignmentWithCourse,
+    missing_fields: &[String],
+    logger: &JobLogger,
+) -> Result<HashMap<String, String>, String> {
+    parse_clarification_response_internal(text, assignment, missing_fields, Some(logger)).await
+}
+
+/// Public API: stdout-only version (keeps compatibility with main branch)
+pub async fn parse_clarification_response_stdout(
     text: &str, 
     assignment: &AssignmentWithCourse,
     missing_fields: &[String]
 ) -> Result<HashMap<String, String>, String> {
-    
+    parse_clarification_response_internal(text, assignment, missing_fields, None).await
+}
+
+async fn parse_clarification_response_internal(
+    text: &str, 
+    assignment: &AssignmentWithCourse,
+    missing_fields: &[String],
+    logger: Option<&JobLogger>,
+) -> Result<HashMap<String, String>, String> {
     let current_deadline = assignment.deadline.map(|d| d.naive_utc());
     let next_meeting_hint = resolve_next_meeting(assignment);
 
-    println!("\n{}┌── 🤖 CLARIFICATION PARSING ──────────────────{}", GRAY, RESET);
+    logger_log(logger, &format!("\n{}┌── 🤖 CLARIFICATION PARSING ──────────────────{}", GRAY, RESET));
     
     let message_display = text
         .replace('\n', "\\n")
@@ -243,14 +307,14 @@ pub async fn parse_clarification_response(
         .take(60)
         .collect::<String>();
     
-    println!("│ {}📝 Message{} : \"{}...\"", CYAN, RESET, message_display);
-    println!("│ {}🔍 Missing{} : {:?}", YELLOW, RESET, missing_fields);
-    println!("│");
+    logger_log(logger, &format!("│ {}📝 Message{} : \"{}...\"", CYAN, RESET, message_display));
+    logger_log(logger, &format!("│ {}🔍 Missing{} : {:?}", YELLOW, RESET, missing_fields));
+    logger_log(logger, "│");
 
     // RETRY LOGIC
     for attempt in 0..MAX_RETRIES {
         if attempt > 0 {
-            retry_with_countdown(attempt).await;
+            retry_with_countdown(attempt, logger).await;
         }
 
         // Build prompt
@@ -270,46 +334,52 @@ pub async fn parse_clarification_response(
         );
 
         // TIER 1: Try Gemini
-        match try_gemini_clarification(&prompt, current_deadline).await {
+        match try_gemini_clarification(&prompt, current_deadline, logger).await {
             Ok(result) => {
-                println!("{}└──────────────────────────────────────────────{}", GRAY, RESET);
+                logger_log(logger, &format!("{}└──────────────────────────────────────────────{}", GRAY, RESET));
                 return Ok(result);
             }
             Err(e) if e == "rate limit" => {
-                println!("│ {}🔄 Falling back{} to Groq...", YELLOW, RESET);
-                println!("│");
+                logger_log(logger, &format!("│ {}🔄 Falling back{} to Groq...", YELLOW, RESET));
+                logger_log(logger, "│");
             }
             Err(_) => {}
         }
 
         // TIER 2: Try Groq reasoning
-        match try_groq_reasoning_clarification(&prompt, current_deadline).await {
+        match try_groq_reasoning_clarification(&prompt, current_deadline, logger).await {
             Ok(result) => {
-                println!("{}└──────────────────────────────────────────────{}", GRAY, RESET);
+                logger_log(logger, &format!("{}└──────────────────────────────────────────────{}", GRAY, RESET));
                 return Ok(result);
             }
             Err(_) => {}
         }
 
         // TIER 3: Try Groq standard
-        match try_groq_standard_clarification(&prompt, current_deadline).await {
+        match try_groq_standard_clarification(&prompt, current_deadline, logger).await {
             Ok(result) => {
-                println!("{}└──────────────────────────────────────────────{}", GRAY, RESET);
+                logger_log(logger, &format!("{}└──────────────────────────────────────────────{}", GRAY, RESET));
                 return Ok(result);
             }
             Err(_) => {
                 if attempt < MAX_RETRIES - 1 {
-                    println!("│ {}⚠️ All models failed{} - will retry ({}/{})", 
-                             YELLOW, RESET, attempt + 1, MAX_RETRIES - 1);
+                    logger_log(logger, &format!("│ {}⚠️ All models failed{} - will retry ({}/{})", 
+                             YELLOW, RESET, attempt + 1, MAX_RETRIES - 1));
                 }
             }
         }
     }
 
     // Fallback to regex after all retries
-    eprintln!("│ {}❌ CRITICAL{}: All AI models failed after {} retries", RED, RESET, MAX_RETRIES);
-    println!("│ {}🔄 Falling back{} to regex parser...", YELLOW, RESET);
-    println!("{}└──────────────────────────────────────────────{}", GRAY, RESET);
+    if logger.is_some() {
+        logger_log(logger, &format!("│ {}❌ CRITICAL{}: All AI models failed after {} retries", RED, RESET, MAX_RETRIES));
+        logger_log(logger, &format!("│ {}🔄 Falling back{} to regex parser...", YELLOW, RESET));
+        logger_log(logger, &format!("{}└──────────────────────────────────────────────{}", GRAY, RESET));
+    } else {
+        eprintln!("│ {}❌ CRITICAL{}: All AI models failed after {} retries", RED, RESET, MAX_RETRIES);
+        println!("│ {}🔄 Falling back{} to regex parser...", YELLOW, RESET);
+        println!("{}└──────────────────────────────────────────────{}", GRAY, RESET);
+    }
     
     parse_natural_language_fallback(text, current_deadline, next_meeting_hint)
 }
@@ -338,6 +408,7 @@ fn resolve_next_meeting(assignment: &AssignmentWithCourse) -> Option<NaiveDateTi
 async fn try_gemini_clarification(
     prompt: &str,
     current_deadline: Option<NaiveDateTime>,
+    logger: Option<&JobLogger>,
 ) -> Result<HashMap<String, String>, String> {
     let api_key = std::env::var("GEMINI_API_KEY")
         .map_err(|_| "GEMINI_API_KEY not set".to_string())?;
@@ -347,7 +418,12 @@ async fn try_gemini_clarification(
     
     for (idx, model) in GEMINI_MODELS.iter().enumerate() {
         let index = idx + 1;
-        print_trying_line(model, index, GEMINI_MODELS.len(), &mut last_trying);
+
+        if let Some(l) = logger {
+            log_trying_line_tui(model, index, GEMINI_MODELS.len(), l);
+        } else {
+            print_trying_line_stdout(model, index, GEMINI_MODELS.len(), &mut last_trying);
+        }
         
         let url = format!(
             "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent",
@@ -374,8 +450,14 @@ async fn try_gemini_clarification(
             Ok(r) => r,
             Err(_) => {
                 all_rate_limited = false;
-                clear_previous_trying(&mut last_trying);
-                println!("│ {}❌ FAILED{} : {} - Network error", RED, RESET, model);
+                if let Some(_l) = logger {
+                    // TUI: clear trying marker then log failure
+                    // JobLogger doesn't need clear marker; just log
+                    logger_log(logger, &format!("│ {}❌ FAILED{} : {} - Network error", RED, RESET, model));
+                } else {
+                    clear_previous_trying_stdout(&mut last_trying);
+                    println!("│ {}❌ FAILED{} : {} - Network error", RED, RESET, model);
+                }
                 continue;
             }
         };
@@ -383,24 +465,24 @@ async fn try_gemini_clarification(
         let status = response.status();
         
         if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
-            clear_previous_trying(&mut last_trying);
+            if logger.is_none() { clear_previous_trying_stdout(&mut last_trying); }
             continue;
         }
         
         if status.is_success() {
-            clear_previous_trying(&mut last_trying);
-            println!("│ {}✅ SUCCESS{} : {} (Gemini {}/{})", GREEN, RESET, model, index, GEMINI_MODELS.len());
+            if logger.is_none() { clear_previous_trying_stdout(&mut last_trying); }
+            logger_log(logger, &format!("│ {}✅ SUCCESS{} : {} (Gemini {}/{})", GREEN, RESET, model, index, GEMINI_MODELS.len()));
             
             let gemini_response: GeminiResponse = response.json().await
                 .map_err(|e| format!("Failed to deserialize: {}", e))?;
             
             let ai_text = extract_ai_text(&gemini_response)?;
-            return parse_ai_response(ai_text, current_deadline);
+            return parse_ai_response(&ai_text, current_deadline);
         }
         
         all_rate_limited = false;
-        clear_previous_trying(&mut last_trying);
-        println!("│ {}❌ FAILED{} : {} - HTTP {}", RED, RESET, model, status);
+        if logger.is_none() { clear_previous_trying_stdout(&mut last_trying); }
+        logger_log(logger, &format!("│ {}❌ FAILED{} : {} - HTTP {}", RED, RESET, model, status));
     }
     
     if all_rate_limited {
@@ -415,6 +497,7 @@ async fn try_gemini_clarification(
 async fn try_groq_reasoning_clarification(
     prompt: &str,
     current_deadline: Option<NaiveDateTime>,
+    logger: Option<&JobLogger>,
 ) -> Result<HashMap<String, String>, String> {
     let api_key = std::env::var("GROQ_API_KEY")
         .map_err(|_| "GROQ_API_KEY not set".to_string())?;
@@ -423,7 +506,11 @@ async fn try_groq_reasoning_clarification(
     
     for (idx, model) in GROQ_REASONING_MODELS.iter().enumerate() {
         let index = idx + 1;
-        print_trying_line(model, index, GROQ_REASONING_MODELS.len(), &mut last_trying);
+        if let Some(l) = logger {
+            log_trying_line_tui(model, index, GROQ_REASONING_MODELS.len(), l);
+        } else {
+            print_trying_line_stdout(model, index, GROQ_REASONING_MODELS.len(), &mut last_trying);
+        }
         
         let url = "https://api.groq.com/openai/v1/chat/completions";
         
@@ -447,8 +534,8 @@ async fn try_groq_reasoning_clarification(
         {
             Ok(r) => r,
             Err(_) => {
-                clear_previous_trying(&mut last_trying);
-                println!("│ {}❌ FAILED{} : {} - Network error", RED, RESET, model);
+                if logger.is_none() { clear_previous_trying_stdout(&mut last_trying); }
+                logger_log(logger, &format!("│ {}❌ FAILED{} : {} - Network error", RED, RESET, model));
                 continue;
             }
         };
@@ -456,13 +543,13 @@ async fn try_groq_reasoning_clarification(
         let status = response.status();
         
         if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
-            clear_previous_trying(&mut last_trying);
+            if logger.is_none() { clear_previous_trying_stdout(&mut last_trying); }
             continue;
         }
         
         if status.is_success() {
-            clear_previous_trying(&mut last_trying);
-            println!("│ {}✅ SUCCESS{} : {} (Groq Reasoning {}/{})", GREEN, RESET, model, index, GROQ_REASONING_MODELS.len());
+            if logger.is_none() { clear_previous_trying_stdout(&mut last_trying); }
+            logger_log(logger, &format!("│ {}✅ SUCCESS{} : {} (Groq Reasoning {}/{})", GREEN, RESET, model, index, GROQ_REASONING_MODELS.len()));
             
             let groq_response: GroqResponse = response.json().await
                 .map_err(|e| format!("Failed to deserialize: {}", e))?;
@@ -471,8 +558,8 @@ async fn try_groq_reasoning_clarification(
             return parse_ai_response(&ai_text, current_deadline);
         }
         
-        clear_previous_trying(&mut last_trying);
-        println!("│ {}❌ FAILED{} : {} - HTTP {}", RED, RESET, model, status);
+        if logger.is_none() { clear_previous_trying_stdout(&mut last_trying); }
+        logger_log(logger, &format!("│ {}❌ FAILED{} : {} - HTTP {}", RED, RESET, model, status));
     }
     
     Err("All Groq reasoning models failed".to_string())
@@ -483,6 +570,7 @@ async fn try_groq_reasoning_clarification(
 async fn try_groq_standard_clarification(
     prompt: &str,
     current_deadline: Option<NaiveDateTime>,
+    logger: Option<&JobLogger>,
 ) -> Result<HashMap<String, String>, String> {
     let api_key = std::env::var("GROQ_API_KEY")
         .map_err(|_| "GROQ_API_KEY not set".to_string())?;
@@ -491,7 +579,11 @@ async fn try_groq_standard_clarification(
     
     for (idx, model) in GROQ_TEXT_MODELS.iter().enumerate() {
         let index = idx + 1;
-        print_trying_line(model, index, GROQ_TEXT_MODELS.len(), &mut last_trying);
+        if let Some(l) = logger {
+            log_trying_line_tui(model, index, GROQ_TEXT_MODELS.len(), l);
+        } else {
+            print_trying_line_stdout(model, index, GROQ_TEXT_MODELS.len(), &mut last_trying);
+        }
         
         let url = "https://api.groq.com/openai/v1/chat/completions";
         
@@ -514,8 +606,8 @@ async fn try_groq_standard_clarification(
         {
             Ok(r) => r,
             Err(_) => {
-                clear_previous_trying(&mut last_trying);
-                println!("│ {}❌ FAILED{} : {} - Network error", RED, RESET, model);
+                if logger.is_none() { clear_previous_trying_stdout(&mut last_trying); }
+                logger_log(logger, &format!("│ {}❌ FAILED{} : {} - Network error", RED, RESET, model));
                 continue;
             }
         };
@@ -523,13 +615,13 @@ async fn try_groq_standard_clarification(
         let status = response.status();
         
         if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
-            clear_previous_trying(&mut last_trying);
+            if logger.is_none() { clear_previous_trying_stdout(&mut last_trying); }
             continue;
         }
         
         if status.is_success() {
-            clear_previous_trying(&mut last_trying);
-            println!("│ {}✅ SUCCESS{} : {} (Groq Standard {}/{})", GREEN, RESET, model, index, GROQ_TEXT_MODELS.len());
+            if logger.is_none() { clear_previous_trying_stdout(&mut last_trying); }
+            logger_log(logger, &format!("│ {}✅ SUCCESS{} : {} (Groq Standard {}/{})", GREEN, RESET, model, index, GROQ_TEXT_MODELS.len()));
             
             let groq_response: GroqResponse = response.json().await
                 .map_err(|e| format!("Failed to deserialize: {}", e))?;
@@ -538,8 +630,8 @@ async fn try_groq_standard_clarification(
             return parse_ai_response(&ai_text, current_deadline);
         }
         
-        clear_previous_trying(&mut last_trying);
-        println!("│ {}❌ FAILED{} : {} - HTTP {}", RED, RESET, model, status);
+        if logger.is_none() { clear_previous_trying_stdout(&mut last_trying); }
+        logger_log(logger, &format!("│ {}❌ FAILED{} : {} - HTTP {}", RED, RESET, model, status));
     }
     
     Err("All Groq standard models failed".to_string())
@@ -840,7 +932,7 @@ fn parse_natural_time(text: &str) -> Option<NaiveTime> {
 }
 
 fn extract_description_part(text: &str) -> Option<String> {
-    let indicators = ["tugasnya", "tugas", "kerjakan", "submit", "soal", "halaman", "chapter"];
+    let indicators = ["tugasnya", "tugas", "kerjakan", "submit", "soal", "halaman", "chapter"]; 
     if !indicators.iter().any(|&i| text.contains(i)) { return None; }
     
     if text.len() > 10 { return Some(text.to_string()); }
@@ -851,7 +943,7 @@ fn detect_parallel_codes(text: &str) -> Vec<String> {
     let mut codes = Vec::new();
     if text.contains("semua") || text.contains("all") { return vec!["ALL".to_string()]; }
     
-    static RE_CODE: Lazy<Regex> = Lazy::new(|| Regex::new(r"\b([KPR][1-4])\b").unwrap());
+    static RE_CODE: Lazy<Regex> = Lazy::new(|| Regex::new(r"\\b([KPR][1-4])\\b").unwrap());
     for caps in RE_CODE.captures_iter(text) {
         codes.push(caps[1].to_uppercase());
     }

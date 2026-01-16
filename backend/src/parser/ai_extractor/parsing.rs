@@ -2,11 +2,12 @@ use crate::models::AIClassification;
 use uuid::Uuid;
 use serde::Deserialize;
 use chrono::{Utc, FixedOffset};
+use crate::tui::JobLogger;
 
 // ===== API RESPONSE STRUCTURES =====
 
 #[derive(Debug, Deserialize)]
-pub struct GroqResponse {  // ← Changed from pub(super)
+pub struct GroqResponse {  // ← Changed from pub(super) - from main
     pub choices: Vec<GroqChoice>,
 }
 
@@ -21,7 +22,7 @@ pub struct GroqMessage {
 }
 
 #[derive(Debug, Deserialize)]
-pub struct GeminiResponse {  // ← Changed from pub(super)
+pub struct GeminiResponse {  // ← Changed from pub(super) - from main
     pub candidates: Vec<Candidate>,
 }
 
@@ -53,7 +54,7 @@ pub(super) struct DuplicateCheckResult {
 
 // ===== RESPONSE EXTRACTORS =====
 
-pub fn extract_groq_text(groq_response: &GroqResponse) -> Result<String, String> {  // ← Changed from pub(super)
+pub fn extract_groq_text(groq_response: &GroqResponse) -> Result<String, String> {  // ← Changed from pub(super) - from main
     groq_response
         .choices
         .first()
@@ -61,7 +62,7 @@ pub fn extract_groq_text(groq_response: &GroqResponse) -> Result<String, String>
         .ok_or_else(|| "Groq returned empty response".to_string())
 }
 
-pub fn extract_ai_text(gemini_response: &GeminiResponse) -> Result<&str, String> {  // ← Changed from pub(super)
+pub fn extract_ai_text(gemini_response: &GeminiResponse) -> Result<&str, String> {  // ← Changed from pub(super) - from main
     gemini_response
         .candidates
         .first()
@@ -104,8 +105,7 @@ pub(super) fn parse_classification(ai_text: &str) -> Result<AIClassification, St
     }
 }
 
-
-pub(super) fn parse_match_result(ai_text: &str) -> Result<Option<Uuid>, String> {
+pub(super) fn parse_match_result(ai_text: &str, logger: &JobLogger) -> Result<Option<Uuid>, String> {  // ← Kept logger parameter from feat/tui
     let cleaned = ai_text.trim()
         .trim_start_matches("```json")
         .trim_start_matches("```")
@@ -122,9 +122,9 @@ pub(super) fn parse_match_result(ai_text: &str) -> Result<Option<Uuid>, String> 
     
     match serde_json::from_str::<MatchResult>(cleaned) {
         Ok(result) => {
-            println!("│ 🔍 Confidence : {}", result.confidence);
+            logger.log(&format!("│ 🔍 Confidence : {}", result.confidence));  // ← Kept logger.log from feat/tui
             if let Some(ref reason) = result.reason {
-                println!("│ 📝 Reason     : {}", truncate_for_log(reason, 60));
+                logger.log(&format!("│ 📝 Reason     : {}", truncate_for_log(reason, 60)));  // ← Kept logger.log from feat/tui
             }
             
             if result.confidence == "high" {
@@ -134,12 +134,12 @@ pub(super) fn parse_match_result(ai_text: &str) -> Result<Option<Uuid>, String> 
                     Ok(None)
                 }
             } else {
-                println!("│ ⚠️ Low confidence match");
+                logger.log("│ ⚠️ Low confidence match");  // ← Kept logger.log from feat/tui
                 Ok(None)
             }
         }
         Err(e) => {
-            eprintln!("│ ❌ Failed to parse match result: {}", e);
+            logger.log(&format!("│ ❌ Failed to parse match result: {}", e));  // ← Kept logger.log from feat/tui
             Ok(None)
         }
     }
@@ -250,4 +250,3 @@ pub(super) fn truncate_for_log(text: &str, max_chars: usize) -> String {
         text.chars().take(max_chars).collect::<String>() + "..."
     }
 }
-

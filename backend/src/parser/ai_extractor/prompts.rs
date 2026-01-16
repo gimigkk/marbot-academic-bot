@@ -279,30 +279,54 @@ Example:
     2. {{"parallel_codes": ["p1", "p2"], "deadline": "2026-01-09 10:00", ...}}
 
 STEP C: Distinguish NEW vs UPDATE
-NEW_ASSIGNMENT signals:
-- "ada tugas baru", "new assignment", clear announcement
-- Contains: course + description (deadline optional)
+
+UPDATE_ASSIGNMENT signals (HIGH PRIORITY - check FIRST):
+1. EXPLICIT REFERENCE PATTERNS:
+   - "tugas yang [course]" → references existing assignment
+   - "assignment yang [course]" → references existing assignment  
+   - "tugas [course] yang" → references existing assignment
+   - "[course] yang deadline" → references existing assignment
+   - "yang [course] deadline" → references existing assignment
+
+2. TEMPORAL REFERENCE WITH COURSE:
+   - "tugas kemarin" → yesterday's assignment
+   - "[course] kemarin" → yesterday's course assignment
+   - "yang tadi" → earlier mentioned assignment
+   
+3. DEADLINE CHANGES (CLEAR UPDATE SIGNALS):
+   - "deadline itu besok" → changing existing deadline
+   - "diundur besok" → postponing deadline
+   - "dimajuin besok" → moving deadline forward
+   - "deadline [course] besok" → updating course deadline
+   
+4. EXPLICIT CHANGE LANGUAGE:
+   - "berubah", "ganti", "revisi", "update", "correction"
+   - "diganti", "diubah", "diperbaiki"
+
+NEW_ASSIGNMENT signals (only if NO update signals):
+- "ada tugas baru" → explicit new announcement
+- Clear announcement with full details (course + description + deadline)
 - Sequential numbering not in DB (LKP 15 when only LKP 14 exists)
 - "ada lagi" when replying → NEW, not update
 
-UPDATE_ASSIGNMENT patterns:
-- Explicit change language: "berubah", "ganti", "diundur", "dimajuin", "revisi", "update", "correction"
-- Clarification with reference: "Tugas yang kemarin", "assignment from yesterday"
-- Replying to quoted message with change indicators
-- MUST have change language (don't assume update just because assignment exists)
+DECISION TREE:
+1. Check for "yang [course]" or "[course] yang" pattern → UPDATE
+2. Check for "deadline itu/yang" with course reference → UPDATE  
+3. Check for temporal reference ("kemarin", "tadi") → UPDATE
+4. Check for explicit change words → UPDATE
+5. Only if NONE of above → consider NEW
 
-Matching logic for updates:
-- Use semantic understanding (not exact strings)
-- "coding pake kertas" can match "Coding on Paper Assignment"
-- Match by: course + identifying keywords (topic/number)
-- If QUOTED MESSAGE present: strongly prioritize that assignment
-- Must have reasonable match in DB
-
-Key distinction:
-- "Ada tugas LKP 15 lagi" → NEW (re-announcement, check for duplicate)
+Examples:
+- "tugas yang rpl deadline itu besok yaa" → UPDATE (has "yang rpl" + "deadline itu")
+- "tugas rpl deadline besok" → Could be NEW (no reference word "yang")
+- "ada tugas baru rpl" → NEW (explicit "baru")
 - "LKP 15 deadline berubah" → UPDATE (explicit change)
-- Replying with "diundur" → UPDATE (use quoted context)
-- Replying with "ada lagi yang ini" → NEW (different assignment)
+
+CRITICAL: When message has:
+- Reference word ("yang", "itu", "tadi", "kemarin") + 
+- Course name +  
+- Deadline mention
+→ This is almost ALWAYS an UPDATE, not a new assignment
 
 ═══════════════════════════════════════════════════════════════════
 PRIORITY 3: EXTRACTION RULES
@@ -371,12 +395,12 @@ Format: YYYY-MM-DD HH:MM (always include time component)
 
 PARALLEL CODES:
 ═══════════════════════════════════════════════════════════════════
-⚠️  CRITICAL "all" RULE (HIGHEST PRIORITY):
-    If "all"/"semua"/"everyone"/"semuanya" appears ANYWHERE:
-    → IMMEDIATELY return ["all"] and STOP processing other parallel codes
-    → IGNORE all other parallel mentions (k1, k2, etc.)
-    → ["all", "k2"] is ALWAYS WRONG ❌
-    → ["all"] is ALWAYS RIGHT ✅
+CRITICAL "all" RULE (HIGHEST PRIORITY):
+   If "all"/"semua"/"everyone"/"semuanya" appears ANYWHERE:
+   → IMMEDIATELY return ["all"] and STOP processing other parallel codes
+   → IGNORE all other parallel mentions (k1, k2, etc.)
+   → ["all", "k2"] is ALWAYS WRONG 
+   → ["all"] is ALWAYS RIGHT 
 ═══════════════════════════════════════════════════════════════════
 
 Valid codes: k1-k4, p1-p4, r1-r4, all
@@ -388,12 +412,12 @@ DECISION TREE:
 2. Extract specific parallel codes (k1, k2, etc.)
 
 Examples:
-- "semua parallel, k2" → ["all"] ✅ (step 1: "semua" found, stop)
-- "untuk all parallel" → ["all"] ✅ (step 1: "all" found, stop)
-- "k1 dan k2" → ["k1","k2"] ✅ (step 1: no "all", step 2: extract codes)
-- "GRAFKOM K2" → ["k2"] ✅ (step 1: no "all", step 2: extract from title)
-- "All students including k1" → ["all"] ✅ (step 1: "all" found, stop)
-- No mention + no context → [] ✅
+- "semua parallel, k2" → ["all"] (step 1: "semua" found, stop)
+- "untuk all parallel" → ["all"] (step 1: "all" found, stop)
+- "k1 dan k2" → ["k1","k2"] (step 1: no "all", step 2: extract codes)
+- "GRAFKOM K2" → ["k2"] (step 1: no "all", step 2: extract from title)
+- "All students including k1" → ["all"] (step 1: "all" found, stop)
+- No mention + no context → []
 
 - Return as ARRAY (assignments can target multiple parallels)
 - Extract from message or use context hint if not explicitly mentioned
@@ -505,6 +529,10 @@ pub fn build_matching_prompt(
     course_map: &HashMap<Uuid, String>,
     parallel_codes: &[String],
 ) -> String {
+    
+    let gmt7 = FixedOffset::east_opt(7 * 3600).unwrap();
+    let now = Utc::now().with_timezone(&gmt7);
+    
     let assignments_list = assignments.iter().enumerate().map(|(i, a)| {
         let parallel_str = if a.parallel_codes.is_empty() {
             "N/A".to_string()
@@ -512,48 +540,119 @@ pub fn build_matching_prompt(
             format!("[{}]", a.parallel_codes.join(", "))
         };
         
-        let course_name = a.course_id.and_then(|id| course_map.get(&id)).map(|s| s.as_str()).unwrap_or("Unknown Course");
+        let course_name = a.course_id
+            .and_then(|id| course_map.get(&id))
+            .map(|s| s.as_str())
+            .unwrap_or("Unknown");
         
-        let created_ago = Utc::now().signed_duration_since(a.created_at);
-        let time_ago = if created_ago.num_minutes() < 60 { format!("{} min ago", created_ago.num_minutes()) }
-            else if created_ago.num_hours() < 24 { format!("{} hr ago", created_ago.num_hours()) }
-            else { format!("{} days ago", created_ago.num_days()) };
+        let age_days = now.signed_duration_since(a.created_at).num_days();
         
-        let desc_preview = if a.description.is_empty() { "(no description)".to_string() } else { truncate_for_log(&a.description, 60) };
-        
-        format!("#{}: {} | {} | \"{}\" | Parallels: {} | Desc: \"{}\" | {}", i + 1, a.id, course_name, a.title, parallel_str, desc_preview, time_ago)
+        format!("{}. {} | \"{}\" | Parallels: {} | Created: {} days ago | ID: {}", 
+            i + 1, course_name, a.title, parallel_str, age_days, a.id)
     }).collect::<Vec<_>>().join("\n");
     
-    let gmt7 = FixedOffset::east_opt(7 * 3600).unwrap();
-    let now = Utc::now().with_timezone(&gmt7);
-    let current_time = now.format("%Y-%m-%d %H:%M:%S").to_string();
-    
     let parallel_info = if parallel_codes.is_empty() {
-        "Parallel codes: (not specified)".to_string()
+        "".to_string()
     } else {
-        format!("Parallel codes in update: [{}]", parallel_codes.join(", "))
+        format!("\nParallel codes mentioned: [{}]", parallel_codes.join(", "))
     };
     
     format!(
-        r#"Match this update to an existing assignment.
+        r#"Match this update message to an existing assignment.
 
-CONTEXT
-Time: {} | Update: "{}" | Keywords: {:?}
+UPDATE MESSAGE:
+"{}"
+
+Keywords extracted: {:?}{}
+
+CANDIDATE ASSIGNMENTS:
 {}
 
-Assignments:
-{}
+═══════════════════════════════════════════════════════════════════
+EXAMPLES OF GOOD MATCHING
+═══════════════════════════════════════════════════════════════════
 
-TASK: Find which assignment this update refers to, or return null if no match.
+Example 1: Generic title match
+Update: "tugas yang rpl deadline besok"
+Keywords: ["rpl"]
+Candidates:
+1. Rekayasa Perangkat Lunak | "Tugas RPL" | Parallels: [k1,k2] | 1 day ago
+→ Match: #1 (only recent RPL assignment, generic title matches)
 
-OUTPUT FORMAT (JSON only, no commentary):
-{{"assignment_id":"uuid","confidence":"high","reason":"..."}}
+Example 2: Specific identifier match
+Update: "LKP 14 diundur"
+Keywords: ["lkp", "14"]
+Candidates:
+1. Pemrograman | "LKP 14" | Parallels: [k1] | 2 days ago
+2. Pemrograman | "LKP 15" | Parallels: [k1] | 0 days ago
+→ Match: #1 (exact number match)
 
-OR if no match:
-{{"assignment_id":null,"confidence":"low","reason":"..."}}
+Example 3: Semantic match
+Update: "quiz kalkulus yang kemarin dipindah"
+Keywords: ["quiz", "kalkulus"]
+Candidates:
+1. Kalkulus | "Quiz 3" | Parallels: [k2] | 1 day ago
+2. Kalkulus | "Problem Set 5" | Parallels: [k2] | 3 days ago
+→ Match: #1 (quiz type matches, recent)
 
-Return ONLY valid JSON. No markdown, no explanations."#,
-        current_time, changes, keywords, parallel_info, assignments_list
+Example 4: No match
+Update: "tugas grafkom deadline besok"
+Keywords: ["grafkom"]
+Candidates:
+1. Pemrograman | "LKP 14" | Parallels: [k1] | 2 days ago
+2. Kalkulus | "Quiz 3" | Parallels: [k2] | 1 day ago
+→ Match: NONE (no Grafkom assignments)
+
+═══════════════════════════════════════════════════════════════════
+MATCHING REASONING APPROACH
+═══════════════════════════════════════════════════════════════════
+
+Think step-by-step:
+
+1. COURSE MATCH: Which candidates match the course keywords?
+   - Look for course name mentions in keywords
+   - Consider course abbreviations (RPL = Rekayasa Perangkat Lunak)
+
+2. RECENCY: Prioritize assignments created within last 7 days
+   - Updates typically reference recent announcements
+
+3. TITLE SIMILARITY: Does the title match the update context?
+   - Generic titles ("Tugas RPL") often reference the only recent assignment
+   - Specific identifiers (numbers) must match exactly
+   - Semantic similarity (quiz vs quiz, lab vs lab)
+
+4. PARALLEL OVERLAP: If parallels mentioned, do they overlap?
+   - Empty parallels = match anything
+   - [k1, k2] matches [k1] or [k2] or [k1, k2]
+   - [k1] does NOT match [k3]
+
+5. CONFIDENCE: How certain are you?
+   - HIGH: Clear match (course + title + recent + parallels match)
+   - MEDIUM: Probable match (course matches, similar title)
+   - LOW: Uncertain (multiple candidates or weak signals)
+
+═══════════════════════════════════════════════════════════════════
+OUTPUT FORMAT
+═══════════════════════════════════════════════════════════════════
+
+Return JSON with reasoning:
+
+{{
+  "assignment_id": "uuid"|null,
+  "confidence": "high"|"medium"|"low",
+  "reasoning": "Step-by-step explanation of your decision"
+}}
+
+Rules:
+- Only return ID with "high" confidence
+- If "medium" or "low" → return null (safer to not match)
+- Include your reasoning for transparency
+
+Think through the steps above, then provide your answer."#,
+        changes,
+        keywords,
+        parallel_info,
+        assignments_list
     )
 }
 
@@ -567,83 +666,142 @@ pub fn build_duplicate_detection_prompt(
     existing_assignments: &[Assignment],
     course_map: &HashMap<Uuid, String>,
 ) -> String {
-    let assignments_list = existing_assignments.iter().enumerate().map(|(i, a)| {
-        let parallel_str = if a.parallel_codes.is_empty() {
-            "null".to_string()
-        } else {
-            format!("[{}]", a.parallel_codes.join(", "))
-        };
-        
-        let course = a.course_id.and_then(|id| course_map.get(&id)).map(|s| s.as_str()).unwrap_or("Unknown");
-        
-        let desc_preview = if a.description.is_empty() { 
-            "(no description)".to_string() 
-        } else { 
-            a.description.chars().take(100).collect::<String>()
-        };
-        
-        format!("{}. ID: {} | Course: {} | Title: \"{}\" | Parallels: {} | Desc: \"{}\"", 
-            i + 1, a.id, course, a.title, parallel_str, desc_preview)
-    }).collect::<Vec<_>>().join("\n");
+    
+    let assignments_list = existing_assignments.iter().enumerate()
+        .map(|(i, a)| {
+            let parallel_str = if a.parallel_codes.is_empty() {
+                "none".to_string()
+            } else {
+                a.parallel_codes.join(", ")
+            };
+            
+            let course = a.course_id
+                .and_then(|id| course_map.get(&id))
+                .map(|s| s.as_str())
+                .unwrap_or("Unknown");
+            
+            format!("{}. Course: {} | Title: \"{}\" | Parallels: {} | ID: {}", 
+                i + 1, course, a.title, parallel_str, a.id)
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
     
     let parallel_info = if parallel_codes.is_empty() {
-        "Parallels: []".to_string()
+        "none".to_string()
     } else {
-        format!("Parallels: [{}]", parallel_codes.join(", "))
+        parallel_codes.join(", ")
     };
     
     format!(
-        r#"STRICT DUPLICATE DETECTION
+        r#"Is this a duplicate (re-announcement) of an existing assignment?
 
 NEW ASSIGNMENT:
 Course: {}
 Title: "{}"
-Description: "{}"
+Parallels: {}
+
+EXISTING CANDIDATES:
 {}
 
-CANDIDATES (pre-filtered by course/parallel/numbers/type):
-{}
+═══════════════════════════════════════════════════════════════════
+LEARN FROM EXAMPLES
+═══════════════════════════════════════════════════════════════════
 
-CRITICAL RULES:
-1. Sequential numbers = DIFFERENT (LKP 15 ≠ LKP 14 ≠ LKP 17)
-2. Assignment types must match (quiz ≠ lab ≠ homework)
-3. Topics must be similar
-4. Parallel codes must overlap (assignment targeting [k1, k2] can match [k1] or [k1, k2])
-5. When uncertain → NOT duplicate (safer to create new)
+Example 1: DUPLICATE (same generic title)
+New: Course: RPL | Title: "Tugas RPL" | Parallels: k1,k2
+Existing: Course: RPL | Title: "Tugas RPL" | Parallels: k1
+Reasoning:
+- Same course ✓
+- Same generic title ✓
+- Parallels overlap (k1,k2 includes k1) ✓
+- No distinguishing identifier
+→ Duplicate: YES (re-announcement of same work)
 
-TRUE DUPLICATES (rare cases only):
-- Exact match: "LKP 15" = "LKP 15"
-- Semantic match: "Lab Report 3" = "Laboratory Report 3"
-- Reannouncement: "Quiz tomorrow" posted twice
-- Clarification: "Quiz 5 updated" vs "Quiz 5"
+Example 2: NOT DUPLICATE (different numbers)
+New: Course: Pemrograman | Title: "LKP 15" | Parallels: k1
+Existing: Course: Pemrograman | Title: "LKP 14" | Parallels: k1
+Reasoning:
+- Same course ✓
+- Different sequential numbers (15 vs 14) ✗
+- These are different lab assignments
+→ Duplicate: NO
 
-NOT DUPLICATES:
-- Different numbers: "LKP 15" ≠ "LKP 14"
-- Different types: "Quiz 5" ≠ "Lab 5"
-- Different topics: "Data Structures" ≠ "Algorithms"
-- No parallel overlap: [k1, k2] ≠ [k3, k4]
+Example 3: DUPLICATE (semantic match)
+New: Course: Physics | Title: "Laboratory Report 3" | Parallels: none
+Existing: Course: Physics | Title: "Laporan Lab 3" | Parallels: k1
+Reasoning:
+- Same course ✓
+- Same work, different language (Lab Report = Laporan Lab) ✓
+- Same number (3) ✓
+→ Duplicate: YES
 
-OUTPUT FORMAT (JSON only, no commentary or markdown):
+Example 4: NOT DUPLICATE (different types)
+New: Course: Grafkom | Title: "Quiz 2" | Parallels: k1
+Existing: Course: Grafkom | Title: "Lab 2" | Parallels: k1
+Reasoning:
+- Same course ✓
+- Different assignment types (Quiz ≠ Lab) ✗
+- Even though same number, different work
+→ Duplicate: NO
+
+Example 5: NOT DUPLICATE (no parallel overlap)
+New: Course: Strukdat | Title: "Tugas Besar" | Parallels: k3
+Existing: Course: Strukdat | Title: "Tugas Besar" | Parallels: k1,k2
+Reasoning:
+- Same course ✓
+- Same title ✓
+- No parallel overlap (k3 ≠ k1,k2) ✗
+→ Duplicate: NO (different sections)
+
+═══════════════════════════════════════════════════════════════════
+REASONING APPROACH
+═══════════════════════════════════════════════════════════════════
+
+Think step-by-step:
+
+1. COURSE: Must match exactly
+   - Different courses → NOT duplicate
+
+2. PARALLELS: Must overlap
+   - [k1,k2] overlaps [k1] → can be duplicate
+   - [k1] vs [k3] → NOT duplicate (different sections)
+   - Empty parallels = unspecified = overlaps anything
+
+3. IDENTIFIERS: Check for numbers/names
+   - "LKP 15" vs "LKP 14" → NOT duplicate (sequential)
+   - "Quiz 3" vs "Quiz 3" → might be duplicate
+   - "Tugas RPL" vs "Tugas RPL" → likely duplicate (generic)
+
+4. ASSIGNMENT TYPE: Must be same type
+   - Quiz, Lab, Homework, Exam, Project
+   - Different types → NOT duplicate
+
+5. CONFIDENCE:
+   - HIGH: Clear duplicate (same course, generic title, overlapping parallels)
+   - MEDIUM: Similar but uncertain
+   - LOW: Probably different
+
+═══════════════════════════════════════════════════════════════════
+OUTPUT FORMAT
+═══════════════════════════════════════════════════════════════════
+
+Return JSON:
+
 {{
-  "is_duplicate": true,
-  "confidence": "high",
-  "reason": "detailed explanation",
-  "matched_assignment_id": "uuid-here"
+  "is_duplicate": boolean,
+  "confidence": "high"|"medium"|"low",
+  "reasoning": "Your step-by-step analysis",
+  "matched_assignment_id": "uuid"|null
 }}
 
-OR if not duplicate:
-{{
-  "is_duplicate": false,
-  "confidence": "high",
-  "reason": "detailed explanation",
-  "matched_assignment_id": null
-}}
+Rules:
+- Only mark as duplicate with HIGH confidence
+- When uncertain → is_duplicate: false (safer to create new)
+- Provide clear reasoning
 
-Be STRICT. Default to false. Only mark as duplicate with HIGH confidence.
-Return ONLY valid JSON. No markdown, no explanations."#,
+Think through each step, then provide your answer."#,
         course_name,
         title,
-        description,
         parallel_info,
         assignments_list
     )

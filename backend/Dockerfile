@@ -1,12 +1,13 @@
 # Build stage
-FROM rust:slim-bookworm AS builder
+FROM rust:1.92-slim-bookworm AS builder
 
 WORKDIR /app
 COPY Cargo.toml Cargo.lock ./
 COPY src ./src
 COPY migrations ./migrations
 COPY schedule.json ./schedule.json
-COPY .sqlx ./.sqlx 
+
+RUN apt-get update && apt-get install -y screen && rm -rf /var/lib/apt/lists/*
 
 # Install build dependencies
 RUN apt-get update && apt-get install -y \
@@ -14,10 +15,7 @@ RUN apt-get update && apt-get install -y \
     libssl-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Use offline mode
-ENV SQLX_OFFLINE=true
-
-# Build in release mode
+# Build in release mode (connects to DB to verify queries)
 RUN cargo build --release
 
 # Runtime stage
@@ -42,4 +40,4 @@ EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
   CMD curl -f http://localhost:3000/health || exit 1
 
-CMD ["/app/marbot"]
+CMD ["screen", "-DmS", "marbot", "/app/marbot"]
