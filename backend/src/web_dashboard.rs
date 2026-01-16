@@ -147,10 +147,17 @@ const DASHBOARD_HTML: &str = r#"<!doctype html>
         position: relative;
     }
 
-    .collapse-btn {
+    /* Top-left control buttons container */
+    .top-left-controls {
         position: fixed;
         left: 16px;
         top: 16px;
+        display: flex;
+        gap: 8px;
+        z-index: 100;
+    }
+
+    .control-btn {
         width: 32px;
         height: 32px;
         border-radius: 6px;
@@ -164,23 +171,102 @@ const DASHBOARD_HTML: &str = r#"<!doctype html>
         font-size: 18px;
         transition: all 0.2s ease;
         padding: 0;
-        z-index: 100;
         flex-shrink: 0;
     }
 
-    .collapse-btn:hover {
+    .control-btn:hover {
         background: var(--hover-bg);
         color: var(--text-primary);
     }
 
-    .collapse-btn svg {
+    .control-btn svg {
         width: 18px;
         height: 18px;
         transition: transform 0.2s ease;
     }
 
-    .sidebar.collapsed ~ .collapse-btn svg {
+    .collapse-btn svg {
+        transition: transform 0.2s ease;
+    }
+
+    .collapse-btn.collapsed svg {
         transform: rotate(180deg);
+    }
+
+    /* Search container - starts as button, expands to input */
+    .search-container {
+        display: flex;
+        align-items: center;
+        height: 32px;
+        background: var(--sidebar-bg);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.2s ease, visibility 0.2s ease;
+        overflow: hidden;
+        position: relative;
+        width: 32px;
+    }
+
+    .search-container.resizing {
+        transition: opacity 0.2s ease, visibility 0.2s ease;
+    }
+
+    .search-container.hidden {
+        opacity: 0;
+        visibility: hidden;
+        pointer-events: none;
+    }
+
+    .search-container.expanded {
+        /* Width set dynamically via JS */
+    }
+
+    .search-icon-btn {
+        width: 32px;
+        height: 32px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: var(--text-secondary);
+        cursor: pointer;
+        flex-shrink: 0;
+        transition: color 0.2s ease;
+        background: none;
+        border: none;
+        padding: 0;
+    }
+
+    .search-container:hover .search-icon-btn,
+    .search-container.expanded .search-icon-btn {
+        color: var(--text-primary);
+    }
+
+    .search-icon-btn svg {
+        width: 16px;
+        height: 16px;
+    }
+
+    .search-input {
+        flex: 1;
+        height: 100%;
+        background: transparent;
+        border: none;
+        color: var(--text-primary);
+        font-size: 13px;
+        outline: none;
+        padding: 0 16px 0 0;
+        min-width: 0;
+        width: 100%;
+        opacity: 0;
+        transition: opacity 0.2s ease 0.1s;
+    }
+
+    .search-container.expanded .search-input {
+        opacity: 1;
+    }
+
+    .search-input::placeholder {
+        color: var(--text-tertiary);
     }
 
     .sidebar {
@@ -260,7 +346,6 @@ const DASHBOARD_HTML: &str = r#"<!doctype html>
     .sidebar-content,
     .sidebar-footer,
     .view-toggle-container,
-    .search-container,
     .toggle-collapsed,
     .footer-collapsed {
         transition: opacity 0.15s ease, visibility 0.15s ease;
@@ -269,8 +354,7 @@ const DASHBOARD_HTML: &str = r#"<!doctype html>
     /* Expanded state content */
     .sidebar:not(.collapsed) .sidebar-content,
     .sidebar:not(.collapsed) .sidebar-footer,
-    .sidebar:not(.collapsed) .view-toggle-container,
-    .sidebar:not(.collapsed) .search-container {
+    .sidebar:not(.collapsed) .view-toggle-container {
         opacity: 1;
         visibility: visible;
     }
@@ -290,8 +374,7 @@ const DASHBOARD_HTML: &str = r#"<!doctype html>
     /* Collapsed state content */
     .sidebar.collapsed .sidebar-content,
     .sidebar.collapsed .sidebar-footer,
-    .sidebar.collapsed .view-toggle-container,
-    .sidebar.collapsed .search-container {
+    .sidebar.collapsed .view-toggle-container {
         opacity: 0;
         visibility: hidden;
         height: 0;
@@ -332,31 +415,6 @@ const DASHBOARD_HTML: &str = r#"<!doctype html>
     .view-toggle-container {
         padding: 16px;
         flex-shrink: 0;
-    }
-
-    .search-container {
-        padding: 0 16px 12px 16px;
-        flex-shrink: 0;
-    }
-
-    .search-input {
-        width: 100%;
-        padding: 8px 12px;
-        background: var(--bg);
-        border: 1px solid var(--border);
-        border-radius: 6px;
-        color: var(--text-primary);
-        font-size: 13px;
-        outline: none;
-        transition: border-color 0.2s ease;
-    }
-
-    .search-input:focus {
-        border-color: var(--accent);
-    }
-
-    .search-input::placeholder {
-        color: var(--text-tertiary);
     }
 
     .stats-row {
@@ -496,7 +554,7 @@ const DASHBOARD_HTML: &str = r#"<!doctype html>
     }
 
     .job-item {
-        padding: 10px 12px 10px 16px;
+        padding: 8px 12px 8px 16px;
         border-radius: 8px;
         cursor: pointer;
         transition: all 0.2s ease;
@@ -524,8 +582,8 @@ const DASHBOARD_HTML: &str = r#"<!doctype html>
         content: '';
         position: absolute;
         left: 0;
-        top: 8px;
-        bottom: 8px;
+        top: 6px;
+        bottom: 6px;
         width: 3px;
         border-radius: 0 2px 2px 0;
         background: transparent;
@@ -541,7 +599,7 @@ const DASHBOARD_HTML: &str = r#"<!doctype html>
         display: flex;
         align-items: center;
         justify-content: space-between;
-        margin-bottom: 4px;
+        margin-bottom: 2px;
     }
 
     .job-name {
@@ -571,11 +629,21 @@ const DASHBOARD_HTML: &str = r#"<!doctype html>
     }
 
     .job-chat {
-        font-size: 12px;
+        font-size: 11px;
         color: var(--text-tertiary);
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
+        margin-bottom: 4px;
+        opacity: 0;
+        max-height: 0;
+        transition: opacity 0.2s ease, max-height 0.2s ease, margin 0.2s ease;
+    }
+
+    .job-item:hover .job-chat,
+    .job-item.selected .job-chat {
+        opacity: 1;
+        max-height: 20px;
         margin-bottom: 4px;
     }
 
@@ -587,9 +655,9 @@ const DASHBOARD_HTML: &str = r#"<!doctype html>
     }
 
     .job-tag {
-        font-size: 10px;
-        padding: 2px 6px;
-        border-radius: 4px;
+        font-size: 9px;
+        padding: 2px 5px;
+        border-radius: 3px;
         background: rgba(198, 97, 67, 0.15);
         color: var(--accent);
         font-family: 'JetBrains Mono', monospace;
@@ -735,7 +803,7 @@ const DASHBOARD_HTML: &str = r#"<!doctype html>
             transform: translateX(-100%);
         }
 
-        .collapse-btn {
+        .top-left-controls {
             left: 8px;
             top: 8px;
         }
@@ -744,12 +812,29 @@ const DASHBOARD_HTML: &str = r#"<!doctype html>
 </head>
 <body>
 <div class="app-container">
-    <button class="collapse-btn" id="collapse-sidebar" title="Toggle sidebar">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
-            <rect x="3" y="3" width="18" height="18" rx="2"/>
-            <line x1="9" y1="3" x2="9" y2="21"/>
-        </svg>
-    </button>
+    <div class="top-left-controls" id="top-controls">
+        <button class="control-btn collapse-btn" id="collapse-sidebar" title="Toggle sidebar">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+                <rect x="3" y="3" width="18" height="18" rx="2"/>
+                <line x1="9" y1="3" x2="9" y2="21"/>
+            </svg>
+        </button>
+
+        <div class="search-container" id="search-container">
+            <button class="search-icon-btn" id="search-toggle">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="11" cy="11" r="8"/>
+                    <path d="m21 21-4.35-4.35"/>
+                </svg>
+            </button>
+            <input 
+                type="text" 
+                class="search-input" 
+                id="search-input" 
+                placeholder="Search tasks..."
+            />
+        </div>
+    </div>
 
     <aside class="sidebar" id="sidebar">
         <div class="resize-handle" id="resize-handle"></div>
@@ -769,15 +854,6 @@ const DASHBOARD_HTML: &str = r#"<!doctype html>
                     </span>
                     <span class="toggle-arrow">→</span>
                 </button>
-            </div>
-
-            <div class="search-container">
-                <input 
-                    type="text" 
-                    class="search-input" 
-                    id="search-input" 
-                    placeholder="Search tasks..."
-                />
             </div>
 
             <div class="toggle-collapsed">
@@ -858,6 +934,7 @@ const DASHBOARD_HTML: &str = r#"<!doctype html>
     const STORAGE_KEY = 'marbot:lastSelectedJob';
     const SIDEBAR_COLLAPSED_KEY = 'marbot:sidebarCollapsed';
     const VIEW_KEY = 'marbot:currentView';
+    const SEARCH_EXPANDED_KEY = 'marbot:searchExpanded';
 
     let currentView = 'tasks';
     let selectedJobId = null;
@@ -867,6 +944,7 @@ const DASHBOARD_HTML: &str = r#"<!doctype html>
     let jobStartTimes = {};
     let isConnected = true;
     let searchQuery = '';
+    let searchExpanded = false;
 
     const jobSortOrder = {};
     let nextSortIndex = 0;
@@ -876,6 +954,7 @@ const DASHBOARD_HTML: &str = r#"<!doctype html>
     let generalHtmlCache = { sig: null, html: null };
 
     const sidebar = document.getElementById('sidebar');
+    const topControls = document.getElementById('top-controls');
     const collapseBtn = document.getElementById('collapse-sidebar');
     const resizeHandle = document.getElementById('resize-handle');
     const viewToggleBtn = document.getElementById('view-toggle-btn');
@@ -885,6 +964,8 @@ const DASHBOARD_HTML: &str = r#"<!doctype html>
     const terminalContent = document.getElementById('terminal-content');
     const topbarSubtitle = document.getElementById('topbar-subtitle');
     const lastUpdateEl = document.getElementById('last-update');
+    const searchContainer = document.getElementById('search-container');
+    const searchToggle = document.getElementById('search-toggle');
     const searchInput = document.getElementById('search-input');
 
     let renderedJobIds = new Set();
@@ -892,15 +973,83 @@ const DASHBOARD_HTML: &str = r#"<!doctype html>
     let resizeStartX = 0;
     let resizeStartWidth = 0;
 
+    // Update search width based on current sidebar width
+    function updateSearchWidth() {
+        if (!searchExpanded) return;
+        const sidebarWidth = sidebar.offsetWidth;
+        // left margin (16) + collapse btn (32) + gap (8) + right margin (16) = 72
+        const maxWidth = sidebarWidth - 72;
+        searchContainer.style.width = maxWidth + 'px';
+    }
+
     // Initialize
     try {
         const collapsed = localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === 'true';
-        if (collapsed) sidebar.classList.add('collapsed');
+        if (collapsed) {
+            sidebar.classList.add('collapsed');
+            searchContainer.classList.add('hidden');
+            collapseBtn.classList.add('collapsed');
+        }
         const savedWidth = localStorage.getItem('marbot:sidebarWidth');
         if (savedWidth && !collapsed) sidebar.style.width = savedWidth + 'px';
         const savedView = localStorage.getItem(VIEW_KEY);
         if (savedView === 'general') currentView = 'general';
+        const savedSearchExpanded = localStorage.getItem(SEARCH_EXPANDED_KEY) === 'true';
+        if (savedSearchExpanded && !collapsed) {
+            searchExpanded = true;
+            searchContainer.classList.add('expanded');
+            updateSearchWidth();
+            setTimeout(() => searchInput.focus(), 350);
+        }
     } catch (e) {}
+
+    // Search toggle functionality
+    searchToggle.addEventListener('click', (e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        
+        searchExpanded = !searchExpanded;
+        
+        if (searchExpanded) {
+            searchContainer.classList.add('expanded');
+            updateSearchWidth();
+            setTimeout(() => {
+                searchInput.focus();
+            }, 350);
+        } else {
+            searchContainer.style.width = '32px';
+            searchContainer.classList.remove('expanded');
+            searchInput.value = '';
+            searchQuery = '';
+            filterJobs();
+        }
+
+        try {
+            localStorage.setItem(SEARCH_EXPANDED_KEY, searchExpanded);
+        } catch (e) {}
+    });
+
+    // Prevent search container clicks from toggling
+    searchInput.addEventListener('click', (e) => {
+        e.stopPropagation();
+    });
+
+    // Collapse search when clicking outside
+    document.addEventListener('click', (e) => {
+        if (searchExpanded && 
+            !searchContainer.contains(e.target) && 
+            !e.target.closest('.search-container')) {
+            searchExpanded = false;
+            searchContainer.style.width = '32px';
+            searchContainer.classList.remove('expanded');
+            searchInput.value = '';
+            searchQuery = '';
+            filterJobs();
+            try {
+                localStorage.setItem(SEARCH_EXPANDED_KEY, false);
+            } catch (e) {}
+        }
+    });
 
     // Search input handler
     searchInput.addEventListener('input', (e) => {
@@ -957,9 +1106,26 @@ const DASHBOARD_HTML: &str = r#"<!doctype html>
             const savedWidth = localStorage.getItem('marbot:sidebarWidth') || '260px';
             sidebar.style.width = savedWidth;
             sidebar.classList.remove('collapsed');
+            searchContainer.classList.remove('hidden');
+            collapseBtn.classList.remove('collapsed');
         } else {
             // Collapsing
             sidebar.classList.add('collapsed');
+            searchContainer.classList.add('hidden');
+            collapseBtn.classList.add('collapsed');
+            
+            // Also collapse search
+            if (searchExpanded) {
+                searchExpanded = false;
+                searchContainer.style.width = '32px';
+                searchContainer.classList.remove('expanded');
+                searchInput.value = '';
+                searchQuery = '';
+                filterJobs();
+                try {
+                    localStorage.setItem(SEARCH_EXPANDED_KEY, false);
+                } catch (e) {}
+            }
         }
         
         try {
@@ -973,6 +1139,7 @@ const DASHBOARD_HTML: &str = r#"<!doctype html>
         resizeStartX = e.clientX;
         resizeStartWidth = sidebar.offsetWidth;
         sidebar.classList.add('resizing');
+        searchContainer.classList.add('resizing');
         resizeHandle.classList.add('active');
         document.body.style.cursor = 'col-resize';
         document.body.style.userSelect = 'none';
@@ -984,12 +1151,16 @@ const DASHBOARD_HTML: &str = r#"<!doctype html>
         const delta = e.clientX - resizeStartX;
         const newWidth = Math.max(200, Math.min(600, resizeStartWidth + delta));
         sidebar.style.width = newWidth + 'px';
+        
+        // Update search width in real-time during resize
+        updateSearchWidth();
     });
 
     document.addEventListener('mouseup', () => {
         if (isResizing) {
             isResizing = false;
             sidebar.classList.remove('resizing');
+            searchContainer.classList.remove('resizing');
             resizeHandle.classList.remove('active');
             document.body.style.cursor = '';
             document.body.style.userSelect = '';
@@ -1452,7 +1623,7 @@ const DASHBOARD_HTML: &str = r#"<!doctype html>
         if (currentView === 'tasks' && selectedJobId) {
             renderSidebar();
             const job = allJobs.find(j => j.id === selectedJobId);
-            if (job && (job.current_countdown || clientSideCountdowns[job.id])) {
+            if (job && (job.current_countdown || clientSideCountdowns[jobId])) {
                 renderJobDetail();
             }
         }
