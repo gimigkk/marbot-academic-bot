@@ -931,7 +931,7 @@ fn calculate_course_hints(
         logger.log("│");
         logger.log(&format!("│ 🎯 Processing\t: {}", ai_course_hint.course_name));
         logger.log(&format!("│    Parallels\t: {:?}", ai_course_hint.parallel_codes));
-        logger.log(&format!("│    Deadline Type\t: {}", ai_course_hint.deadline_type));
+        logger.log(&format!("│    Dead. Type\t: {}", ai_course_hint.deadline_type));
         
         let parallel_schedules = match ai_course_hint.deadline_type.as_str() {
             "next_meeting" | "relative" => {

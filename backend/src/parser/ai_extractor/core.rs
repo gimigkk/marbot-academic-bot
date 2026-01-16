@@ -789,7 +789,7 @@ async fn try_gemini_duplicate_check(prompt: &str, logger: &JobLogger) -> Result<
             Err(_) => {
                 all_rate_limited = false;
                 clear_trying_line(logger);
-                logger.log(&format!("│ ❌ FAILED\t: {} - Network error", model));
+                logger.log(&format!("│ ❌ FAILED\t\t\t: {} - Network error", model));
                 continue;
             }
         };
@@ -803,7 +803,7 @@ async fn try_gemini_duplicate_check(prompt: &str, logger: &JobLogger) -> Result<
 
         if status.is_success() {
             clear_trying_line(logger);
-            logger.log(&format!("│ ✅ SUCCESS\t: {} (Gemini {}/{})", model, index, GEMINI_MODELS.len()));
+            logger.log(&format!("│ ✅ SUCCESS\t\t\t: {} (Gemini {}/{})", model, index, GEMINI_MODELS.len()));
 
             let gemini_response: GeminiResponse = response.json().await
                 .map_err(|e| format!("Parse error: {}", e))?;
@@ -822,11 +822,11 @@ async fn try_gemini_duplicate_check(prompt: &str, logger: &JobLogger) -> Result<
                 if let Some(ref id_str) = result.matched_assignment_id {
                     match Uuid::parse_str(id_str) {
                         Ok(uuid) => {
-                            logger.log(&format!("│ ✅ Duplicate Match\t: {} (confidence: high)", uuid));
+                            logger.log(&format!("│ ✅ Duplicate Match\t\t: {} (confidence: high)", uuid));
                             return Ok(Some(uuid));
                         }
                         Err(_) => {
-                            logger.log(&format!("│ ⚠️ Invalid UUID\t: {}", id_str));
+                            logger.log(&format!("│ ⚠️ Invalid UUID\t\t: {}", id_str));
                             return Ok(None);
                         }
                     }
@@ -835,7 +835,7 @@ async fn try_gemini_duplicate_check(prompt: &str, logger: &JobLogger) -> Result<
                     return Ok(None);
                 }
             } else if result.is_duplicate {
-                logger.log(&format!("│ ⚠️ Low confidence ({})\t: Treating as non-duplicate", result.confidence));
+                logger.log(&format!("│ ⚠️ Low confidence ({})\t\t: Treating as non-duplicate", result.confidence));
                 return Ok(None);
             } else {
                 logger.log("│ ✅ Not a duplicate");
