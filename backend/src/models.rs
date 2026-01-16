@@ -143,7 +143,7 @@ pub enum BotCommand {
     Undo,
     Help,
     Delete(u32),
-    SetKelas(String, String),
+    SetKelas(String, Vec<String>),
     UnknownCommand(String),
     MissingArgument(String),
 }

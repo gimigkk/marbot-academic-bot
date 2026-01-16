@@ -176,13 +176,19 @@ pub async fn handle_command(
             }
         }
 
-        BotCommand::SetKelas(matkul, kode) => {
-            logger.log(&format!("⚙️ SetKelas command: {} {} from {}", matkul, kode, user_phone));
-            match set_user_course_parallel(pool, user_phone, &matkul, &kode).await {
+        // Update Handler SetKelas untuk menerima Vec<String>
+        BotCommand::SetKelas(matkul, codes) => {
+            // codes sekarang adalah vector, misal ["k1", "p2"]
+            // Join dengan spasi hanya untuk log display
+            let codes_display = codes.join(" ");
+            println!("⚙️ SetKelas command: {} [{}] from {}", matkul, codes_display, user_phone);
+            
+            // Panggil fungsi CRUD yang baru (passing referensi vector)
+            match set_user_course_parallel(pool, user_phone, &matkul, &codes).await {
                 Ok(msg) => CommandResponse::Text(msg),
                 Err(e) => {
-                    logger.log(&format!("❌ Error set kelas: {}", e));
-                    CommandResponse::Text("❌ Gagal mengatur kelas. Pastikan nama matkul benar.".to_string())
+                    eprintln!("❌ Error set kelas: {}", e);
+                    CommandResponse::Text("❌ Gagal mengatur kelas. Terjadi kesalahan server.".to_string())
                 }
             }
         }
@@ -190,44 +196,54 @@ pub async fn handle_command(
         BotCommand::Todo => {
             logger.log(&format!("✅ Todo command received from {} ({})", user_name, user_phone));
 
-            // Panggil fungsi yang baru (yang mengembalikan tuple assignments + settings)
-            match get_active_assignments_for_user(pool, user_phone, Some(logger)).await {
+            match get_active_assignments_for_user(pool, user_phone).await {
                 Ok((assignments, user_settings)) => {
                     let has_settings = !user_settings.is_empty();
                     
-                    // --- LOGIC FILTERING ---
+                    // --- UPDATE LOGIC FILTERING ---
                     let filtered_assignments: Vec<_> = assignments.into_iter().filter(|a| {
-                        // 1. Kalau sudah selesai (completed), skip 
+                        // 1. Kalau sudah selesai, skip 
                         if a.is_completed { return false; }
                         
-                        // 2. Cek Pararel Codes tugas ini
+                        // 2. Tugas General (all) -> AMBIL
                         if a.parallel_codes.is_empty() || a.parallel_codes.contains(&"all".to_string()) {
-                            return true; // Tugas untuk semua orang -> AMBIL
+                            return true; 
                         }
                         
-                        // 3. Cek apakah user punya setting untuk matkul ini
-                        if let Some(user_code) = user_settings.get(&a.course_name) {
-                            // User punya setting (misal "k1")
-                            // Cek apakah tugas ini memuat "k1"?
-                            return a.parallel_codes.contains(user_code);
+                        // 3. Cek setting user untuk matkul ini
+                        if let Some(user_codes_str) = user_settings.get(&a.course_name) {
+                            // user_codes_str bisa berisi "k1" atau "k1,p2"
+                            // Kita pecah dulu menjadi vector
+                            let user_codes: Vec<&str> = user_codes_str.split(',').collect();
+                            
+                            // Cek apakah ADA kode tugas yang cocok dengan kode user
+                            // Misal: Tugas code "p2", User setting "k1,p2".
+                            // p2 ada di dalam [k1, p2]? Ya -> Tampilkan.
+                            
+                            // Iterate kode tugas
+                            for task_code in &a.parallel_codes {
+                                if user_codes.contains(&task_code.as_str()) {
+                                    return true;
+                                }
+                            }
+                            
+                            // Jika tidak ada yang cocok sama sekali
+                            return false;
                         }
                         
-                        // 4. Jika user TIDAK punya setting untuk matkul ini
-                        // Default behavior: Tampilkan semua tugas matkul tersebut (agar tidak ada yang terlewat)
+                        // 4. Default: Jika user BELUM set kelas, tampilkan semua (biar aman)
                         true 
                     }).collect();
 
+                    // ... sisa kode display sama ...
                     let header = format!("*[To-Do]* _{}_", user_name);
-                    
-                    // Generate list response
                     let mut response = format_assignments_list(filtered_assignments, &header, false, true);
                     
-                    // --- TAMBAHAN PERINGATAN ---
                     if let CommandResponse::Text(ref mut text) = response {
+                         // Update pesan bantuan di bawah
                         if !has_settings {
-                            text.push_str("\n\n⚠️ _Kamu belum mengatur kelas spesifik._\n_Tugas dari semua kelas pararel ditampilkan._\n_Ketik:_ `#setkelas <matkul> <pararel>`\n_Contoh:_ `#setkelas pmk k1`");
+                            text.push_str("\n\n⚠️ _Kamu belum mengatur kelas spesifik._\n_Ketik:_ `#setkelas <matkul> <k-kode> [p-kode]`\n_Contoh:_ `#setkelas pemrog k1 p2`");
                         } else {
-                            // Jika sudah set, info footer beda dikit
                              text.push_str("\n\n_⚙️ Menampilkan tugas sesuai kelas kamu & tugas umum._");
                         }
                     }
@@ -537,7 +553,7 @@ pub async fn handle_command(
 • #done <id> — tandai selesai\n\
 • #undo — batalkan #done terakhir\n\n\
 *Perintah Pengaturan:*
-• #setkelas <matkul> <pararel> — atur kelas pararel untuk matkul\n\n\
+• #setkelas <matkul> <kode1> [kode2]... — atur kelas pararel untuk matkul\n\n\
 *Perintah Admin (Grup Akademik):*\n\
 • #delete <id> — hapus tugas (id dari #tugas)\n\n\
 *Penting:* #<id> dan #done selalu pakai nomor dari *#todo*. _Info tugas akan otomatis tersimpan via grup info akademik, tidak dari chat lain._
@@ -580,10 +596,11 @@ github.com/gimigkk/marbot-academic-bot"
                 }
                 "setkelas" => {
                     "⚠️ *Cara pakai yang benar:*\n\n\
-                    #setkelas <matkul> <pararel>\n\n\
+                    #setkelas <matkul> <kode1> [kode2]...\n\n\
                     *Contoh:*\n\
                     • #setkelas pmk k1\n\
-                    • #setkelas algorithm c3\n\n\
+                    • #setkelas algorithm c3\n\
+                    • #setkelas pemrog k1 p2\n\n\
                     💡 _Gunakan nama matkul yang benar (lihat di #tugas)_"
                 }
                 _ => {

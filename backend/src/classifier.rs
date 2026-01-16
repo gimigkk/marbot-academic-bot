@@ -47,8 +47,18 @@ fn parse_command(text: &str) -> Option<BotCommand> {
         "setkelas" | "set" => {
             if parts.len() >= 3 {
                 let matkul = parts[1].to_string();
-                let kode = parts[2].to_string();
-                Some(BotCommand::SetKelas(matkul, kode))
+                
+                // Contoh input: "#setkelas pemrog k1 p2"
+                // parts[0] = setkelas
+                // parts[1] = pemrog
+                // parts[2..] = ["k1", "p2"] -> Ini yang kita ambil
+                
+                let codes: Vec<String> = parts[2..]
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect();
+
+                Some(BotCommand::SetKelas(matkul, codes))
             } else {
                 Some(BotCommand::MissingArgument("setkelas".to_string()))
             }
