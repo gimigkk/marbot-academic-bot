@@ -477,7 +477,7 @@ async fn call_context_resolver_ai(
 
 // ===== GEMINI CONTEXT RESOLUTION =====
 
-async fn try_gemini_context(prompt: &str, logger: &JobLogger) -> Result<AIHints, String> {
+async fn try_gemini_context(prompt: &str, _logger: &JobLogger) -> Result<AIHints, String> {
     let api_key = std::env::var("GEMINI_API_KEY")
         .map_err(|_| "GEMINI_API_KEY not set".to_string())?;
     
@@ -557,7 +557,7 @@ async fn try_gemini_context(prompt: &str, logger: &JobLogger) -> Result<AIHints,
 
 // ===== GROQ REASONING CONTEXT RESOLUTION =====
 
-async fn try_groq_reasoning_context(prompt: &str, logger: &JobLogger) -> Result<AIHints, String> {
+async fn try_groq_reasoning_context(prompt: &str, _logger: &JobLogger) -> Result<AIHints, String> {
     let api_key = std::env::var("GROQ_API_KEY")
         .map_err(|_| "GROQ_API_KEY not set".to_string())?;
     
@@ -598,7 +598,7 @@ async fn try_groq_reasoning_context(prompt: &str, logger: &JobLogger) -> Result<
             return parse_ai_hints(&ai_text);
         }
     }
-    
+
     Err("All Groq reasoning models failed".to_string())
 }
 

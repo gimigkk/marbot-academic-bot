@@ -91,7 +91,8 @@ impl JobEntry {
             tags,
         }
     }
-
+    
+    #[allow(non_snake_case)]
     pub fn duration(&self) -> std::time::Duration {
         match self.completed_at {
             Some(end) => end.duration_since(self.started_at),

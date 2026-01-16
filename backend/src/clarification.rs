@@ -172,10 +172,6 @@ fn logger_log(logger: Option<&JobLogger>, msg: &str) {
     }
 }
 
-fn logger_log_simple(logger: Option<&JobLogger>, msg: &str) {
-    // used for simple lines that shouldn't be prefixed in TUI
-    logger_log(logger, msg)
-}
 
 fn logger_log_countdown(logger: Option<&JobLogger>, attempt: u32, remaining: u64) {
     if let Some(l) = logger {

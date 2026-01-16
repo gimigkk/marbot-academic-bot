@@ -670,7 +670,7 @@ pub fn build_duplicate_detection_prompt(
     let assignments_list = existing_assignments.iter().enumerate()
         .map(|(i, a)| {
             let parallel_str = if a.parallel_codes.is_empty() {
-                "none".to_string()
+                "all".to_string()
             } else {
                 a.parallel_codes.join(", ")
             };
@@ -680,129 +680,224 @@ pub fn build_duplicate_detection_prompt(
                 .map(|s| s.as_str())
                 .unwrap_or("Unknown");
             
-            format!("{}. Course: {} | Title: \"{}\" | Parallels: {} | ID: {}", 
-                i + 1, course, a.title, parallel_str, a.id)
+            let desc_text = a.description.as_str();
+            
+            format!(
+                "Assignment #{}:\n  Course: {}\n  Title: \"{}\"\n  Parallels: {}\n  Description: {}\n  ID: {}\n", 
+                i + 1, course, a.title, parallel_str, desc_text, a.id
+            )
         })
         .collect::<Vec<_>>()
         .join("\n");
     
     let parallel_info = if parallel_codes.is_empty() {
-        "none".to_string()
+        "all".to_string()
     } else {
         parallel_codes.join(", ")
     };
     
     format!(
-        r#"Is this a duplicate (re-announcement) of an existing assignment?
+        r#"You are analyzing whether a new assignment announcement is a DUPLICATE of an existing assignment in the database.
 
-NEW ASSIGNMENT:
+═══════════════════════════════════════════════════════════════════
+PROBLEM DEFINITION
+═══════════════════════════════════════════════════════════════════
+
+A DUPLICATE means: The new message is re-announcing THE SAME ASSIGNMENT that already exists in the database. This happens when:
+- A professor sends a reminder about an existing assignment
+- An assignment is reposted with updated information (deadline change, clarification, etc.)
+- The same assignment is announced to additional parallel classes
+
+A NON-DUPLICATE means: The new message announces a DIFFERENT ASSIGNMENT that should be stored separately. This happens when:
+- It's a new sequential assignment (Quiz 2 after Quiz 1, Lab 5 after Lab 4)
+- It's a different type of assignment for the same course (Quiz vs Lab, Project vs Homework)
+- It's the same title but for non-overlapping class sections (different parallel codes)
+
+═══════════════════════════════════════════════════════════════════
+NEW ASSIGNMENT TO ANALYZE
+═══════════════════════════════════════════════════════════════════
+
 Course: {}
 Title: "{}"
-Parallels: {}
+Parallel Codes: {}
+Description: {}
 
-EXISTING CANDIDATES:
+═══════════════════════════════════════════════════════════════════
+EXISTING ASSIGNMENTS IN DATABASE
+═══════════════════════════════════════════════════════════════════
+
 {}
 
 ═══════════════════════════════════════════════════════════════════
-LEARN FROM EXAMPLES
+REASONING PRINCIPLES
 ═══════════════════════════════════════════════════════════════════
 
-Example 1: DUPLICATE (same generic title)
-New: Course: RPL | Title: "Tugas RPL" | Parallels: k1,k2
-Existing: Course: RPL | Title: "Tugas RPL" | Parallels: k1
-Reasoning:
-- Same course ✓
-- Same generic title ✓
-- Parallels overlap (k1,k2 includes k1) ✓
-- No distinguishing identifier
-→ Duplicate: YES (re-announcement of same work)
+1. SEMANTIC IDENTITY
+   Understand what the assignment actually IS, not just surface text matching:
+   - "Tugas Pemrograman" and "Programming Assignment" could be the same thing
+   - "Lab Report 3" and "Laporan Lab 3" refer to the same deliverable
+   - Look beyond literal string matching to understand the actual work being requested
 
-Example 2: NOT DUPLICATE (different numbers)
-New: Course: Pemrograman | Title: "LKP 15" | Parallels: k1
-Existing: Course: Pemrograman | Title: "LKP 14" | Parallels: k1
-Reasoning:
-- Same course ✓
-- Different sequential numbers (15 vs 14) ✗
-- These are different lab assignments
-→ Duplicate: NO
+2. SEQUENTIAL CONTEXT
+   Assignments often come in numbered sequences:
+   - "Quiz 1", "Quiz 2", "Quiz 3" are DIFFERENT assignments in a series
+   - "LKP 14" and "LKP 15" are DIFFERENT lab assignments
+   - "Week 3 Assignment" and "Week 4 Assignment" are DIFFERENT
+   - However: "Quiz Minggu 3" and "Week 3 Quiz" could be the SAME assignment in different languages
 
-Example 3: DUPLICATE (semantic match)
-New: Course: Physics | Title: "Laboratory Report 3" | Parallels: none
-Existing: Course: Physics | Title: "Laporan Lab 3" | Parallels: k1
-Reasoning:
-- Same course ✓
-- Same work, different language (Lab Report = Laporan Lab) ✓
-- Same number (3) ✓
-→ Duplicate: YES
+3. ASSIGNMENT TYPE TAXONOMY
+   Different types of academic work are distinct:
+   - Quiz ≠ Lab ≠ Homework ≠ Exam ≠ Project ≠ Essay
+   - "Tugas" (general homework) vs "Kuis" (quiz) vs "Praktikum" (lab) are different types
+   - Even if they have the same number or timing, different types = different assignments
 
-Example 4: NOT DUPLICATE (different types)
-New: Course: Grafkom | Title: "Quiz 2" | Parallels: k1
-Existing: Course: Grafkom | Title: "Lab 2" | Parallels: k1
-Reasoning:
-- Same course ✓
-- Different assignment types (Quiz ≠ Lab) ✗
-- Even though same number, different work
-→ Duplicate: NO
+4. PARALLEL CLASS LOGIC
+   Parallel codes represent different sections/classes:
+   - Assignments are relevant to specific parallel classes
+   - If parallel codes overlap (k1 in both), it could be the same assignment
+   - If parallels are "all" or empty, it applies to everyone
+   - If there's NO overlap (k1,k2 vs k3), they're for different sections = not duplicate
+   - Exception: A re-announcement might ADD parallel codes to an existing assignment
 
-Example 5: NOT DUPLICATE (no parallel overlap)
-New: Course: Strukdat | Title: "Tugas Besar" | Parallels: k3
-Existing: Course: Strukdat | Title: "Tugas Besar" | Parallels: k1,k2
-Reasoning:
+5. DESCRIPTION AS SEMANTIC CONTEXT
+   The description provides crucial context about what the work actually entails:
+   - Use it to understand the actual requirements and deliverables
+   - Compare the substance of the work, not just keywords
+   - If descriptions discuss fundamentally different topics/requirements → different assignments
+   - If descriptions are semantically similar but differently worded → could be duplicate
+   - Missing descriptions shouldn't prevent duplicate detection if other signals are clear
+
+6. CONFIDENCE CALIBRATION
+   Be precise about your certainty:
+   - HIGH confidence: Clear duplicate with strong signals (same course, same work identity, parallel overlap)
+   - MEDIUM confidence: Likely duplicate but some ambiguity exists
+   - LOW confidence: Significant uncertainty, multiple interpretations possible
+   
+   Default to "not duplicate" when confidence is not HIGH. Creating a duplicate entry is safer than missing a new assignment.
+
+═══════════════════════════════════════════════════════════════════
+REASONING EXAMPLES
+═══════════════════════════════════════════════════════════════════
+
+Example 1: Generic Title with Overlap
+New: [RPL] "Tugas RPL" | k1,k2
+Old: [RPL] "Tugas RPL" | k1
+
+Analysis:
+- Same course ✓
+- Parallel overlap (k1 appears in both) ✓
+- Generic identical title with no distinguishing features
+- No sequential numbers or type differences
+- Likely a re-announcement extending to k2
+
+Conclusion: DUPLICATE (high confidence)
+
+---
+
+Example 2: Sequential Numbering
+New: [Pemrograman] "LKP 15"
+Old: [Pemrograman] "LKP 14"
+
+Analysis:
+- Same course ✓
+- Different sequential numbers (14 vs 15)
+- "LKP" = Lab assignments in a series
+- Each number represents a distinct lab exercise
+
+Conclusion: NOT DUPLICATE (high confidence)
+
+---
+
+Example 3: Semantic Equivalence Across Languages
+New: [Physics] "Laboratory Report 3" | all
+Old: [Physics] "Laporan Lab 3" | k1
+
+Analysis:
+- Same course ✓
+- Parallel overlap (all includes k1) ✓
+- "Laboratory Report" = "Laporan Lab" (English/Indonesian)
+- Same number (3)
+- Semantically identical work
+
+Conclusion: DUPLICATE (high confidence)
+
+---
+
+Example 4: No Parallel Overlap
+New: [Struktur Data] "Tugas Besar" | k3
+Old: [Struktur Data] "Tugas Besar" | k1,k2
+
+Analysis:
 - Same course ✓
 - Same title ✓
-- No parallel overlap (k3 ≠ k1,k2) ✗
-→ Duplicate: NO (different sections)
+- BUT: No parallel overlap (k3 vs k1,k2)
+- Different class sections = different assignment instances
+- These are separate assignments for separate classes
+
+Conclusion: NOT DUPLICATE (high confidence)
+
+---
+
+Example 5: Different Assignment Types
+New: [Grafkom] "Quiz 2" | k1
+Old: [Grafkom] "Lab 2" | k1
+
+Analysis:
+- Same course ✓
+- Same number (2) ✓
+- Different types: Quiz vs Lab
+- Quiz and Lab are fundamentally different assessment types
+- Same timing doesn't make them the same assignment
+
+Conclusion: NOT DUPLICATE (high confidence)
+
+---
+
+Example 6: Description Provides Clarity
+New: [Database] "Project" | all | desc: "Design and implement a library management system with CRUD operations"
+Old: [Database] "Project" | k1 | desc: "Create an e-commerce database with transaction handling"
+
+Analysis:
+- Same course ✓
+- Same generic title ("Project") ✓
+- Parallel overlap (all includes k1) ✓
+- BUT: Descriptions reveal completely different scopes and requirements
+- Library system vs E-commerce system = different projects
+
+Conclusion: NOT DUPLICATE (high confidence)
 
 ═══════════════════════════════════════════════════════════════════
-REASONING APPROACH
+YOUR TASK
 ═══════════════════════════════════════════════════════════════════
+
+Analyze the new assignment against existing assignments using the principles above.
 
 Think step-by-step:
+1. What course is this for? Does it match any existing assignments?
+2. What parallel codes apply? Is there overlap with candidates?
+3. What is the semantic identity of this assignment? (What work is actually being requested?)
+4. Are there sequential indicators (numbers, dates) that distinguish it?
+5. What type of assignment is this? (quiz, lab, homework, etc.)
+6. What do the descriptions tell us about the actual work required?
+7. Based on all factors, is this the SAME assignment or a DIFFERENT one?
 
-1. COURSE: Must match exactly
-   - Different courses → NOT duplicate
-
-2. PARALLELS: Must overlap
-   - [k1,k2] overlaps [k1] → can be duplicate
-   - [k1] vs [k3] → NOT duplicate (different sections)
-   - Empty parallels = unspecified = overlaps anything
-
-3. IDENTIFIERS: Check for numbers/names
-   - "LKP 15" vs "LKP 14" → NOT duplicate (sequential)
-   - "Quiz 3" vs "Quiz 3" → might be duplicate
-   - "Tugas RPL" vs "Tugas RPL" → likely duplicate (generic)
-
-4. ASSIGNMENT TYPE: Must be same type
-   - Quiz, Lab, Homework, Exam, Project
-   - Different types → NOT duplicate
-
-5. CONFIDENCE:
-   - HIGH: Clear duplicate (same course, generic title, overlapping parallels)
-   - MEDIUM: Similar but uncertain
-   - LOW: Probably different
-
-═══════════════════════════════════════════════════════════════════
-OUTPUT FORMAT
-═══════════════════════════════════════════════════════════════════
-
-Return JSON:
-
+Respond with valid JSON:
 {{
   "is_duplicate": boolean,
-  "confidence": "high"|"medium"|"low",
-  "reasoning": "Your step-by-step analysis",
-  "matched_assignment_id": "uuid"|null
+  "confidence": "high" | "medium" | "low",
+  "reasoning": "Explain your step-by-step analysis covering: course match, parallel overlap, semantic identity, sequential context, assignment type, and description analysis. Be thorough but concise.",
+  "matched_assignment_id": "uuid of matched assignment or null"
 }}
 
-Rules:
-- Only mark as duplicate with HIGH confidence
-- When uncertain → is_duplicate: false (safer to create new)
-- Provide clear reasoning
-
-Think through each step, then provide your answer."#,
+Critical rules:
+- Only set is_duplicate: true if confidence is "high"
+- When in doubt, mark as NOT duplicate (safer to create new entry)
+- Provide clear reasoning that shows your analytical process
+- Consider ALL principles, not just surface matching"#,
         course_name,
         title,
         parallel_info,
+        description,
         assignments_list
     )
 }

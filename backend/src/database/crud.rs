@@ -460,7 +460,7 @@ pub async fn get_active_assignments_sorted(
 pub async fn get_active_assignments_for_user(
     pool: &PgPool, 
     user_id: &str,
-    logger: Option<&JobLogger>,
+    _logger: Option<&JobLogger>,
 ) -> Result<(Vec<AssignmentWithCourse>, HashMap<String, String>), sqlx::Error> {
     let now = Utc::now();
     
@@ -839,6 +839,7 @@ pub fn parse_deadline(deadline_str: &str) -> Result<DateTime<Utc>, String> {
 }
 
 /// Set user preference for a specific course parallel
+#[allow(non_snake_case)]
 pub async fn set_user_course_parallel(
     pool: &PgPool,
     user_id: &str,
