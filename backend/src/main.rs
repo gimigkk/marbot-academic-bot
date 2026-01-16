@@ -26,7 +26,7 @@ pub mod whitelist;
 pub mod database;
 pub mod clarification;
 pub mod tui;
-pub mod web_dashboard;
+pub mod dashboard;
 
 use crate::database::crud;
 use crate::parser::commands::CommandResponse;
@@ -249,8 +249,8 @@ async fn main() {
     let app = Router::new()
         .route("/webhook", post(webhook))
         .route("/health", get(health_check))
-        .route("/tui", get(web_dashboard::serve_dashboard_page))
-        .route("/tui/api/data", get(web_dashboard::get_dashboard_data))
+        .route("/tui", get(dashboard::serve_dashboard_page))
+        .route("/tui/api/data", get(dashboard::get_dashboard_data))
         .with_state(state);
 
     let port = 3000;
