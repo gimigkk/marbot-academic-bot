@@ -5,6 +5,17 @@ on:
     branches:
       - main
 
+env:
+  # Colors for logging
+  COLOR_RESET: '\033[0m'
+  COLOR_BOLD: '\033[1m'
+  COLOR_RED: '\033[0;31m'
+  COLOR_GREEN: '\033[0;32m'
+  COLOR_YELLOW: '\033[0;33m'
+  COLOR_BLUE: '\033[0;34m'
+  COLOR_MAGENTA: '\033[0;35m'
+  COLOR_CYAN: '\033[0;36m'
+
 jobs:
   prepare:
     name: 📋 Prepare Deployment Info
@@ -15,29 +26,71 @@ jobs:
       deletions: ${{ steps.stats.outputs.deletions }}
       short_sha: ${{ steps.stats.outputs.short_sha }}
       commit_message: ${{ steps.stats.outputs.commit_message }}
+      commit_message_escaped: ${{ steps.stats.outputs.commit_message_escaped }}
       author_name: ${{ steps.stats.outputs.author_name }}
+      cargo_lock_hash: ${{ steps.stats.outputs.cargo_lock_hash }}
     
     steps:
       - name: 📥 Checkout code
-        uses: actions/checkout@v4
+        run: echo -e "\033[0;36m📥 Checking out code...\033[0m"
+        
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 2
       
       - name: 📊 Calculate commit statistics
         id: stats
         run: |
+          echo -e "\033[0;36m📊 Calculating commit statistics...\033[0m"
+          
           ADDITIONS=$(git show --shortstat | grep -oP '\d+(?= insertion)' || echo "0")
           DELETIONS=$(git show --shortstat | grep -oP '\d+(?= deletion)' || echo "0")
           SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
-          COMMIT_MSG_RAW='${{ github.event.head_commit.message }}'
-          COMMIT_MSG=$(echo "$COMMIT_MSG_RAW" | tr '\n' ' ' | tr '\r' ' ' | sed 's/  */ /g' | sed 's/"/\\"/g' | head -c 150 | xargs)
+          
+          # Get commit message and handle special characters
+          COMMIT_MSG_RAW=$(git log -1 --pretty=%B)
+          
+          # For display (truncated, basic escaping)
+          COMMIT_MSG=$(echo "$COMMIT_MSG_RAW" | head -c 150 | tr '\n' ' ' | tr '\r' ' ' | sed 's/  */ /g' | xargs)
+          
+          # For JSON (proper escaping for WhatsApp notifications)
+          COMMIT_MSG_ESCAPED=$(echo "$COMMIT_MSG_RAW" | head -c 150 | tr '\n' ' ' | tr '\r' ' ' | sed 's/  */ /g' | jq -Rs '.' | sed 's/^"//;s/"$//')
+          
           AUTHOR_NAME="${{ github.event.head_commit.author.name }}"
           
+          # Get Cargo.lock hash for cache key
+          if [ -f "backend/Cargo.lock" ]; then
+            CARGO_LOCK_HASH=$(sha256sum backend/Cargo.lock | cut -d' ' -f1 | cut -c1-8)
+          else
+            CARGO_LOCK_HASH="no-lock"
+          fi
+          
+          # Use delimiters for multiline output to avoid issues
           echo "additions=$ADDITIONS" >> $GITHUB_OUTPUT
           echo "deletions=$DELETIONS" >> $GITHUB_OUTPUT
           echo "short_sha=$SHORT_SHA" >> $GITHUB_OUTPUT
-          echo "commit_message=$COMMIT_MSG" >> $GITHUB_OUTPUT
+          echo "cargo_lock_hash=$CARGO_LOCK_HASH" >> $GITHUB_OUTPUT
+          
+          # Use EOF delimiter for safe multiline output
+          {
+            echo "commit_message<<EOF"
+            echo "$COMMIT_MSG"
+            echo "EOF"
+          } >> $GITHUB_OUTPUT
+          
+          {
+            echo "commit_message_escaped<<EOF"
+            echo "$COMMIT_MSG_ESCAPED"
+            echo "EOF"
+          } >> $GITHUB_OUTPUT
+          
           echo "author_name=$AUTHOR_NAME" >> $GITHUB_OUTPUT
+          
+          echo -e "\033[0;32m✅ Statistics calculated:\033[0m"
+          echo -e "  \033[1mCommit:\033[0m $SHORT_SHA"
+          echo -e "  \033[1mAuthor:\033[0m $AUTHOR_NAME"
+          echo -e "  \033[1mChanges:\033[0m +$ADDITIONS / -$DELETIONS"
+          echo -e "  \033[1mCargo Lock:\033[0m $CARGO_LOCK_HASH"
 
   build:
     name: 🔨 Build Rust Binary
@@ -49,44 +102,67 @@ jobs:
     
     steps:
       - name: 📥 Checkout code
-        uses: actions/checkout@v4
+        run: echo -e "\033[0;36m📥 Checking out code...\033[0m"
+        
+      - uses: actions/checkout@v4
       
-      - name: 📦 Cache Docker layers
-        uses: actions/cache@v3
+      - name: 📦 Restore Cargo cache
+        id: cargo-cache
+        uses: actions/cache@v4
         with:
-          path: /tmp/.buildx-cache
-          key: ${{ runner.os }}-buildx-${{ github.sha }}
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            backend/target/
+          key: cargo-${{ runner.os }}-${{ needs.prepare.outputs.cargo_lock_hash }}-${{ hashFiles('backend/Cargo.toml') }}
           restore-keys: |
-            ${{ runner.os }}-buildx-
+            cargo-${{ runner.os }}-${{ needs.prepare.outputs.cargo_lock_hash }}-
+            cargo-${{ runner.os }}-
+      
+      - name: 📊 Cache status
+        run: |
+          if [ "${{ steps.cargo-cache.outputs.cache-hit }}" == "true" ]; then
+            echo -e "\033[0;32m✅ Cache hit! Build will be faster.\033[0m"
+          else
+            echo -e "\033[0;33m⚠️  Cache miss. Building from scratch.\033[0m"
+          fi
       
       - name: 🏗️ Build release binary in Docker
         id: build
         continue-on-error: true
         working-directory: backend
         run: |
-          echo "🔨 Building inside Docker (rust:1.92-slim-bookworm)..."
+          echo -e "\033[0;36m🔨 Building inside Docker (rust:1.92-slim-bookworm)...\033[0m"
           
-          # Build using Docker (no DATABASE_URL needed with runtime queries)
+          # Create target directory if it doesn't exist
+          mkdir -p target
+          
+          # Build using Docker with mounted cache
           docker run --rm \
             -v $(pwd):/workspace \
+            -v ~/.cargo/registry:/usr/local/cargo/registry \
+            -v ~/.cargo/git:/usr/local/cargo/git \
             -w /workspace \
             rust:1.92-slim-bookworm \
             bash -c "
               set -e
-              echo '📦 Installing build dependencies...'
-              apt-get update && apt-get install -y pkg-config libssl-dev
+              echo -e '\033[0;36m📦 Installing build dependencies...\033[0m'
+              apt-get update -qq && apt-get install -y -qq pkg-config libssl-dev > /dev/null 2>&1
               
-              echo '🔨 Building release binary...'
-              cargo build --release
+              echo -e '\033[0;36m🔨 Building release binary (with incremental compilation)...\033[0m'
+              export CARGO_INCREMENTAL=1
+              cargo build --release --color=always
               
-              echo '✅ Build complete!'
+              echo -e '\033[0;32m✅ Build complete!\033[0m'
               ls -lh target/release/marbot
             "
           
-          echo "📊 Binary information:"
+          echo -e "\033[0;32m📊 Binary information:\033[0m"
           ls -lh target/release/marbot
           file target/release/marbot
-          ldd target/release/marbot || echo "Static binary"
+          ldd target/release/marbot 2>/dev/null || echo -e "\033[0;33m⚡ Static binary\033[0m"
       
       - name: 🔍 Check if binary exists
         id: binary-check
@@ -94,10 +170,14 @@ jobs:
         run: |
           if [ -f "target/release/marbot" ]; then
             echo "exists=true" >> $GITHUB_OUTPUT
-            echo "✅ Binary found!"
+            echo -e "\033[0;32m✅ Binary found!\033[0m"
+            
+            # Get size for logging
+            SIZE=$(du -h target/release/marbot | cut -f1)
+            echo -e "\033[1mBinary size:\033[0m $SIZE"
           else
             echo "exists=false" >> $GITHUB_OUTPUT
-            echo "❌ Binary not found!"
+            echo -e "\033[0;31m❌ Binary not found!\033[0m"
           fi
       
       - name: 🔐 Generate SHA256 checksum
@@ -105,6 +185,8 @@ jobs:
         if: steps.binary-check.outputs.exists == 'true'
         working-directory: backend
         run: |
+          echo -e "\033[0;36m🔐 Generating SHA256 checksum...\033[0m"
+          
           # Fix permissions first (Docker ran as root)
           sudo chown -R $USER:$USER target/release
           
@@ -112,7 +194,8 @@ jobs:
           sha256sum marbot > marbot.sha256
           CHECKSUM=$(cat marbot.sha256 | awk '{print $1}')
           echo "checksum=$CHECKSUM" >> $GITHUB_OUTPUT
-          echo "✅ SHA256: $CHECKSUM"
+          
+          echo -e "\033[0;32m✅ SHA256:\033[0m \033[1m$CHECKSUM\033[0m"
           cat marbot.sha256
       
       - name: 📦 Upload binary artifact
@@ -125,16 +208,17 @@ jobs:
             backend/target/release/marbot.sha256
           retention-days: 1
           if-no-files-found: error
+          compression-level: 9
       
       - name: 📝 Set build result
         id: build-result
         run: |
           if [ "${{ steps.binary-check.outputs.exists }}" == "true" ]; then
             echo "success=true" >> $GITHUB_OUTPUT
-            echo "✅ Build succeeded - binary built with Debian Bookworm GLIBC"
+            echo -e "\033[0;32m✅ Build succeeded - binary built with Debian Bookworm GLIBC\033[0m"
           else
             echo "success=false" >> $GITHUB_OUTPUT
-            echo "⚠️ Build failed - will fallback to VPS build"
+            echo -e "\033[0;33m⚠️  Build failed - will fallback to VPS build\033[0m"
           fi
 
   deploy:
@@ -146,17 +230,19 @@ jobs:
     
     steps:
       - name: 📥 Checkout full repository
-        uses: actions/checkout@v4
+        run: echo -e "\033[0;36m📥 Checking out repository...\033[0m"
+        
+      - uses: actions/checkout@v4
       
       - name: 🔍 Check build status
         id: build-check
         run: |
           if [ "${{ needs.build.outputs.build-success }}" == "true" ]; then
             echo "mode=prebuilt" >> $GITHUB_OUTPUT
-            echo "✅ Using prebuilt binary from GitHub Actions"
+            echo -e "\033[0;32m✅ Using prebuilt binary from GitHub Actions\033[0m"
           else
             echo "mode=vps-build" >> $GITHUB_OUTPUT
-            echo "⚠️ GitHub Actions build failed - will build on VPS"
+            echo -e "\033[0;33m⚠️  GitHub Actions build failed - will build on VPS\033[0m"
           fi
       
       - name: 📥 Download binary artifact
@@ -169,6 +255,8 @@ jobs:
       - name: 📦 Prepare prebuilt deployment package
         if: steps.build-check.outputs.mode == 'prebuilt'
         run: |
+          echo -e "\033[0;36m📦 Preparing prebuilt deployment package...\033[0m"
+          
           # Create clean deployment structure
           mkdir -p deploy/backend
           
@@ -186,13 +274,15 @@ jobs:
           # Create deployment marker
           echo "prebuilt" > deploy/DEPLOY_MODE
           
-          echo "✅ Prebuilt package ready"
-          echo "📊 Package contents:"
-          ls -laR deploy/
+          echo -e "\033[0;32m✅ Prebuilt package ready\033[0m"
+          echo -e "\033[1m📊 Package contents:\033[0m"
+          du -sh deploy/*
       
       - name: 📦 Prepare VPS build deployment package
         if: steps.build-check.outputs.mode == 'vps-build'
         run: |
+          echo -e "\033[0;36m📦 Preparing VPS build deployment package...\033[0m"
+          
           # Create clean deployment structure with full source
           mkdir -p deploy
           
@@ -203,20 +293,21 @@ jobs:
           # Create deployment marker
           echo "vps-build" > deploy/DEPLOY_MODE
           
-          echo "✅ VPS build package ready"
-          ls -laR deploy/
+          echo -e "\033[0;32m✅ VPS build package ready\033[0m"
+          du -sh deploy/*
       
       - name: 🔐 Verify binary integrity (prebuilt only)
         if: steps.build-check.outputs.mode == 'prebuilt'
         run: |
-          cd deploy/backend
-          echo "🔍 Verifying SHA256 checksum..."
-          sha256sum -c marbot.sha256
-          echo "✅ Binary integrity verified before transfer"
+          echo -e "\033[0;36m🔐 Verifying binary integrity...\033[0m"
           
-          echo "🔍 Binary information:"
+          cd deploy/backend
+          sha256sum -c marbot.sha256
+          
+          echo -e "\033[0;32m✅ Binary integrity verified before transfer\033[0m"
+          echo -e "\033[1m🔍 Binary information:\033[0m"
           file marbot
-          ldd marbot || echo "Static binary"
+          ldd marbot 2>/dev/null || echo -e "\033[0;33m⚡ Static binary\033[0m"
       
       - name: 📤 Transfer deployment package to VPS
         uses: appleboy/scp-action@v1
@@ -247,15 +338,24 @@ jobs:
           script: |
             set -e
             
+            # Colors for VPS output
+            RED='\033[0;31m'
+            GREEN='\033[0;32m'
+            YELLOW='\033[0;33m'
+            BLUE='\033[0;34m'
+            CYAN='\033[0;36m'
+            BOLD='\033[1m'
+            NC='\033[0m'
+            
             DEPLOY_DIR="/tmp/marbot-deploy-${COMMIT_SHA}"
             PROJECT_DIR="/opt/marbot-academic-bot"
             
-            echo "📦 Deployment package received"
+            echo -e "${CYAN}📦 Deployment package received${NC}"
             ls -la "$DEPLOY_DIR"
             
             # Read deployment mode
             DEPLOY_MODE=$(cat "$DEPLOY_DIR/DEPLOY_MODE")
-            echo "🔧 Deployment mode: $DEPLOY_MODE"
+            echo -e "${BOLD}🔧 Deployment mode:${NC} ${DEPLOY_MODE}"
             
             cd "$PROJECT_DIR"
             
@@ -265,18 +365,18 @@ jobs:
             
             # Copy backend files based on mode
             if [ "$DEPLOY_MODE" = "prebuilt" ]; then
-              echo "✅ Installing prebuilt binary and files"
+              echo -e "${GREEN}✅ Installing prebuilt binary and files${NC}"
               
               # Verify binary integrity on VPS
               cd "$DEPLOY_DIR/backend"
-              echo "🔍 Verifying binary integrity on VPS..."
+              echo -e "${CYAN}🔍 Verifying binary integrity on VPS...${NC}"
               sha256sum -c marbot.sha256 || {
-                echo "❌ Binary integrity check failed on VPS!"
+                echo -e "${RED}❌ Binary integrity check failed on VPS!${NC}"
                 exit 1
               }
-              echo "✅ Binary integrity verified on VPS"
+              echo -e "${GREEN}✅ Binary integrity verified on VPS${NC}"
               
-              echo "🔍 Binary information on VPS:"
+              echo -e "${BOLD}🔍 Binary information on VPS:${NC}"
               file marbot
               
               cd "$PROJECT_DIR"
@@ -290,37 +390,42 @@ jobs:
               
               chmod +x ./backend/marbot-new
               
+              echo -e "${GREEN}⚡ Prebuilt binary ready for deployment${NC}"
+              
             else
-              echo "⚠️ Preparing for VPS build"
+              echo -e "${YELLOW}⚠️  Preparing for VPS build${NC}"
               
               # Replace entire backend directory with fresh source
               rm -rf backend
               cp -r "$DEPLOY_DIR/backend" ./backend
+              
+              echo -e "${YELLOW}📦 Source code ready for VPS build${NC}"
             fi
             
             # Run update script with environment variables
             export COMMIT_SHA COMMIT_MSG AUTHOR ADDITIONS DELETIONS DEPLOY_MODE
+            echo -e "${CYAN}🚀 Running update script...${NC}"
             bash update.sh
             
             # Cleanup
             rm -rf "$DEPLOY_DIR"
             
-            echo "✅ Deployment complete!"
+            echo -e "${GREEN}${BOLD}✅ Deployment complete!${NC}"
       
       - name: ✅ Deployment successful
         run: |
           if [ "${{ steps.build-check.outputs.mode }}" == "prebuilt" ]; then
-            echo "✅ Binary built inside Docker (rust:1.92-slim-bookworm)"
-            echo "✅ GLIBC compatibility ensured"
-            echo "✅ Runtime query validation (no DATABASE_URL needed)"
-            echo "✅ Binary integrity verified with SHA256"
-            echo "✅ Deployed prebuilt binary"
+            echo -e "\033[0;32m✅ Binary built inside Docker (rust:1.92-slim-bookworm)\033[0m"
+            echo -e "\033[0;32m✅ GLIBC compatibility ensured\033[0m"
+            echo -e "\033[0;32m✅ Runtime query validation (no DATABASE_URL needed)\033[0m"
+            echo -e "\033[0;32m✅ Binary integrity verified with SHA256\033[0m"
+            echo -e "\033[0;32m✅ Deployed prebuilt binary\033[0m"
           else
-            echo "⚠️ GitHub Actions build failed"
-            echo "✅ Full source deployed for VPS build"
-            echo "✅ VPS will build from source"
+            echo -e "\033[0;33m⚠️  GitHub Actions build failed\033[0m"
+            echo -e "\033[0;32m✅ Full source deployed for VPS build\033[0m"
+            echo -e "\033[0;32m✅ VPS will build from source\033[0m"
           fi
-          echo "✅ Deployment package transferred successfully"
+          echo -e "\033[0;32m\033[1m✅ Deployment package transferred successfully\033[0m"
 
   notify-success:
     name: 📱 Send Success Notification
@@ -331,7 +436,9 @@ jobs:
     
     steps:
       - name: 📤 Send WhatsApp notification
-        uses: joelwmale/webhook-action@master
+        run: echo -e "\033[0;36m📤 Sending success notification...\033[0m"
+        
+      - uses: joelwmale/webhook-action@master
         with:
           url: ${{ secrets.WAHA_URL }}/api/sendText
           headers: '{"X-Api-Key": "${{ secrets.WAHA_API_KEY }}", "Content-Type": "application/json"}'
@@ -339,7 +446,7 @@ jobs:
             {
               "session": "default",
               "chatId": "${{ secrets.DEBUG_GROUP_ID }}",
-              "text": "*[ MARBOT UPDATE SUCCESS ]*\n_${{ needs.prepare.outputs.commit_message }}_\n\n*[ `#${{ needs.prepare.outputs.short_sha }}` by ${{ needs.prepare.outputs.author_name }} ]* +${{ needs.prepare.outputs.additions }} -${{ needs.prepare.outputs.deletions }}\nhttps://github.com/${{ github.repository }}/commit/${{ needs.prepare.outputs.short_sha }}",
+              "text": "*[ MARBOT UPDATE SUCCESS ]*\n_${{ needs.prepare.outputs.commit_message_escaped }}_\n\n*[ `#${{ needs.prepare.outputs.short_sha }}` by ${{ needs.prepare.outputs.author_name }} ]* +${{ needs.prepare.outputs.additions }} -${{ needs.prepare.outputs.deletions }}\nhttps://github.com/${{ github.repository }}/commit/${{ needs.prepare.outputs.short_sha }}",
               "linkPreview": false
             }
 
@@ -352,7 +459,9 @@ jobs:
     
     steps:
       - name: 📤 Send WhatsApp notification
-        uses: joelwmale/webhook-action@master
+        run: echo -e "\033[0;31m📤 Sending failure notification...\033[0m"
+        
+      - uses: joelwmale/webhook-action@master
         with:
           url: ${{ secrets.WAHA_URL }}/api/sendText
           headers: '{"X-Api-Key": "${{ secrets.WAHA_API_KEY }}", "Content-Type": "application/json"}'
@@ -360,7 +469,7 @@ jobs:
             {
               "session": "default",
               "chatId": "${{ secrets.DEBUG_GROUP_ID }}",
-              "text": "*[ MARBOT UPDATE FAILED ]*\n_${{ needs.prepare.outputs.commit_message }}_\n\n*[ `#${{ needs.prepare.outputs.short_sha }}` by ${{ needs.prepare.outputs.author_name }} ]* +${{ needs.prepare.outputs.additions }} -${{ needs.prepare.outputs.deletions }}\n\n❌ Deployment failed\n🔍 Check logs:\n${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}",
+              "text": "*[ MARBOT UPDATE FAILED ]*\n_${{ needs.prepare.outputs.commit_message_escaped }}_\n\n*[ `#${{ needs.prepare.outputs.short_sha }}` by ${{ needs.prepare.outputs.author_name }} ]* +${{ needs.prepare.outputs.additions }} -${{ needs.prepare.outputs.deletions }}\n\n❌ Deployment failed\n🔍 Check logs:\n${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}",
               "linkPreview": false
             }
 
@@ -388,6 +497,7 @@ jobs:
               echo "**Environment:** rust:1.92-slim-bookworm" >> $GITHUB_STEP_SUMMARY
               echo "**GLIBC:** Compatible with Debian Bookworm" >> $GITHUB_STEP_SUMMARY
               echo "**Query Verification:** Runtime (no DATABASE_URL needed)" >> $GITHUB_STEP_SUMMARY
+              echo "**Caching:** Enabled (Cargo registry + target)" >> $GITHUB_STEP_SUMMARY
             else
               echo "🎉 Deployment completed with VPS build fallback!" >> $GITHUB_STEP_SUMMARY
               echo "" >> $GITHUB_STEP_SUMMARY
@@ -409,7 +519,11 @@ jobs:
           echo "| **Commit** | [\`${{ needs.prepare.outputs.short_sha }}\`](https://github.com/${{ github.repository }}/commit/${{ needs.prepare.outputs.short_sha }}) |" >> $GITHUB_STEP_SUMMARY
           echo "| **Author** | ${{ needs.prepare.outputs.author_name }} |" >> $GITHUB_STEP_SUMMARY
           echo "| **Changes** | +${{ needs.prepare.outputs.additions }} / -${{ needs.prepare.outputs.deletions }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Message** | ${{ needs.prepare.outputs.commit_message }} |" >> $GITHUB_STEP_SUMMARY
+          
+          # Properly escape commit message for markdown table
+          COMMIT_MSG_SAFE=$(echo '${{ needs.prepare.outputs.commit_message }}' | sed 's/|/\\|/g' | sed 's/\*/\\*/g')
+          echo "| **Message** | ${COMMIT_MSG_SAFE} |" >> $GITHUB_STEP_SUMMARY
+          
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### 🔧 Job Results" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
