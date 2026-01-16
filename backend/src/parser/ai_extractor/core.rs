@@ -72,7 +72,7 @@ pub async fn extract_with_ai(
             format!("\"{}\"", quoted_display)
         };
 
-        logger.log(&format!("│ 💬 Quoted    : {}", quoted_truncated));
+        logger.log(&format!("│ 💬 Quoted\t: {}", quoted_truncated));
     }
 
     // Build context

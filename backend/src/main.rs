@@ -599,7 +599,7 @@ async fn webhook(
     // STEP 3: HANDLE MESSAGE BASED ON TYPE
     match message_type {
         MessageType::Command(cmd) => {
-            logger.log(&format!("⚙️  Processing command: {:?}", cmd));
+            logger.log(&format!("⚙️ Processing command: {:?}", cmd));
             let response = handle_command(cmd, sender_phone, sender_name, chat_id, &state.pool, &logger).await;
             
             match response {

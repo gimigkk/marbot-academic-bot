@@ -929,9 +929,9 @@ fn calculate_course_hints(
     
     for ai_course_hint in &hints.course_hints {
         logger.log("│");
-        logger.log(&format!("│ 🎯 Processing   : {}", ai_course_hint.course_name));
-        logger.log(&format!("│    Parallels    : {:?}", ai_course_hint.parallel_codes));
-        logger.log(&format!("│    Deadline Type: {}", ai_course_hint.deadline_type));
+        logger.log(&format!("│ 🎯 Processing\t: {}", ai_course_hint.course_name));
+        logger.log(&format!("│    Parallels\t: {:?}", ai_course_hint.parallel_codes));
+        logger.log(&format!("│    Deadline Type\t: {}", ai_course_hint.deadline_type));
         
         let parallel_schedules = match ai_course_hint.deadline_type.as_str() {
             "next_meeting" | "relative" => {
@@ -945,11 +945,11 @@ fn calculate_course_hints(
                 )
             },
             "explicit" => {
-                logger.log("│    📅 Result    : Explicit date (main AI will parse)");
+                logger.log("│    📅 Result\t: Explicit date (main AI will parse)");
                 vec![]
             },
             _ => {
-                logger.log("│    ❓ Result    : Unknown type");
+                logger.log("│    ❓ Result\t: Unknown type");
                 vec![]
             }
         };
@@ -975,12 +975,12 @@ fn calculate_parallel_schedules(
     logger: &JobLogger,
 ) -> Vec<ParallelSchedule> {
     if parallel_codes.is_empty() {
-        logger.log("│    ⏭️ Result    : Skipped (needs parallel for schedule)");
+        logger.log("│    ⏭️ Result\t: Skipped (needs parallel for schedule)");
         return vec![];
     }
     
     if parallel_codes.contains(&"all".to_string()) {
-        logger.log("│    ⏭️ Result    : Skipped ('all' cannot determine specific schedule)");
+        logger.log("│    ⏭️ Result\t: Skipped ('all' cannot determine specific schedule)");
         return vec![];
     }
     
