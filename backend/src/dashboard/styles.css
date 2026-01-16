@@ -100,9 +100,7 @@ body {
     pointer-events: none;
 }
 
-.search-container.expanded {
-    /* Width set dynamically via JS */
-}
+/* .search-container.expanded - width set dynamically via JS */
 
 .search-icon-btn {
     width: 32px;
@@ -231,7 +229,7 @@ body {
 .view-toggle-container,
 .toggle-collapsed,
 .footer-collapsed {
-    transition: opacity 0.15s ease, visibility 0.15s ease;
+    transition: opacity 0.25s ease, visibility 0.25s ease;
 }
 
 /* Expanded state content */
