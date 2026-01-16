@@ -21,6 +21,9 @@ pub struct JobResponse {
     current_countdown: Option<CountdownResponse>,
     current_trying: Option<String>,
     last_message_ms: Option<u128>,
+    message_body: Option<String>,
+    quoted_message: Option<String>,
+    tags: Vec<String>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -82,6 +85,9 @@ pub async fn get_dashboard_data(
             }),
             current_trying: job.current_trying.clone(),
             last_message_ms: None,
+            message_body: job.message_body.clone(),
+            quoted_message: job.quoted_message.clone(),
+            tags: job.tags.clone(),
         }
     }).collect();
 
@@ -254,6 +260,7 @@ const DASHBOARD_HTML: &str = r#"<!doctype html>
     .sidebar-content,
     .sidebar-footer,
     .view-toggle-container,
+    .search-container,
     .toggle-collapsed,
     .footer-collapsed {
         transition: opacity 0.15s ease, visibility 0.15s ease;
@@ -262,7 +269,8 @@ const DASHBOARD_HTML: &str = r#"<!doctype html>
     /* Expanded state content */
     .sidebar:not(.collapsed) .sidebar-content,
     .sidebar:not(.collapsed) .sidebar-footer,
-    .sidebar:not(.collapsed) .view-toggle-container {
+    .sidebar:not(.collapsed) .view-toggle-container,
+    .sidebar:not(.collapsed) .search-container {
         opacity: 1;
         visibility: visible;
     }
@@ -282,7 +290,8 @@ const DASHBOARD_HTML: &str = r#"<!doctype html>
     /* Collapsed state content */
     .sidebar.collapsed .sidebar-content,
     .sidebar.collapsed .sidebar-footer,
-    .sidebar.collapsed .view-toggle-container {
+    .sidebar.collapsed .view-toggle-container,
+    .sidebar.collapsed .search-container {
         opacity: 0;
         visibility: hidden;
         height: 0;
@@ -323,6 +332,31 @@ const DASHBOARD_HTML: &str = r#"<!doctype html>
     .view-toggle-container {
         padding: 16px;
         flex-shrink: 0;
+    }
+
+    .search-container {
+        padding: 0 16px 12px 16px;
+        flex-shrink: 0;
+    }
+
+    .search-input {
+        width: 100%;
+        padding: 8px 12px;
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        color: var(--text-primary);
+        font-size: 13px;
+        outline: none;
+        transition: border-color 0.2s ease;
+    }
+
+    .search-input:focus {
+        border-color: var(--accent);
+    }
+
+    .search-input::placeholder {
+        color: var(--text-tertiary);
     }
 
     .stats-row {
@@ -458,7 +492,7 @@ const DASHBOARD_HTML: &str = r#"<!doctype html>
         display: flex;
         flex-direction: column;
         gap: 2px;
-        margin: 0 -4px;
+        margin: 0;
     }
 
     .job-item {
@@ -480,6 +514,10 @@ const DASHBOARD_HTML: &str = r#"<!doctype html>
     .job-item.grayed {
         opacity: 0.4;
         pointer-events: none;
+    }
+
+    .job-item.hidden {
+        display: none;
     }
 
     .job-item::before {
@@ -538,6 +576,23 @@ const DASHBOARD_HTML: &str = r#"<!doctype html>
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
+        margin-bottom: 4px;
+    }
+
+    .job-tags {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
+        margin-top: 4px;
+    }
+
+    .job-tag {
+        font-size: 10px;
+        padding: 2px 6px;
+        border-radius: 4px;
+        background: rgba(198, 97, 67, 0.15);
+        color: var(--accent);
+        font-family: 'JetBrains Mono', monospace;
     }
 
     .empty-sidebar {
@@ -716,6 +771,15 @@ const DASHBOARD_HTML: &str = r#"<!doctype html>
                 </button>
             </div>
 
+            <div class="search-container">
+                <input 
+                    type="text" 
+                    class="search-input" 
+                    id="search-input" 
+                    placeholder="Search tasks..."
+                />
+            </div>
+
             <div class="toggle-collapsed">
                 <button class="toggle-icon-btn" id="toggle-icon-btn" title="Toggle view">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -802,6 +866,7 @@ const DASHBOARD_HTML: &str = r#"<!doctype html>
     let clientSideCountdowns = {};
     let jobStartTimes = {};
     let isConnected = true;
+    let searchQuery = '';
 
     const jobSortOrder = {};
     let nextSortIndex = 0;
@@ -820,6 +885,7 @@ const DASHBOARD_HTML: &str = r#"<!doctype html>
     const terminalContent = document.getElementById('terminal-content');
     const topbarSubtitle = document.getElementById('topbar-subtitle');
     const lastUpdateEl = document.getElementById('last-update');
+    const searchInput = document.getElementById('search-input');
 
     let renderedJobIds = new Set();
     let isResizing = false;
@@ -835,6 +901,52 @@ const DASHBOARD_HTML: &str = r#"<!doctype html>
         const savedView = localStorage.getItem(VIEW_KEY);
         if (savedView === 'general') currentView = 'general';
     } catch (e) {}
+
+    // Search input handler
+    searchInput.addEventListener('input', (e) => {
+        searchQuery = e.target.value.toLowerCase();
+        filterJobs();
+    });
+
+    // Filter jobs based on search query
+    function filterJobs() {
+        if (currentView !== 'tasks') return;
+        
+        const jobList = sidebarContent.querySelector('.job-list');
+        if (!jobList) return;
+
+        const items = jobList.querySelectorAll('.job-item');
+        
+        items.forEach(item => {
+            const jobId = item.dataset.jobId;
+            const job = allJobs.find(j => j.id === jobId);
+            
+            if (!job) {
+                item.classList.add('hidden');
+                return;
+            }
+
+            if (!searchQuery) {
+                item.classList.remove('hidden');
+                return;
+            }
+
+            // Search in: tags, message_body, quoted_message, sender, chat_id
+            const searchableText = [
+                ...(job.tags || []),
+                job.message_body || '',
+                job.quoted_message || '',
+                job.sender || '',
+                job.chat_id || ''
+            ].join(' ').toLowerCase();
+
+            if (searchableText.includes(searchQuery)) {
+                item.classList.remove('hidden');
+            } else {
+                item.classList.add('hidden');
+            }
+        });
+    }
 
     // Instant collapse/expand - no delays, handles mid-transition clicks
     collapseBtn.addEventListener('click', () => {
@@ -1100,6 +1212,10 @@ const DASHBOARD_HTML: &str = r#"<!doctype html>
                 if (grayed) jobItem.classList.add(grayed);
                 if (job.id === selectedJobId) jobItem.classList.add('selected');
                 
+                const tagsHtml = (job.tags && job.tags.length > 0) 
+                    ? `<div class="job-tags">${job.tags.map(tag => `<span class="job-tag">${escapeHtml(tag)}</span>`).join('')}</div>`
+                    : '';
+                
                 jobItem.innerHTML = `
                     <div class="job-row">
                         <div class="job-name">
@@ -1109,6 +1225,7 @@ const DASHBOARD_HTML: &str = r#"<!doctype html>
                         <span class="job-duration" data-duration-id="${job.id}">${duration}</span>
                     </div>
                     <div class="job-chat">${escapeHtml(shorten(job.chat_id, 28))}</div>
+                    ${tagsHtml}
                 `;
                 
                 if (index === 0) {
@@ -1158,6 +1275,9 @@ const DASHBOARD_HTML: &str = r#"<!doctype html>
                 }
             }
         });
+
+        // Apply search filter after rendering
+        filterJobs();
     }
 
     function updateClientSideCountdown(jobId, attempt, remaining) {

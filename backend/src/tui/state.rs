@@ -55,7 +55,10 @@ pub struct JobEntry {
     pub started_at: Instant,
     pub completed_at: Option<Instant>,
     pub current_countdown: Option<CountdownState>,
-    pub current_trying: Option<String>, // Stores the current "TRYING" line
+    pub current_trying: Option<String>,
+    pub message_body: Option<String>,
+    pub quoted_message: Option<String>,
+    pub tags: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -65,7 +68,14 @@ pub struct CountdownState {
 }
 
 impl JobEntry {
-    pub fn new(id: String, chat_id: String, sender: String) -> Self {
+    pub fn new(
+        id: String, 
+        chat_id: String, 
+        sender: String,
+        message_body: Option<String>,
+        quoted_message: Option<String>,
+        tags: Vec<String>,
+    ) -> Self {
         Self {
             id,
             chat_id,
@@ -76,6 +86,9 @@ impl JobEntry {
             completed_at: None,
             current_countdown: None,
             current_trying: None,
+            message_body,
+            quoted_message,
+            tags,
         }
     }
 
@@ -250,9 +263,20 @@ impl TuiState {
         }
     }
 
-    pub async fn create_job(&self, id: String, chat_id: String, sender: String) {
+    pub async fn create_job(
+        &self, 
+        id: String, 
+        chat_id: String, 
+        sender: String,
+        message_body: Option<String>,
+        quoted_message: Option<String>,
+        tags: Vec<String>,
+    ) {
         let mut jobs = self.jobs.write().await;
-        jobs.insert(id.clone(), JobEntry::new(id, chat_id, sender));
+        jobs.insert(
+            id.clone(), 
+            JobEntry::new(id, chat_id, sender, message_body, quoted_message, tags)
+        );
     }
 
     pub async fn get_jobs(&self) -> Vec<JobEntry> {

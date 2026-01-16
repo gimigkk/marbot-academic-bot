@@ -373,18 +373,60 @@ async fn webhook(
         }
     }
 
+    // Extract quoted message text and id
+    let (quoted_message_text, quoted_message_id) = if let Some(quoted) = payload.payload.get_quoted_message() {
+        (Some(quoted.text.clone()), Some(quoted.id.clone()))  // Clone both to own them
+    } else {
+        (None, None)
+    };
+
     // ============================================================
     // TUI INTEGRATION: Create job logger
     // ============================================================
     let job_id = tui::generate_job_id();
     let logger = tui::JobLogger::new(job_id.clone(), state.log_tx.clone());
     
+    // Extract tags based on message classification and content
+    let mut tags = Vec::new();
+    
+    // Add classification tag
+    match &message_type {
+        MessageType::Command(cmd) => {
+            tags.push(format!("#{:?}", cmd).to_lowercase());
+        }
+        MessageType::NeedsAI(_) => {
+            tags.push("#ai".to_string());
+        }
+    }
+    
+    // Add content-based tags
+    let body_lower = payload.payload.body.to_lowercase();
+    if body_lower.contains("tugas") || body_lower.contains("assignment") {
+        tags.push("#tugas".to_string());
+    }
+    if body_lower.contains("todo") || body_lower.contains("deadline") {
+        tags.push("#todo".to_string());
+    }
+    if body_lower.contains("update") {
+        tags.push("#update".to_string());
+    }
+    if body_lower.contains("clarif") || body_lower.contains("klarif") {
+        tags.push("#clarification".to_string());
+    }
+    
+    // Store message body and quoted message for search
+    let message_body_for_search = Some(payload.payload.body.clone());
+    let quoted_message_for_search = quoted_message_text.clone();
+    
     // Get TUI state from global storage
     if let Some(tui_state) = TUI_STATE.get() {
         tui_state.create_job(
             job_id.clone(),
             chat_id.to_string(),
-            sender_name.to_string()
+            sender_name.to_string(),
+            message_body_for_search,
+            quoted_message_for_search,
+            tags,
         ).await;
     }
 
@@ -410,13 +452,6 @@ async fn webhook(
     logger.log(&format!("| Sender      : \x1b[32m{}\x1b[0m (\x1b[32m{}\x1b[0m)", sender_name, sender_phone));
     logger.log(&format!("| Body        : \x1b[32m{}\x1b[0m", body_truncated));
     logger.log(&format!("| Type        : \x1b[32m{}\x1b[0m\n", type_display));
-    
-    // Extract quoted message text and id
-    let (quoted_message_text, quoted_message_id) = if let Some(quoted) = payload.payload.get_quoted_message() {
-        (Some(quoted.text.clone()), Some(quoted.id.clone()))  // Clone both to own them
-    } else {
-        (None, None)
-    };
 
     if let Some(ref quoted) = quoted_message_text {
         logger.log(&format!("| Quoted: \"{}\"\n", 
