@@ -106,7 +106,7 @@ pub(super) fn parse_classification(ai_text: &str) -> Result<AIClassification, St
     }
 }
 
-pub(super) fn parse_match_result(ai_text: &str, logger: &JobLogger) -> Result<Option<Uuid>, String> {  // ← Kept logger parameter from feat/tui
+pub(super) fn parse_match_result(ai_text: &str, logger: &JobLogger) -> Result<Option<(Uuid, String)>, String> {  // Change return type
     let cleaned = ai_text.trim()
         .trim_start_matches("```json")
         .trim_start_matches("```")
@@ -123,24 +123,30 @@ pub(super) fn parse_match_result(ai_text: &str, logger: &JobLogger) -> Result<Op
     
     match serde_json::from_str::<MatchResult>(cleaned) {
         Ok(result) => {
-            logger.log(&format!("│ 🔍 Confidence : {}", result.confidence));  // ← Kept logger.log from feat/tui
+            logger.log(&format!("│ 🔍 Confidence : {}", result.confidence));
+            
+            let reason_text = result.reason.clone().unwrap_or_default();
+            
             if let Some(ref reason) = result.reason {
-                logger.log(&format!("│ 📝 Reason     : {}", truncate_for_log(reason, 60)));  // ← Kept logger.log from feat/tui
+                logger.log(&format!("│ 📝 Reason     : {}", truncate_for_log(reason, 60)));
             }
             
             if result.confidence == "high" {
                 if let Some(id_str) = result.assignment_id {
-                    Ok(Some(Uuid::parse_str(&id_str).map_err(|e| e.to_string())?))
+                    Ok(Some((
+                        Uuid::parse_str(&id_str).map_err(|e| e.to_string())?,
+                        reason_text  // Return reason along with UUID
+                    )))
                 } else {
                     Ok(None)
                 }
             } else {
-                logger.log("│ ⚠️ Low confidence match");  // ← Kept logger.log from feat/tui
+                logger.log("│ ⚠️ Low confidence match");
                 Ok(None)
             }
         }
         Err(e) => {
-            logger.log(&format!("│ ❌ Failed to parse match result: {}", e));  // ← Kept logger.log from feat/tui
+            logger.log(&format!("│ ❌ Failed to parse match result: {}", e));
             Ok(None)
         }
     }

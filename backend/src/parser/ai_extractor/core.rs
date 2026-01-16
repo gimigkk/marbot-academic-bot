@@ -638,7 +638,7 @@ pub async fn check_duplicate_assignment(
     existing_assignments: &[Assignment],
     course_map: &HashMap<Uuid, String>,
     logger: &JobLogger,
-) -> Result<Option<Uuid>, String> {
+) -> Result<Option<(Uuid, String)>, String> {  // ← CHANGED: Now returns (Uuid, String)
     let new_numbers = extract_numbers(title);
     let new_type = extract_assignment_type(title);
 
@@ -731,7 +731,7 @@ pub async fn check_duplicate_assignment(
         }
 
         match try_gemini_duplicate_check(&prompt, logger).await {
-            Ok(result) => return Ok(result),
+            Ok(result) => return Ok(result),  // ← Returns Option<(Uuid, String)>
             Err(e) if e == "rate limit" => {
                 logger.log("│ 🔄 Gemini rate limited\t: Trying Groq...");
             }
@@ -739,7 +739,7 @@ pub async fn check_duplicate_assignment(
         }
 
         match try_groq_duplicate_check(&prompt, logger).await {
-            Ok(result) => return Ok(result),
+            Ok(result) => return Ok(result),  // ← Returns Option<(Uuid, String)>
             Err(_) => {
                 if attempt < MAX_RETRIES - 1 {
                     logger.log(&format!("│ ⚠️ Attempt {}/{} failed\t: Retrying duplicate check...", attempt + 1, MAX_RETRIES - 1));
@@ -752,7 +752,7 @@ pub async fn check_duplicate_assignment(
     Err("All duplicate check attempts failed".to_string())
 }
 
-async fn try_gemini_duplicate_check(prompt: &str, logger: &JobLogger) -> Result<Option<Uuid>, String> {
+async fn try_gemini_duplicate_check(prompt: &str, logger: &JobLogger) -> Result<Option<(Uuid, String)>, String> {  // ← CHANGED
     let api_key = std::env::var("GEMINI_API_KEY")
         .map_err(|_| "GEMINI_API_KEY not set".to_string())?;
 
@@ -817,13 +817,15 @@ async fn try_gemini_duplicate_check(prompt: &str, logger: &JobLogger) -> Result<
                     format!("JSON error: {}", e)
                 })?;
 
+            let reason = result.reason.clone();  // ← Get reason
+
             // Make decision and log in one line
             if result.is_duplicate && result.confidence == "high" {
                 if let Some(ref id_str) = result.matched_assignment_id {
                     match Uuid::parse_str(id_str) {
                         Ok(uuid) => {
                             logger.log(&format!("│ ✅ Duplicate Match\t\t: {} (confidence: high)", uuid));
-                            return Ok(Some(uuid));
+                            return Ok(Some((uuid, reason)));  // ← Return tuple
                         }
                         Err(_) => {
                             logger.log(&format!("│ ⚠️ Invalid UUID\t\t: {}", id_str));
@@ -853,7 +855,7 @@ async fn try_gemini_duplicate_check(prompt: &str, logger: &JobLogger) -> Result<
     Err("All Gemini models failed".to_string())
 }
 
-async fn try_groq_duplicate_check(prompt: &str, logger: &JobLogger) -> Result<Option<Uuid>, String> {
+async fn try_groq_duplicate_check(prompt: &str, logger: &JobLogger) -> Result<Option<(Uuid, String)>, String> {  // ← CHANGED
     let api_key = std::env::var("GROQ_API_KEY")
         .map_err(|_| "GROQ_API_KEY not set".to_string())?;
 
@@ -911,13 +913,15 @@ async fn try_groq_duplicate_check(prompt: &str, logger: &JobLogger) -> Result<Op
                     format!("JSON error: {}", e)
                 })?;
 
+            let reason = result.reason.clone();  // ← Get reason
+
             // Make decision and log in one line
             if result.is_duplicate && result.confidence == "high" {
                 if let Some(ref id_str) = result.matched_assignment_id {
                     match Uuid::parse_str(id_str) {
                         Ok(uuid) => {
                             logger.log(&format!("│ ✅ Duplicate Match\t: {} (confidence: high)", uuid));
-                            return Ok(Some(uuid));
+                            return Ok(Some((uuid, reason)));  // ← Return tuple
                         }
                         Err(_) => {
                             logger.log(&format!("│ ⚠️ Invalid UUID\t: {}", id_str));
@@ -954,7 +958,7 @@ pub async fn match_update_to_assignment(
     course_map: &HashMap<Uuid, String>,
     parallel_codes: &[String],
     logger: &JobLogger,
-) -> Result<Option<Uuid>, String> {
+) -> Result<Option<(Uuid, String)>, String> {  // ← CHANGED: Now returns (Uuid, String)
     let prompt = build_matching_prompt(changes, keywords, active_assignments, course_map, parallel_codes);
 
     logger.log("┌──[AI MATCHING]────────────────────────────");
@@ -973,7 +977,7 @@ pub async fn match_update_to_assignment(
         match try_gemini_matching(&prompt, logger).await {
             Ok(result) => {
                 logger.log("└──────────────────────────────────────────────");
-                return Ok(result);
+                return Ok(result);  // ← Returns Option<(Uuid, String)>
             }
             Err(e) if e == "rate limit" => {
                 logger.log("│ 🔄 Falling back to Groq for matching...");
@@ -984,7 +988,7 @@ pub async fn match_update_to_assignment(
         match try_groq_matching(&prompt, logger).await {
             Ok(result) => {
                 logger.log("└──────────────────────────────────────────────");
-                return Ok(result);
+                return Ok(result);  // ← Returns Option<(Uuid, String)>
             }
             Err(_) => {
                 if attempt < MAX_RETRIES - 1 {
@@ -999,7 +1003,7 @@ pub async fn match_update_to_assignment(
     Err("All matching attempts failed".to_string())
 }
 
-async fn try_gemini_matching(prompt: &str, logger: &JobLogger) -> Result<Option<Uuid>, String> {
+async fn try_gemini_matching(prompt: &str, logger: &JobLogger) -> Result<Option<(Uuid, String)>, String> {  // ← CHANGED
     let api_key = std::env::var("GEMINI_API_KEY")
         .map_err(|_| "GEMINI_API_KEY not set in .env".to_string())?;
 
@@ -1055,9 +1059,9 @@ async fn try_gemini_matching(prompt: &str, logger: &JobLogger) -> Result<Option<
                 .map_err(|e| format!("Failed to deserialize: {}", e))?;
 
             let ai_text = extract_ai_text(&gemini_response)?;
-            let result = parse_match_result(ai_text, logger)?;
+            let result = parse_match_result(ai_text, logger)?;  // ← Returns Option<(Uuid, String)>
 
-            return Ok(result);
+            return Ok(result);  // ← Pass through the tuple
         }
 
         all_rate_limited = false;
@@ -1070,7 +1074,7 @@ async fn try_gemini_matching(prompt: &str, logger: &JobLogger) -> Result<Option<
     Err("All Gemini models failed for matching".to_string())
 }
 
-async fn try_groq_matching(prompt: &str, logger: &JobLogger) -> Result<Option<Uuid>, String> {
+async fn try_groq_matching(prompt: &str, logger: &JobLogger) -> Result<Option<(Uuid, String)>, String> {  // ← CHANGED
     let api_key = std::env::var("GROQ_API_KEY")
         .map_err(|_| "GROQ_API_KEY not set".to_string())?;
 
@@ -1120,9 +1124,9 @@ async fn try_groq_matching(prompt: &str, logger: &JobLogger) -> Result<Option<Uu
                 .map_err(|e| format!("Failed to deserialize: {}", e))?;
 
             let ai_text = extract_groq_text(&groq_response)?;
-            let result = parse_match_result(&ai_text, logger)?;
+            let result = parse_match_result(&ai_text, logger)?;  // ← Returns Option<(Uuid, String)>
 
-            return Ok(result);
+            return Ok(result);  // ← Pass through the tuple
         }
 
         clear_trying_line(logger);

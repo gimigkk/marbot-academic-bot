@@ -963,7 +963,7 @@ async fn handle_ai_classification(
                             &logger_clone,  // Pass logger
                         ).await;
                         
-                        if let Ok(Some(id)) = dup_check {
+                        if let Ok(Some((id, reason))) = dup_check { 
                             logger_clone.log(&format!("🔄 \x1b[33mRe-announcement\x1b[0m: \x1b[1m{}\x1b[0m", title));
                             
                             let deadline_parsed = new_deadline.as_ref()
@@ -999,9 +999,15 @@ async fn handle_ai_classification(
                             }
 
                             if let Some(debug_id) = debug_clone {
+                                let reason_display = if !reason.is_empty() {
+                                    format!("\n_{}_", reason)
+                                } else {
+                                    String::new()
+                                };
+                                
                                 let _ = send_reply(
                                     &debug_id,
-                                    &format!("🔄 *UPDATED*: {}\n_{}_", title, changes)
+                                    &format!("🔄 *UPDATED*: {}\n_{}_{}",  title, changes, reason_display)
                                 ).await;
                             }
                             
@@ -1018,9 +1024,9 @@ async fn handle_ai_classification(
                     &active_assignments,
                     &course_map,
                     &parallel_codes,
-                    &logger_clone,  // Pass logger
+                    &logger_clone,
                 ).await {
-                    Ok(Some(assignment_id)) => {
+                    Ok(Some((assignment_id, reason))) => {  // Destructure to get both id and reason
                         let current_title = active_assignments.iter()
                             .find(|a| a.id == assignment_id)
                             .map(|a| a.title.clone())
@@ -1054,8 +1060,6 @@ async fn handle_ai_classification(
                                     course_name.unwrap_or_else(|| "General".to_string())
                                 };
                                 
-                                // AMBIL ID PESAN UNTUK REPLY
-                                // Kita ambil yang terakhir (termasuk pesan update barusan) atau sebelumnya.
                                 let reply_target_id = updated_assign.message_ids.last().cloned();
 
                                 send_academic_alert(
@@ -1063,14 +1067,25 @@ async fn handle_ai_classification(
                                     &course_name_for_alert, 
                                     deadline_parsed, 
                                     &source_chat_clone,
-                                    reply_target_id // Pass ID pesan
+                                    reply_target_id
                                 ).await;
                             }
                             
                             if let Some(debug_id) = debug_clone {
+                                // Include reason in the message
+                                let reason_display = if !reason.is_empty() {
+                                    format!("\n_{}_", reason)
+                                } else {
+                                    String::new()
+                                };
+                                
                                 let _ = send_reply(
                                     &debug_id,
-                                    &format!("🔄 *UPDATED*: {}\n_{}_", current_title, changes)
+                                    &format!("🔄 *UPDATED*: {}\n_{}_{}",  // Add reason here
+                                        current_title, 
+                                        changes,
+                                        reason_display
+                                    )
                                 ).await;
                             }
                         }
@@ -1182,12 +1197,11 @@ async fn handle_single_assignment(
                     final_parallel_codes.as_slice(),
                     &existing_assignments,
                     &course_map,
-                    &logger,  // Pass logger
+                    &logger, 
                 ).await;
                 
                 match &match_result {
-                    Ok(Some(id)) => {
-                        // CLEAN LOG: Just show what's being updated
+                    Ok(Some((id, reason))) => {  // NOW: destructure to get both id and reason
                         logger.log(&format!("🔄 \x1b[33mUpdating\x1b[0m: \x1b[1m{}\x1b[0m", title_clone));
                         
                         let update_result = crud::update_assignment_fields(
@@ -1209,18 +1223,24 @@ async fn handle_single_assignment(
                                 } else {
                                     String::new()
                                 };
+                                
+                                // Include reason in the message
+                                let reason_display = if !reason.is_empty() {
+                                    format!("\n_{}_", reason)
+                                } else {
+                                    String::new()
+                                };
+                                
                                 let _ = send_reply(
                                     debug_id, 
-                                    &format!("{}🔄 *UPDATED*: {}", prefix, title_clone)
+                                    &format!("{}🔄 *UPDATED*: {}{}", prefix, title_clone, reason_display)
                                 ).await;
                             }
                         }
                         return;
                     }
                     Ok(None) => {}
-                    Err(_) => {
-                        // Silent fallback - no need to spam logs
-                    }
+                    Err(_) => {}
                 }
             }
         }
