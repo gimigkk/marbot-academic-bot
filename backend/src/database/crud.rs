@@ -434,9 +434,6 @@ pub async fn get_active_assignments_for_user(
 ) -> Result<(Vec<AssignmentWithCourse>, HashMap<String, String>), sqlx::Error> {
     let now = Utc::now();
     
-    // ... query sql sama seperti sebelumnya ...
-    // ... tidak ada perubahan pada SQL query ...
-    
     // (Bagian fetch existing)
     let assignments = sqlx::query_as::<_, AssignmentWithCourse>(
         r#"
