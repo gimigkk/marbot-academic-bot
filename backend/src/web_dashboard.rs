@@ -141,7 +141,6 @@ const DASHBOARD_HTML: &str = r#"<!doctype html>
         position: relative;
     }
 
-    /* COLLAPSE BUTTON - Fixed position */
     .collapse-btn {
         position: fixed;
         left: 16px;
@@ -171,21 +170,20 @@ const DASHBOARD_HTML: &str = r#"<!doctype html>
     .collapse-btn svg {
         width: 18px;
         height: 18px;
-        transition: transform 0.3s ease;
+        transition: transform 0.2s ease;
     }
 
     .sidebar.collapsed ~ .collapse-btn svg {
         transform: rotate(180deg);
     }
 
-    /* SIDEBAR */
     .sidebar {
         width: 260px;
         background: var(--sidebar-bg);
         border-right: 1px solid var(--border);
         display: flex;
         flex-direction: column;
-        transition: none;
+        transition: width 0.2s cubic-bezier(0.4, 0, 0.2, 1);
         position: relative;
         z-index: 10;
         flex-shrink: 0;
@@ -199,27 +197,6 @@ const DASHBOARD_HTML: &str = r#"<!doctype html>
 
     .sidebar.collapsed {
         width: var(--sidebar-collapsed-width) !important;
-    }
-
-    .sidebar.collapsing {
-        transition: width 0.3s ease;
-    }
-
-    .sidebar.expanding {
-        transition: width 0.3s ease;
-    }
-
-    .sidebar.collapsing .sidebar-content,
-    .sidebar.collapsing .sidebar-footer,
-    .sidebar.collapsing .view-toggle-container {
-        opacity: 0;
-        transition: opacity 0.15s ease;
-    }
-
-    .sidebar.expanding .sidebar-content,
-    .sidebar.expanding .sidebar-footer,
-    .sidebar.expanding .view-toggle-container {
-        transition: opacity 0.15s ease 0.3s;
     }
 
     .resize-handle {
@@ -266,19 +243,67 @@ const DASHBOARD_HTML: &str = r#"<!doctype html>
         flex-shrink: 0;
     }
 
+    .sidebar-main {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
+    }
+
+    /* Smooth fade transitions for all content */
+    .sidebar-content,
+    .sidebar-footer,
+    .view-toggle-container,
+    .toggle-collapsed,
+    .footer-collapsed {
+        transition: opacity 0.15s ease, visibility 0.15s ease;
+    }
+
+    /* Expanded state content */
+    .sidebar:not(.collapsed) .sidebar-content,
+    .sidebar:not(.collapsed) .sidebar-footer,
+    .sidebar:not(.collapsed) .view-toggle-container {
+        opacity: 1;
+        visibility: visible;
+    }
+
+    .sidebar:not(.collapsed) .toggle-collapsed,
+    .sidebar:not(.collapsed) .footer-collapsed {
+        opacity: 0;
+        visibility: hidden;
+        height: 0;
+        padding: 0;
+        border: none;
+        overflow: hidden;
+        flex: 0;
+        min-height: 0;
+    }
+
+    /* Collapsed state content */
     .sidebar.collapsed .sidebar-content,
     .sidebar.collapsed .sidebar-footer,
     .sidebar.collapsed .view-toggle-container {
         opacity: 0;
-        pointer-events: none;
         visibility: hidden;
+        height: 0;
+        padding: 0;
+        border: none;
+        overflow: hidden;
+        flex: 0;
+        min-height: 0;
+    }
+
+    .sidebar.collapsed .toggle-collapsed,
+    .sidebar.collapsed .footer-collapsed {
+        opacity: 1;
+        visibility: visible;
     }
 
     .sidebar-content {
         flex: 1;
         overflow-y: auto;
         padding: 8px 16px;
-        transition: opacity 0.2s ease, visibility 0.2s ease;
+        min-height: 0;
     }
 
     .sidebar-content::-webkit-scrollbar { width: 6px; }
@@ -291,12 +316,13 @@ const DASHBOARD_HTML: &str = r#"<!doctype html>
         border-top: 1px solid var(--border);
         font-size: 12px;
         color: var(--text-secondary);
-        transition: opacity 0.2s ease, visibility 0.2s ease;
+        flex-shrink: 0;
+        margin-top: auto;
     }
 
     .view-toggle-container {
-        padding: 8px 16px;
-        transition: opacity 0.2s ease, visibility 0.2s ease;
+        padding: 16px;
+        flex-shrink: 0;
     }
 
     .stats-row {
@@ -325,11 +351,10 @@ const DASHBOARD_HTML: &str = r#"<!doctype html>
     .stat-value.completed { color: #38bdf8; }
     .stat-value.failed { color: #f87171; }
 
-    /* SINGLE TOGGLE BUTTON */
     .view-toggle-btn {
         width: 100%;
         padding: 10px 16px;
-        background: var(--bg);
+        background: var(--sidebar-bg);
         border: 1px solid var(--border);
         border-radius: 8px;
         color: var(--text-primary);
@@ -365,6 +390,16 @@ const DASHBOARD_HTML: &str = r#"<!doctype html>
         opacity: 1;
     }
 
+    .view-toggle-btn.spinning .toggle-label svg,
+    .toggle-icon-btn.spinning svg {
+        animation: spin 0.3s ease-in-out;
+    }
+
+    @keyframes spin {
+        from { transform: rotate(0deg); }
+        to { transform: rotate(180deg); }
+    }
+
     .toggle-label {
         display: flex;
         align-items: center;
@@ -386,37 +421,12 @@ const DASHBOARD_HTML: &str = r#"<!doctype html>
         color: var(--text-tertiary);
     }
 
-    /* Icon-only toggle for collapsed state */
     .toggle-collapsed {
-        display: none;
         padding: 16px;
+        display: flex;
         align-items: center;
         justify-content: center;
-        opacity: 0;
-        visibility: hidden;
-        transition: opacity 0.15s ease 0.3s, visibility 0s 0.3s;
-    }
-
-    .sidebar.collapsed .view-toggle-container {
-        display: none;
-    }
-
-    .sidebar.collapsed .toggle-collapsed {
-        display: flex;
-        opacity: 1;
-        visibility: visible;
-    }
-
-    .sidebar.collapsing .toggle-collapsed {
-        opacity: 0;
-        visibility: hidden;
-        transition: opacity 0.15s ease, visibility 0s 0.15s;
-    }
-
-    .sidebar.expanding .toggle-collapsed {
-        opacity: 0;
-        visibility: hidden;
-        transition: opacity 0.15s ease;
+        flex-shrink: 0;
     }
 
     .toggle-icon-btn {
@@ -537,9 +547,8 @@ const DASHBOARD_HTML: &str = r#"<!doctype html>
         font-size: 13px;
     }
 
-    /* Collapsed footer with icon stats */
     .footer-collapsed {
-        display: none;
+        display: flex;
         flex-direction: column;
         gap: 8px;
         padding: 16px;
@@ -547,27 +556,8 @@ const DASHBOARD_HTML: &str = r#"<!doctype html>
         align-items: center;
         font-family: 'JetBrains Mono', monospace;
         font-size: 11px;
-        opacity: 0;
-        visibility: hidden;
-        transition: opacity 0.15s ease 0.3s, visibility 0s 0.3s;
-    }
-
-    .sidebar.collapsed .footer-collapsed {
-        display: flex;
-        opacity: 1;
-        visibility: visible;
-    }
-
-    .sidebar.collapsing .footer-collapsed {
-        opacity: 0;
-        visibility: hidden;
-        transition: opacity 0.15s ease, visibility 0s 0.15s;
-    }
-
-    .sidebar.expanding .footer-collapsed {
-        opacity: 0;
-        visibility: hidden;
-        transition: opacity 0.15s ease;
+        flex-shrink: 0;
+        margin-top: auto;
     }
 
     .footer-stat-item {
@@ -593,7 +583,6 @@ const DASHBOARD_HTML: &str = r#"<!doctype html>
         letter-spacing: 0.5px;
     }
 
-    /* MAIN CONTENT */
     .main-content {
         flex: 1;
         display: flex;
@@ -673,7 +662,6 @@ const DASHBOARD_HTML: &str = r#"<!doctype html>
         opacity: 0.7; 
     }
 
-    /* ANSI colors */
     .ansi-30{color:#000;}.ansi-31{color:#f87171;}.ansi-32{color:#4ade80;}
     .ansi-33{color:#eab308;}.ansi-34{color:#38bdf8;}.ansi-35{color:#e879f9;}
     .ansi-36{color:#22d3ee;}.ansi-37{color:#fff;}.ansi-90{color:#888;}
@@ -701,7 +689,6 @@ const DASHBOARD_HTML: &str = r#"<!doctype html>
 </head>
 <body>
 <div class="app-container">
-    <!-- COLLAPSE BUTTON - Fixed position -->
     <button class="collapse-btn" id="collapse-sidebar" title="Toggle sidebar">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
             <rect x="3" y="3" width="18" height="18" rx="2"/>
@@ -709,80 +696,78 @@ const DASHBOARD_HTML: &str = r#"<!doctype html>
         </svg>
     </button>
 
-    <!-- SIDEBAR -->
     <aside class="sidebar" id="sidebar">
         <div class="resize-handle" id="resize-handle"></div>
         <div class="sidebar-spacer"></div>
 
-        <!-- Single toggle button for desktop -->
-        <div class="view-toggle-container">
-            <button class="view-toggle-btn" id="view-toggle-btn">
-                <span class="toggle-label">
+        <div class="sidebar-main">
+            <div class="view-toggle-container">
+                <button class="view-toggle-btn" id="view-toggle-btn">
+                    <span class="toggle-label">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <rect x="3" y="3" width="7" height="7" rx="1"/>
+                            <rect x="3" y="14" width="7" height="7" rx="1"/>
+                            <rect x="14" y="3" width="7" height="7" rx="1"/>
+                            <rect x="14" y="14" width="7" height="7" rx="1"/>
+                        </svg>
+                        <span id="toggle-text">Tasks</span>
+                    </span>
+                    <span class="toggle-arrow">→</span>
+                </button>
+            </div>
+
+            <div class="toggle-collapsed">
+                <button class="toggle-icon-btn" id="toggle-icon-btn" title="Toggle view">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <rect x="3" y="3" width="7" height="7" rx="1"/>
                         <rect x="3" y="14" width="7" height="7" rx="1"/>
                         <rect x="14" y="3" width="7" height="7" rx="1"/>
                         <rect x="14" y="14" width="7" height="7" rx="1"/>
                     </svg>
-                    <span id="toggle-text">Tasks</span>
-                </span>
-                <span class="toggle-arrow">→</span>
-            </button>
-        </div>
+                </button>
+            </div>
 
-        <!-- Icon button for collapsed state -->
-        <div class="toggle-collapsed">
-            <button class="toggle-icon-btn" id="toggle-icon-btn" title="Toggle view">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <rect x="3" y="3" width="7" height="7" rx="1"/>
-                    <rect x="3" y="14" width="7" height="7" rx="1"/>
-                    <rect x="14" y="3" width="7" height="7" rx="1"/>
-                    <rect x="14" y="14" width="7" height="7" rx="1"/>
-                </svg>
-            </button>
-        </div>
+            <div class="sidebar-content" id="sidebar-content">
+                <div class="empty-sidebar">No tasks yet</div>
+            </div>
 
-        <div class="sidebar-content" id="sidebar-content">
-            <div class="empty-sidebar">No tasks yet</div>
-        </div>
-
-        <div class="sidebar-footer">
-            <div class="stats-row">
-                <div class="stat-item">
-                    <span class="stat-label">Active:</span>
-                    <span class="stat-value active" id="stat-active">0</span>
+            <div class="sidebar-footer">
+                <div class="stats-row">
+                    <div class="stat-item">
+                        <span class="stat-label">Active:</span>
+                        <span class="stat-value active" id="stat-active">0</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-label">Done:</span>
+                        <span class="stat-value completed" id="stat-completed">0</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-label">Failed:</span>
+                        <span class="stat-value failed" id="stat-failed">0</span>
+                    </div>
                 </div>
-                <div class="stat-item">
-                    <span class="stat-label">Done:</span>
-                    <span class="stat-value completed" id="stat-completed">0</span>
-                </div>
-                <div class="stat-item">
-                    <span class="stat-label">Failed:</span>
-                    <span class="stat-value failed" id="stat-failed">0</span>
+                <div style="text-align: center; opacity: 0.5; font-size: 10px;">
+                    <span id="last-update">-</span>
                 </div>
             </div>
-            <div style="text-align: center; opacity: 0.5; font-size: 10px;">
-                <span id="last-update">-</span>
-            </div>
-        </div>
 
-        <div class="footer-collapsed">
-            <div class="footer-stat-item active">
-                <span class="footer-stat-value" id="stat-active-collapsed">0</span>
-                <span class="footer-stat-label">Active</span>
-            </div>
-            <div class="footer-stat-item completed">
-                <span class="footer-stat-value" id="stat-completed-collapsed">0</span>
-                <span class="footer-stat-label">Done</span>
-            </div>
-            <div class="footer-stat-item failed">
-                <span class="footer-stat-value" id="stat-failed-collapsed">0</span>
-                <span class="footer-stat-label">Failed</span>
+            <div class="footer-collapsed">
+                <div class="footer-stat-item active">
+                    <span class="footer-stat-value" id="stat-active-collapsed">0</span>
+                    <span class="footer-stat-label">Active</span>
+                </div>
+                <div class="footer-stat-item completed">
+                    <span class="footer-stat-value" id="stat-completed-collapsed">0</span>
+                    <span class="footer-stat-label">Done</span>
+                </div>
+                <div class="footer-stat-item failed">
+                    <span class="footer-stat-value" id="stat-failed-collapsed">0</span>
+                    <span class="footer-stat-label">Failed</span>
+                </div>
             </div>
         </div>
     </aside>
 
-    <!-- MAIN CONTENT -->
     <main class="main-content" id="main-content">
         <div class="topbar">
             <div class="topbar-title">
@@ -818,7 +803,6 @@ const DASHBOARD_HTML: &str = r#"<!doctype html>
     let jobStartTimes = {};
     let isConnected = true;
 
-    // Store job order by assignment index
     const jobSortOrder = {};
     let nextSortIndex = 0;
 
@@ -842,57 +826,28 @@ const DASHBOARD_HTML: &str = r#"<!doctype html>
     let resizeStartX = 0;
     let resizeStartWidth = 0;
 
-    // Initialize sidebar and view state
+    // Initialize
     try {
         const collapsed = localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === 'true';
-        if (collapsed) {
-            sidebar.classList.add('collapsed');
-        }
+        if (collapsed) sidebar.classList.add('collapsed');
         const savedWidth = localStorage.getItem('marbot:sidebarWidth');
-        if (savedWidth && !collapsed) {
-            sidebar.style.width = savedWidth + 'px';
-        }
+        if (savedWidth && !collapsed) sidebar.style.width = savedWidth + 'px';
         const savedView = localStorage.getItem(VIEW_KEY);
-        if (savedView === 'general') {
-            currentView = 'general';
-        }
+        if (savedView === 'general') currentView = 'general';
     } catch (e) {}
 
+    // Instant collapse/expand - no delays, handles mid-transition clicks
     collapseBtn.addEventListener('click', () => {
         const wasCollapsed = sidebar.classList.contains('collapsed');
         
         if (wasCollapsed) {
             // Expanding
-            sidebar.classList.add('expanding');
+            const savedWidth = localStorage.getItem('marbot:sidebarWidth') || '260px';
+            sidebar.style.width = savedWidth;
             sidebar.classList.remove('collapsed');
-            
-            setTimeout(() => {
-                try {
-                    const savedWidth = localStorage.getItem('marbot:sidebarWidth');
-                    if (savedWidth) {
-                        sidebar.style.width = savedWidth + 'px';
-                    } else {
-                        sidebar.style.width = '260px';
-                    }
-                } catch (e) {
-                    sidebar.style.width = '260px';
-                }
-                
-                setTimeout(() => {
-                    sidebar.classList.remove('expanding');
-                }, 450);
-            }, 10);
         } else {
             // Collapsing
-            sidebar.classList.add('collapsing');
-            
-            setTimeout(() => {
-                sidebar.classList.add('collapsed');
-                
-                setTimeout(() => {
-                    sidebar.classList.remove('collapsing');
-                }, 300);
-            }, 150);
+            sidebar.classList.add('collapsed');
         }
         
         try {
@@ -900,7 +855,7 @@ const DASHBOARD_HTML: &str = r#"<!doctype html>
         } catch (e) {}
     });
 
-    // Resize functionality
+    // Resize
     resizeHandle.addEventListener('mousedown', (e) => {
         isResizing = true;
         resizeStartX = e.clientX;
@@ -961,7 +916,6 @@ const DASHBOARD_HTML: &str = r#"<!doctype html>
         
         const toggleLabelSvg = viewToggleBtn.querySelector('.toggle-label svg');
         
-        // Update button appearance
         if (view === 'tasks') {
             viewToggleBtn.classList.remove('general');
             toggleText.textContent = 'Tasks';
@@ -1002,14 +956,17 @@ const DASHBOARD_HTML: &str = r#"<!doctype html>
     }
 
     viewToggleBtn.addEventListener('click', () => {
+        viewToggleBtn.classList.add('spinning');
+        setTimeout(() => viewToggleBtn.classList.remove('spinning'), 300);
         switchView(currentView === 'tasks' ? 'general' : 'tasks');
     });
 
     toggleIconBtn.addEventListener('click', () => {
+        toggleIconBtn.classList.add('spinning');
+        setTimeout(() => toggleIconBtn.classList.remove('spinning'), 300);
         switchView(currentView === 'tasks' ? 'general' : 'tasks');
     });
 
-    // Initialize view
     switchView(currentView);
 
     try {
@@ -1097,14 +1054,12 @@ const DASHBOARD_HTML: &str = r#"<!doctype html>
             return;
         }
 
-        // Assign sort indices to new jobs only (newest first)
         allJobs.forEach(job => {
             if (jobSortOrder[job.id] === undefined) {
                 jobSortOrder[job.id] = nextSortIndex++;
             }
         });
 
-        // Sort by assigned index (higher index = newer = displayed first)
         const sorted = [...allJobs].sort((a, b) => {
             return jobSortOrder[b.id] - jobSortOrder[a.id];
         });
@@ -1121,7 +1076,6 @@ const DASHBOARD_HTML: &str = r#"<!doctype html>
             renderedJobIds.clear();
         }
 
-        // Remove jobs that are no longer in the list
         const existingItems = jobList.querySelectorAll('.job-item');
         existingItems.forEach(item => {
             const id = item.dataset.jobId;
@@ -1131,12 +1085,10 @@ const DASHBOARD_HTML: &str = r#"<!doctype html>
             }
         });
 
-        // Add or update jobs
         displayJobs.forEach((job, index) => {
             let jobItem = jobList.querySelector(`[data-job-id="${job.id}"]`);
             
             if (!jobItem) {
-                // Create new job item
                 jobItem = document.createElement('div');
                 jobItem.className = 'job-item';
                 jobItem.dataset.jobId = job.id;
@@ -1159,7 +1111,6 @@ const DASHBOARD_HTML: &str = r#"<!doctype html>
                     <div class="job-chat">${escapeHtml(shorten(job.chat_id, 28))}</div>
                 `;
                 
-                // Insert at correct position
                 if (index === 0) {
                     jobList.insertBefore(jobItem, jobList.firstChild);
                 } else {
@@ -1174,7 +1125,6 @@ const DASHBOARD_HTML: &str = r#"<!doctype html>
                 
                 renderedJobIds.add(job.id);
             } else {
-                // Update existing job item
                 const durationEl = jobItem.querySelector('.job-duration');
                 if (durationEl && job.status === 'active') {
                     const newDuration = getClientDuration(job.id, job.status);
@@ -1183,18 +1133,15 @@ const DASHBOARD_HTML: &str = r#"<!doctype html>
                     }
                 }
                 
-                // Update status icon
                 const statusIcon = jobItem.querySelector('.job-status-icon');
                 if (statusIcon) {
                     statusIcon.innerHTML = getStatusIcon(job.status);
                 }
                 
-                // Update classes
                 jobItem.className = 'job-item ' + job.status;
                 if (currentView === 'general') jobItem.classList.add('grayed');
                 if (job.id === selectedJobId) jobItem.classList.add('selected');
                 
-                // Update position if needed (maintain order)
                 const currentIndex = Array.from(jobList.children).indexOf(jobItem);
                 if (currentIndex !== index) {
                     if (index === 0) {
