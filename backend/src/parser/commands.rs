@@ -181,13 +181,13 @@ pub async fn handle_command(
             // codes sekarang adalah vector, misal ["k1", "p2"]
             // Join dengan spasi hanya untuk log display
             let codes_display = codes.join(" ");
-            println!("⚙️ SetKelas command: {} [{}] from {}", matkul, codes_display, user_phone);
+            logger.log(&format!("⚙️ SetKelas command: {} [{}] from {}", matkul, codes_display, user_phone));
             
             // Panggil fungsi CRUD yang baru (passing referensi vector)
             match set_user_course_parallel(pool, user_phone, &matkul, &codes).await {
                 Ok(msg) => CommandResponse::Text(msg),
                 Err(e) => {
-                    eprintln!("❌ Error set kelas: {}", e);
+                    logger.log(&format!("❌ Error set kelas: {}", e));
                     CommandResponse::Text("❌ Gagal mengatur kelas. Terjadi kesalahan server.".to_string())
                 }
             }
@@ -196,7 +196,7 @@ pub async fn handle_command(
         BotCommand::Todo => {
             logger.log(&format!("✅ Todo command received from {} ({})", user_name, user_phone));
 
-            match get_active_assignments_for_user(pool, user_phone).await {
+            match get_active_assignments_for_user(pool, user_phone, Some(logger)).await {
                 Ok((assignments, user_settings)) => {
                     let has_settings = !user_settings.is_empty();
                     

@@ -498,20 +498,21 @@ pub async fn get_active_assignments_for_user(
     .await?;
     
     // Ambil setting user
-    let user_settings_rows = sqlx::query!(
+    let user_settings_rows = sqlx::query(
         "SELECT c.name, ucs.parallel_code 
-         FROM user_course_settings ucs
-         JOIN courses c ON ucs.course_id = c.id
-         WHERE ucs.user_id = $1"
+        FROM user_course_settings ucs
+        JOIN courses c ON ucs.course_id = c.id
+        WHERE ucs.user_id = $1"
     )
     .bind(user_id)
     .fetch_all(pool)
     .await?;
-    
+
     let mut settings_map = HashMap::new();
-    for s in user_settings_rows {
-        // s.parallel_code sekarang bisa berisi "k1" atau "k1,p2"
-        settings_map.insert(s.name, s.parallel_code);
+    for row in user_settings_rows {
+        let course_name: String = row.get("name");
+        let parallel_code: String = row.get("parallel_code");
+        settings_map.insert(course_name, parallel_code);
     }
     
     Ok((assignments, settings_map))
@@ -907,20 +908,17 @@ pub async fn set_user_course_parallel(
             let final_code_str = clean_codes.join(",");
             
             // 2. Upsert
-            sqlx::query!(
+            sqlx::query(
                 r#"
                 INSERT INTO user_course_settings (user_id, course_id, parallel_code)
                 VALUES ($1, $2, $3)
                 ON CONFLICT (user_id, course_id) 
                 DO UPDATE SET parallel_code = $3, created_at = NOW()
-                "#,
-                user_id,
-                c.id,
-                final_code_str
+                "#
             )
             .bind(user_id)
             .bind(c.id)
-            .bind(&clean_code)
+            .bind(&final_code_str)  // ← Use final_code_str, not clean_code
             .execute(pool)
             .await?;
             
