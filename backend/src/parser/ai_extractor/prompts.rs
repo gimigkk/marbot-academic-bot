@@ -640,7 +640,7 @@ Return JSON with reasoning:
 {{
   "assignment_id": "uuid"|null,
   "confidence": "high"|"medium"|"low",
-  "reasoning": "Step-by-step explanation of your decision"
+  "reason": "Step-by-step explanation of your decision"
 }}
 
 Rules:

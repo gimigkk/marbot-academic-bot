@@ -669,6 +669,7 @@ pub async fn check_duplicate_assignment(
         )
     }
 
+    // STEP 1: Filter candidates
     let filtered: Vec<&Assignment> = existing_assignments
         .iter()
         .filter(|a| {
@@ -699,9 +700,19 @@ pub async fn check_duplicate_assignment(
         })
         .collect();
 
-    if filtered.is_empty() { return Ok(None); }
+    // Log filtering results
+    if filtered.is_empty() {
+        logger.log(&format!("│ 🔍 Checked {} assignments\t: No candidates (course/parallel/type mismatch)", existing_assignments.len()));
+        return Ok(None);
+    }
 
-    if filtered.len() > 3 { return Ok(None); }
+    if filtered.len() > 3 {
+        logger.log(&format!("│ 🔍 Checked {} assignments\t: Too many candidates ({}) - skipping AI check", existing_assignments.len(), filtered.len()));
+        return Ok(None);
+    }
+
+    // Show what we're checking
+    logger.log(&format!("│ 🔍 Checked {} assignments\t: {} candidates for AI verification", existing_assignments.len(), filtered.len()));
 
     let filtered_owned: Vec<Assignment> = filtered.into_iter().cloned().collect();
     let prompt = build_duplicate_detection_prompt(
@@ -713,6 +724,7 @@ pub async fn check_duplicate_assignment(
         course_map,
     );
 
+    // STEP 2: AI verification with retry
     for attempt in 0..MAX_RETRIES {
         if attempt > 0 {
             retry_with_countdown(attempt, logger).await;
@@ -721,7 +733,7 @@ pub async fn check_duplicate_assignment(
         match try_gemini_duplicate_check(&prompt, logger).await {
             Ok(result) => return Ok(result),
             Err(e) if e == "rate limit" => {
-                logger.log("│ 🔄 Falling back to Groq for duplicate check...");
+                logger.log("│ 🔄 Gemini rate limited\t: Trying Groq...");
             }
             Err(_) => {}
         }
@@ -730,13 +742,13 @@ pub async fn check_duplicate_assignment(
             Ok(result) => return Ok(result),
             Err(_) => {
                 if attempt < MAX_RETRIES - 1 {
-                    logger.log(&format!("│ ⚠️ Duplicate check failed - will retry ({}/{})", attempt + 1, MAX_RETRIES - 1));
+                    logger.log(&format!("│ ⚠️ Attempt {}/{} failed\t: Retrying duplicate check...", attempt + 1, MAX_RETRIES - 1));
                 }
             }
         }
     }
 
-    logger.log(&format!("│ ❌ CRITICAL: Duplicate check failed after {} retries", MAX_RETRIES));
+    logger.log(&format!("│ ❌ All {} retry attempts failed\t: Treating as new assignment", MAX_RETRIES));
     Err("All duplicate check attempts failed".to_string())
 }
 
@@ -797,25 +809,43 @@ async fn try_gemini_duplicate_check(prompt: &str, logger: &JobLogger) -> Result<
                 .map_err(|e| format!("Parse error: {}", e))?;
 
             let ai_text = extract_ai_text(&gemini_response)?;
-            let result: DuplicateCheckResult = serde_json::from_str(&ai_text)
-                .map_err(|e| format!("JSON error: {}", e))?;
 
+            let result: DuplicateCheckResult = serde_json::from_str(&ai_text)
+                .map_err(|e| {
+                    logger.log(&format!("│ ❌ JSON Parse Failed: {} | Raw: {}", 
+                        e, ai_text.chars().take(100).collect::<String>()));
+                    format!("JSON error: {}", e)
+                })?;
+
+            // Make decision and log in one line
             if result.is_duplicate && result.confidence == "high" {
                 if let Some(ref id_str) = result.matched_assignment_id {
-                    if let Ok(uuid) = Uuid::parse_str(id_str) {
-                        return Ok(Some(uuid));
+                    match Uuid::parse_str(id_str) {
+                        Ok(uuid) => {
+                            logger.log(&format!("│ ✅ Duplicate Match\t: {} (confidence: high)", uuid));
+                            return Ok(Some(uuid));
+                        }
+                        Err(_) => {
+                            logger.log(&format!("│ ⚠️ Invalid UUID\t: {}", id_str));
+                            return Ok(None);
+                        }
                     }
+                } else {
+                    logger.log("│ ⚠️ High confidence duplicate but no ID provided");
+                    return Ok(None);
                 }
             } else if result.is_duplicate {
-                logger.log(&format!("│ ⚠️ Low confidence duplicate - Reason: {}", result.reason));
+                logger.log(&format!("│ ⚠️ Low confidence ({})\t: Treating as non-duplicate", result.confidence));
+                return Ok(None);
+            } else {
+                logger.log("│ ✅ Not a duplicate");
+                return Ok(None);
             }
-
-            return Ok(None);
         }
 
         all_rate_limited = false;
         clear_trying_line(logger);
-        logger.log(&format!("│ ❌ FAILEDt\t {} - HTTP {}", model, status));
+        logger.log(&format!("│ ❌ FAILED\t: {} - HTTP {}", model, status));
     }
 
     if all_rate_limited { return Err("rate limit".to_string()); }
@@ -873,20 +903,38 @@ async fn try_groq_duplicate_check(prompt: &str, logger: &JobLogger) -> Result<Op
                 .map_err(|e| format!("Parse error: {}", e))?;
 
             let ai_text = extract_groq_text(&groq_response)?;
+            
             let result: DuplicateCheckResult = serde_json::from_str(&ai_text)
-                .map_err(|e| format!("JSON error: {}", e))?;
+                .map_err(|e| {
+                    logger.log(&format!("│ ❌ JSON Parse Failed: {} | Raw: {}", 
+                        e, ai_text.chars().take(100).collect::<String>()));
+                    format!("JSON error: {}", e)
+                })?;
 
+            // Make decision and log in one line
             if result.is_duplicate && result.confidence == "high" {
                 if let Some(ref id_str) = result.matched_assignment_id {
-                    if let Ok(uuid) = Uuid::parse_str(id_str) {
-                        return Ok(Some(uuid));
+                    match Uuid::parse_str(id_str) {
+                        Ok(uuid) => {
+                            logger.log(&format!("│ ✅ Duplicate Match\t: {} (confidence: high)", uuid));
+                            return Ok(Some(uuid));
+                        }
+                        Err(_) => {
+                            logger.log(&format!("│ ⚠️ Invalid UUID\t: {}", id_str));
+                            return Ok(None);
+                        }
                     }
+                } else {
+                    logger.log("│ ⚠️ High confidence duplicate but no ID provided");
+                    return Ok(None);
                 }
             } else if result.is_duplicate {
-                logger.log(&format!("│ ⚠️ Low confidence duplicate - Reason: {}", result.reason));
+                logger.log(&format!("│ ⚠️ Low confidence ({})\t: Treating as non-duplicate", result.confidence));
+                return Ok(None);
+            } else {
+                logger.log("│ ✅ Not a duplicate");
+                return Ok(None);
             }
-
-            return Ok(None);
         }
 
         clear_trying_line(logger);

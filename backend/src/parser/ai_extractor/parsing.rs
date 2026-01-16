@@ -47,6 +47,7 @@ pub struct Part {
 pub(super) struct DuplicateCheckResult {
     pub is_duplicate: bool,
     pub confidence: String,
+    #[serde(alias = "reasoning", alias = "explanation")]
     pub reason: String,
     #[serde(default)]
     pub matched_assignment_id: Option<String>,
