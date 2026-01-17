@@ -385,39 +385,60 @@ async fn webhook(
     // ============================================================
     let job_id = tui::generate_job_id();
     let logger = tui::JobLogger::new(job_id.clone(), state.log_tx.clone());
-    
-    // Extract tags based on message classification and content
+
+    // Extract tags based on message classification
     let mut tags = Vec::new();
-    
+
     // Add classification tag
     match &message_type {
         MessageType::Command(cmd) => {
-            tags.push(format!("#{:?}", cmd).to_lowercase());
+            use crate::models::BotCommand;
+            let cmd_tag = match cmd {
+                BotCommand::Ping => "ping",
+                BotCommand::Tugas => "tugas",
+                BotCommand::Todo => "todo",
+                BotCommand::Today => "today",
+                BotCommand::Week => "week",
+                BotCommand::Help => "help",
+                BotCommand::Undo => "undo",
+                BotCommand::Done(_) => "done",
+                BotCommand::Delete(_) => "delete",
+                BotCommand::Expand(_) => "expand",
+                BotCommand::SetKelas(_, _) => "setkelas",
+                BotCommand::MyKelas => "mykelas",
+                BotCommand::MissingArgument(_) => "error",
+                BotCommand::UnknownCommand(_) => "unknown",
+            };
+            tags.push(format!("#{}", cmd_tag));
         }
         MessageType::NeedsAI(_) => {
             tags.push("#ai".to_string());
+            
+            // Add content-based tags for AI messages
+            let body_lower = payload.payload.body.to_lowercase();
+            if body_lower.contains("tugas") || body_lower.contains("assignment") {
+                tags.push("#tugas".to_string());
+            }
+            if body_lower.contains("todo") || body_lower.contains("deadline") {
+                tags.push("#todo".to_string());
+            }
+            if body_lower.contains("update") {
+                tags.push("#update".to_string());
+            }
+            if body_lower.contains("clarif") || body_lower.contains("klarif") {
+                tags.push("#clarification".to_string());
+            }
         }
     }
-    
-    // Add content-based tags
-    let body_lower = payload.payload.body.to_lowercase();
-    if body_lower.contains("tugas") || body_lower.contains("assignment") {
-        tags.push("#tugas".to_string());
-    }
-    if body_lower.contains("todo") || body_lower.contains("deadline") {
-        tags.push("#todo".to_string());
-    }
-    if body_lower.contains("update") {
-        tags.push("#update".to_string());
-    }
-    if body_lower.contains("clarif") || body_lower.contains("klarif") {
-        tags.push("#clarification".to_string());
-    }
-    
+
+    // Remove duplicates
+    tags.sort();
+    tags.dedup();
+
     // Store message body and quoted message for search
     let message_body_for_search = Some(payload.payload.body.clone());
     let quoted_message_for_search = quoted_message_text.clone();
-    
+
     // Get TUI state from global storage
     if let Some(tui_state) = TUI_STATE.get() {
         tui_state.create_job(

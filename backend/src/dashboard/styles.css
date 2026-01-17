@@ -30,7 +30,6 @@ body {
     position: relative;
 }
 
-/* Top-left control buttons container */
 .top-left-controls {
     position: fixed;
     left: 16px;
@@ -76,7 +75,6 @@ body {
     transform: rotate(180deg);
 }
 
-/* Search container - starts as button, expands to input */
 .search-container {
     display: flex;
     align-items: center;
@@ -99,8 +97,6 @@ body {
     visibility: hidden;
     pointer-events: none;
 }
-
-/* .search-container.expanded - width set dynamically via JS */
 
 .search-icon-btn {
     width: 32px;
@@ -223,7 +219,6 @@ body {
     min-height: 0;
 }
 
-/* Smooth fade transitions for all content */
 .sidebar-content,
 .sidebar-footer,
 .view-toggle-container,
@@ -232,7 +227,6 @@ body {
     transition: opacity 0.25s ease, visibility 0.25s ease;
 }
 
-/* Expanded state content */
 .sidebar:not(.collapsed) .sidebar-content,
 .sidebar:not(.collapsed) .sidebar-footer,
 .sidebar:not(.collapsed) .view-toggle-container {
@@ -252,7 +246,6 @@ body {
     min-height: 0;
 }
 
-/* Collapsed state content */
 .sidebar.collapsed .sidebar-content,
 .sidebar.collapsed .sidebar-footer,
 .sidebar.collapsed .view-toggle-container {
@@ -509,23 +502,29 @@ body {
     font-family: 'JetBrains Mono', monospace;
 }
 
-.job-chat {
-    font-size: 11px;
+/* NEW: Job meta row for chat + timestamp */
+.job-meta {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 10px;
     color: var(--text-tertiary);
+    margin-bottom: 4px;
+    gap: 8px;
+}
+
+.job-chat {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    margin-bottom: 4px;
-    opacity: 0;
-    max-height: 0;
-    transition: opacity 0.2s ease, max-height 0.2s ease, margin 0.2s ease;
+    flex: 1;
+    min-width: 0;
 }
 
-.job-item:hover .job-chat,
-.job-item.selected .job-chat {
-    opacity: 1;
-    max-height: 20px;
-    margin-bottom: 4px;
+.job-timestamp {
+    flex-shrink: 0;
+    font-family: 'JetBrains Mono', monospace;
+    opacity: 0.7;
 }
 
 .job-tags {

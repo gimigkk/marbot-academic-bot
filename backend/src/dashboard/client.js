@@ -18,9 +18,6 @@
     let searchQuery = '';
     let searchExpanded = false;
 
-    const jobSortOrder = {};
-    let nextSortIndex = 0;
-
     const jobDetailHtmlCache = {};
     const jobDetailSig = {};
     let generalHtmlCache = { sig: null, html: null };
@@ -49,7 +46,6 @@
     function updateSearchWidth() {
         if (!searchExpanded) return;
         const sidebarWidth = sidebar.offsetWidth;
-        // left margin (16) + collapse btn (32) + gap (8) + right margin (16) = 72
         const maxWidth = sidebarWidth - 72;
         searchContainer.style.width = maxWidth + 'px';
     }
@@ -101,12 +97,10 @@
         } catch (e) {}
     });
 
-    // Prevent search container clicks from toggling
     searchInput.addEventListener('click', (e) => {
         e.stopPropagation();
     });
 
-    // Collapse search when clicking outside
     document.addEventListener('click', (e) => {
         if (searchExpanded && 
             !searchContainer.contains(e.target) && 
@@ -123,13 +117,11 @@
         }
     });
 
-    // Search input handler
     searchInput.addEventListener('input', (e) => {
         searchQuery = e.target.value.toLowerCase();
         filterJobs();
     });
 
-    // Filter jobs based on search query
     function filterJobs() {
         if (currentView !== 'tasks') return;
         
@@ -152,7 +144,6 @@
                 return;
             }
 
-            // Search in: tags, message_body, quoted_message, sender, chat_id
             const searchableText = [
                 ...(job.tags || []),
                 job.message_body || '',
@@ -169,24 +160,20 @@
         });
     }
 
-    // Instant collapse/expand - no delays, handles mid-transition clicks
     collapseBtn.addEventListener('click', () => {
         const wasCollapsed = sidebar.classList.contains('collapsed');
         
         if (wasCollapsed) {
-            // Expanding
             const savedWidth = localStorage.getItem('marbot:sidebarWidth') || '260px';
             sidebar.style.width = savedWidth;
             sidebar.classList.remove('collapsed');
             searchContainer.classList.remove('hidden');
             collapseBtn.classList.remove('collapsed');
         } else {
-            // Collapsing
             sidebar.classList.add('collapsed');
             searchContainer.classList.add('hidden');
             collapseBtn.classList.add('collapsed');
             
-            // Also collapse search
             if (searchExpanded) {
                 searchExpanded = false;
                 searchContainer.style.width = '32px';
@@ -205,7 +192,6 @@
         } catch (e) {}
     });
 
-    // Resize
     resizeHandle.addEventListener('mousedown', (e) => {
         isResizing = true;
         resizeStartX = e.clientX;
@@ -223,8 +209,6 @@
         const delta = e.clientX - resizeStartX;
         const newWidth = Math.max(200, Math.min(600, resizeStartWidth + delta));
         sidebar.style.width = newWidth + 'px';
-        
-        // Update search width in real-time during resize
         updateSearchWidth();
     });
 
@@ -394,6 +378,24 @@
         return Date.now() - (Number(job.duration_ms) || 0);
     }
 
+    function formatTimestamp(ms) {
+        const date = new Date(ms);
+        const now = new Date();
+        const diffMs = now - date;
+        const diffSec = Math.floor(diffMs / 1000);
+        const diffMin = Math.floor(diffSec / 60);
+        const diffHr = Math.floor(diffMin / 60);
+        
+        // If within last minute: "Xs ago"
+        if (diffSec < 60) return `${diffSec}s ago`;
+        // If within last hour: "Xm ago"
+        if (diffMin < 60) return `${diffMin}m ago`;
+        // If today: "Xh ago"
+        if (diffHr < 24 && date.getDate() === now.getDate()) return `${diffHr}h ago`;
+        // Otherwise: "HH:MM"
+        return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
+    }
+
     function jobSignature(job) {
         const logsLen = job.logs ? job.logs.length : 0;
         const trying = job.current_trying || '';
@@ -409,14 +411,9 @@
             return;
         }
 
-        allJobs.forEach(job => {
-            if (jobSortOrder[job.id] === undefined) {
-                jobSortOrder[job.id] = nextSortIndex++;
-            }
-        });
-
+        // FIX 1: Sort by latest message timestamp (newest first)
         const sorted = [...allJobs].sort((a, b) => {
-            return jobSortOrder[b.id] - jobSortOrder[a.id];
+            return getJobLatestMs(b) - getJobLatestMs(a);
         });
 
         const displayJobs = sorted.slice(0, 30);
@@ -455,8 +452,13 @@
                 if (grayed) jobItem.classList.add(grayed);
                 if (job.id === selectedJobId) jobItem.classList.add('selected');
                 
-                const tagsHtml = (job.tags && job.tags.length > 0) 
-                    ? `<div class="job-tags">${job.tags.map(tag => `<span class="job-tag">${escapeHtml(tag)}</span>`).join('')}</div>`
+                // FIX 2: Add timestamp display
+                const timestamp = formatTimestamp(getJobLatestMs(job));
+                
+                // FIX 3: Clean up tags - remove duplicates and # prefix
+                const cleanTags = [...new Set(job.tags || [])].map(tag => tag.replace(/^#/, ''));
+                const tagsHtml = cleanTags.length > 0
+                    ? `<div class="job-tags">${cleanTags.map(tag => `<span class="job-tag">${escapeHtml(tag)}</span>`).join('')}</div>`
                     : '';
                 
                 jobItem.innerHTML = `
@@ -467,7 +469,10 @@
                         </div>
                         <span class="job-duration" data-duration-id="${job.id}">${duration}</span>
                     </div>
-                    <div class="job-chat">${escapeHtml(shorten(job.chat_id, 28))}</div>
+                    <div class="job-meta">
+                        <span class="job-chat">${escapeHtml(shorten(job.chat_id, 22))}</span>
+                        <span class="job-timestamp">${timestamp}</span>
+                    </div>
                     ${tagsHtml}
                 `;
                 
@@ -490,6 +495,15 @@
                     const newDuration = getClientDuration(job.id, job.status);
                     if (durationEl.textContent !== newDuration) {
                         durationEl.textContent = newDuration;
+                    }
+                }
+                
+                // Update timestamp
+                const timestampEl = jobItem.querySelector('.job-timestamp');
+                if (timestampEl) {
+                    const newTimestamp = formatTimestamp(getJobLatestMs(job));
+                    if (timestampEl.textContent !== newTimestamp) {
+                        timestampEl.textContent = newTimestamp;
                     }
                 }
                 
@@ -519,7 +533,6 @@
             }
         });
 
-        // Apply search filter after rendering
         filterJobs();
     }
 
@@ -627,7 +640,6 @@
     }
 
     function processFetchedData(data) {
-        const prevIds = new Set(allJobs.map(j => j.id));
         allJobs = data.jobs;
         generalLog = data.general_log;
 
@@ -656,7 +668,7 @@
                     if (!latest) return job;
                     return getJobLatestMs(job) > getJobLatestMs(latest) ? job : latest;
                 }, null);
-                if (newest && !prevIds.has(newest.id)) selectedJobId = newest.id;
+                if (newest) selectedJobId = newest.id;
             }
         } catch (e) {}
 
@@ -695,7 +707,7 @@
         if (currentView === 'tasks' && selectedJobId) {
             renderSidebar();
             const job = allJobs.find(j => j.id === selectedJobId);
-            if (job && (job.current_countdown || clientSideCountdowns[jobId])) {
+            if (job && (job.current_countdown || clientSideCountdowns[job.id])) {
                 renderJobDetail();
             }
         }
