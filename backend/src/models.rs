@@ -144,6 +144,7 @@ pub enum BotCommand {
     Help,
     Delete(u32),
     SetKelas(String, Vec<String>),
+    MyKelas,
     UnknownCommand(String),
     MissingArgument(String),
 }
@@ -155,7 +156,13 @@ pub struct UserCourseSetting {
     pub course_id: uuid::Uuid,
     pub parallel_code: String,
 }
-// ===== AI EXTRACTION RESULTS =====
+
+// Struct untuk hasil query MyKelas (gabungan nama matkul & status setting)
+#[derive(Debug, sqlx::FromRow)]
+pub struct UserCourseStatus {
+    pub course_name: String,
+    pub parallel_code: Option<String>, 
+}
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(tag = "type", rename_all = "snake_case")]
