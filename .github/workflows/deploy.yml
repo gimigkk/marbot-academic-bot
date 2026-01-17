@@ -53,8 +53,8 @@ jobs:
           # For display (truncated, basic escaping)
           COMMIT_MSG=$(echo "$COMMIT_MSG_RAW" | head -c 150 | tr '\n' ' ' | tr '\r' ' ' | sed 's/  */ /g' | xargs)
           
-          # For JSON (proper escaping for WhatsApp notifications)
-          COMMIT_MSG_ESCAPED=$(echo "$COMMIT_MSG_RAW" | head -c 150 | tr '\n' ' ' | tr '\r' ' ' | sed 's/  */ /g' | jq -Rs '.' | sed 's/^"//;s/"$//')
+          # For JSON/WhatsApp (proper escaping + trim whitespace + escape underscores)
+          COMMIT_MSG_ESCAPED=$(echo "$COMMIT_MSG_RAW" | head -c 150 | tr '\n' ' ' | tr '\r' ' ' | sed 's/  */ /g' | xargs | sed 's/_/\\_/g' | jq -Rs '.' | sed 's/^"//;s/"$//')
           
           AUTHOR_NAME="${{ github.event.head_commit.author.name }}"
           
