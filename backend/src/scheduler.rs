@@ -25,7 +25,7 @@ pub async fn start_scheduler(
             let logger = JobLogger::new(job_id, log_tx);
             
             logger.log("⏰ REMINDER PAGI (00:00 UTC / 07:00 WIB)");
-            if let Err(e) = run_reminder_task(pool, "☀️ Selamat pagi Ilkomers!", &logger).await {
+            if let Err(e) = run_reminder_task(pool, "_Selamat pagi Ilkomers!_", &logger).await {
                 logger.log(&format!("❌ Error reminder pagi: {}", e));
                 logger.set_status(crate::tui::state::JobStatus::Failed);
             } else {
@@ -79,7 +79,6 @@ pub async fn start_scheduler(
 }
 
 // --- LOGIC REMINDER HARIAN ---
-
 async fn run_reminder_task(
     pool: PgPool,
     greeting: &str,
@@ -93,31 +92,26 @@ async fn run_reminder_task(
     }
 
     let mut message = String::new();
+    message.push_str("🌄*[Pengingat Tugas]*\n");
     message.push_str(greeting);
-    message.push_str("\n*Pengingat Tugas*\n\n");
+    message.push_str("\n\n");
 
     for (i, a) in assignments.iter().enumerate() {
         let status = status_dot(&a.deadline);
         let due_text = humanize_deadline(&a.deadline);
-
-        let course = sanitize_wa_md(&a.course_name);
+        let course = sanitize_wa_md(&a.first_alias);
         let title = sanitize_wa_md(&a.title);
 
-        let desc_line = a
-            .description
-            .as_ref()
-            .map(|d| sanitize_wa_md(d))
-            .map(|d| d.trim().to_string())
-            .filter(|d| !d.is_empty())
-            .map(|d| format!("📝 {}", preview_text(&d, 25)))
-            .unwrap_or_default();
+        // Format parallel codes
+        let parallel_display = if !a.parallel_codes.is_empty() {
+            format!(" [{}]", a.format_parallel_display())
+        } else {
+            String::new()
+        };
 
-        message.push_str(&format!("{} *[{}] [{}]*\n", status, i + 1, title));
-        message.push_str(&format!("📌 {}\n", course));
-        message.push_str(&format!("⏰ {}\n", due_text));
-        if !desc_line.is_empty() {
-            message.push_str(&format!("{}\n", desc_line));
-        }
+        message.push_str(&format!("{} *[{}]* *{}*\n", status, i + 1, title));
+        message.push_str(&format!("*├* {}\n", due_text));
+        message.push_str(&format!("*└* {}{}\n", course, parallel_display));
         message.push('\n');
     }
 
@@ -298,16 +292,6 @@ fn format_date_id(date: NaiveDate) -> String {
         _ => "???",
     };
     format!("{} {} {}", day, month, date.year())
-}
-
-fn preview_text(s: &str, max_chars: usize) -> String {
-    let one_line = s.replace('\n', " ").split_whitespace().collect::<Vec<_>>().join(" ");
-    let mut out = String::new();
-    for (i, ch) in one_line.chars().enumerate() {
-        if i >= max_chars { out.push('…'); return out; }
-        out.push(ch);
-    }
-    out
 }
 
 fn sanitize_wa_md(s: &str) -> String {
