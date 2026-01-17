@@ -23,15 +23,6 @@ use std::sync::Mutex;
 // ===== SHARED CONSTANTS FROM CORE.RS =====
 static PRINT_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 
-const RESET: &str = "\x1b[0m";
-const GRAY: &str = "\x1b[1;30m";
-const CYAN: &str = "\x1b[36m";
-//const MAGENTA: &str = "\x1b[35m";
-const YELLOW: &str = "\x1b[33m";
-const GREEN: &str = "\x1b[32m";
-const RED: &str = "\x1b[31m";
-const BLUE: &str = "\x1b[34m";
-
 const MAX_RETRIES: u32 = 4;
 
 // ===== HELPER FUNCTIONS (unchanged) =====
@@ -179,7 +170,7 @@ fn logger_log_countdown(logger: Option<&JobLogger>, attempt: u32, remaining: u64
     } else {
         // stdout version will be handled by retry_with_countdown
         let _guard = PRINT_LOCK.lock().unwrap();
-        print!("\x1b[1A\x1b[2K│ {}⏳ RETRY #{}{} - Waiting {} seconds...\n", YELLOW, attempt, RESET, remaining);
+        print!("\x1b[1A\x1b[2K│ \x1b[33m⏳ RETRY #{}\x1b[0m - Waiting {} seconds...\n", attempt, remaining);
         let _ = stdout().flush();
     }
 }
@@ -190,7 +181,7 @@ async fn retry_with_countdown(attempt: u32, logger: Option<&JobLogger>) {
     if logger.is_some() {
         // TUI style
         logger_log(logger, "│");
-        logger_log(logger, &format!("│ {}⏳ RETRY #{}{} - Waiting {} seconds...", YELLOW, attempt, RESET, delay));
+        logger_log(logger, &format!("│ \x1b[33m⏳ RETRY #{}\x1b[0m - Waiting {} seconds...", attempt, delay));
 
         for remaining in (1..=delay).rev() {
             tokio::time::sleep(std::time::Duration::from_secs(1)).await;
@@ -201,15 +192,15 @@ async fn retry_with_countdown(attempt: u32, logger: Option<&JobLogger>) {
     } else {
         // stdout style with in-place update
         println!("│");
-        println!("│ {}⏳ RETRY #{}{} - Waiting {} seconds...", YELLOW, attempt, RESET, delay);
+        println!("│ \x1b[33m⏳ RETRY #{}\x1b[0m - Waiting {} seconds...", attempt, delay);
 
         for remaining in (1..=delay).rev().skip(1) {
             tokio::time::sleep(std::time::Duration::from_secs(1)).await;
 
             {
                 let _guard = PRINT_LOCK.lock().unwrap();
-                print!("\x1b[1A\x1b[2K│ {}⏳ RETRY #{}{} - Waiting {} seconds...\n", 
-                       YELLOW, attempt, RESET, remaining);
+                print!("\x1b[1A\x1b[2K│ \x1b[33m⏳ RETRY #{}\x1b[0m - Waiting {} seconds...\n", 
+                       attempt, remaining);
                 let _ = stdout().flush();
             }
         }
@@ -227,12 +218,12 @@ async fn retry_with_countdown(attempt: u32, logger: Option<&JobLogger>) {
 }
 
 fn log_trying_line_tui(model: &str, index: usize, total: usize, logger: &JobLogger) {
-    let formatted = format!("│ {}🔄 TRYING{} : {} ({} / {})", BLUE, RESET, model, index, total);
+    let formatted = format!("│ \x1b[34m🔄 TRYING\x1b[0m : {} ({} / {})", model, index, total);
     logger.log(&formatted);
 }
 
 fn print_trying_line_stdout(model: &str, index: usize, total: usize, last_trying: &mut bool) {
-    let formatted = format!("{}🔄 TRYING{} : {} ({} / {})", BLUE, RESET, model, index, total);
+    let formatted = format!("\x1b[34m🔄 TRYING\x1b[0m : {} ({} / {})", model, index, total);
 
     let _guard = PRINT_LOCK.lock().unwrap();
 
@@ -295,7 +286,7 @@ async fn parse_clarification_response_internal(
     let current_deadline = assignment.deadline.map(|d| d.naive_utc());
     let next_meeting_hint = resolve_next_meeting(assignment);
 
-    logger_log(logger, &format!("\n{}┌── 🤖 CLARIFICATION PARSING ──────────────────{}", GRAY, RESET));
+    logger_log(logger, &format!("\n\x1b[1;30m┌── 🤖 CLARIFICATION PARSING ──────────────────\x1b[0m"));
     
     let message_display = text
         .replace('\n', "\\n")
@@ -303,8 +294,8 @@ async fn parse_clarification_response_internal(
         .take(60)
         .collect::<String>();
     
-    logger_log(logger, &format!("│ {}📝 Message{} : \"{}...\"", CYAN, RESET, message_display));
-    logger_log(logger, &format!("│ {}🔍 Missing{} : {:?}", YELLOW, RESET, missing_fields));
+    logger_log(logger, &format!("│ \x1b[36m📝 Message\x1b[0m : \"{}...\"", message_display));
+    logger_log(logger, &format!("│ \x1b[33m🔍 Missing\x1b[0m : {:?}", missing_fields));
     logger_log(logger, "│");
 
     // RETRY LOGIC
@@ -332,11 +323,11 @@ async fn parse_clarification_response_internal(
         // TIER 1: Try Gemini
         match try_gemini_clarification(&prompt, current_deadline, logger).await {
             Ok(result) => {
-                logger_log(logger, &format!("{}└──────────────────────────────────────────────{}", GRAY, RESET));
+                logger_log(logger, &format!("\x1b[1;30m└──────────────────────────────────────────────\x1b[0m"));
                 return Ok(result);
             }
             Err(e) if e == "rate limit" => {
-                logger_log(logger, &format!("│ {}🔄 Falling back{} to Groq...", YELLOW, RESET));
+                logger_log(logger, &format!("│ \x1b[33m🔄 Falling back\x1b[0m to Groq..."));
                 logger_log(logger, "│");
             }
             Err(_) => {}
@@ -345,7 +336,7 @@ async fn parse_clarification_response_internal(
         // TIER 2: Try Groq reasoning
         match try_groq_reasoning_clarification(&prompt, current_deadline, logger).await {
             Ok(result) => {
-                logger_log(logger, &format!("{}└──────────────────────────────────────────────{}", GRAY, RESET));
+                logger_log(logger, &format!("\x1b[1;30m└──────────────────────────────────────────────\x1b[0m"));
                 return Ok(result);
             }
             Err(_) => {}
@@ -354,13 +345,13 @@ async fn parse_clarification_response_internal(
         // TIER 3: Try Groq standard
         match try_groq_standard_clarification(&prompt, current_deadline, logger).await {
             Ok(result) => {
-                logger_log(logger, &format!("{}└──────────────────────────────────────────────{}", GRAY, RESET));
+                logger_log(logger, &format!("\x1b[1;30m└──────────────────────────────────────────────\x1b[0m"));
                 return Ok(result);
             }
             Err(_) => {
                 if attempt < MAX_RETRIES - 1 {
-                    logger_log(logger, &format!("│ {}⚠️ All models failed{} - will retry ({}/{})", 
-                             YELLOW, RESET, attempt + 1, MAX_RETRIES - 1));
+                    logger_log(logger, &format!("│ \x1b[33m⚠️ All models failed\x1b[0m - will retry ({}/{})", 
+                             attempt + 1, MAX_RETRIES - 1));
                 }
             }
         }
@@ -368,13 +359,13 @@ async fn parse_clarification_response_internal(
 
     // Fallback to regex after all retries
     if logger.is_some() {
-        logger_log(logger, &format!("│ {}❌ CRITICAL{}: All AI models failed after {} retries", RED, RESET, MAX_RETRIES));
-        logger_log(logger, &format!("│ {}🔄 Falling back{} to regex parser...", YELLOW, RESET));
-        logger_log(logger, &format!("{}└──────────────────────────────────────────────{}", GRAY, RESET));
+        logger_log(logger, &format!("│ \x1b[31m❌ CRITICAL\x1b[0m: All AI models failed after {} retries", MAX_RETRIES));
+        logger_log(logger, &format!("│ \x1b[33m🔄 Falling back\x1b[0m to regex parser..."));
+        logger_log(logger, &format!("\x1b[1;30m└──────────────────────────────────────────────\x1b[0m"));
     } else {
-        eprintln!("│ {}❌ CRITICAL{}: All AI models failed after {} retries", RED, RESET, MAX_RETRIES);
-        println!("│ {}🔄 Falling back{} to regex parser...", YELLOW, RESET);
-        println!("{}└──────────────────────────────────────────────{}", GRAY, RESET);
+        eprintln!("│ \x1b[31m❌ CRITICAL\x1b[0m: All AI models failed after {} retries", MAX_RETRIES);
+        println!("│ \x1b[33m🔄 Falling back\x1b[0m to regex parser...");
+        println!("\x1b[1;30m└──────────────────────────────────────────────\x1b[0m");
     }
     
     parse_natural_language_fallback(text, current_deadline, next_meeting_hint)
@@ -449,10 +440,10 @@ async fn try_gemini_clarification(
                 if let Some(_l) = logger {
                     // TUI: clear trying marker then log failure
                     // JobLogger doesn't need clear marker; just log
-                    logger_log(logger, &format!("│ {}❌ FAILED{} : {} - Network error", RED, RESET, model));
+                    logger_log(logger, &format!("│ \x1b[31m❌ FAILED\x1b[0m : {} - Network error", model));
                 } else {
                     clear_previous_trying_stdout(&mut last_trying);
-                    println!("│ {}❌ FAILED{} : {} - Network error", RED, RESET, model);
+                    println!("│ \x1b[31m❌ FAILED\x1b[0m : {} - Network error", model);
                 }
                 continue;
             }
@@ -467,7 +458,7 @@ async fn try_gemini_clarification(
         
         if status.is_success() {
             if logger.is_none() { clear_previous_trying_stdout(&mut last_trying); }
-            logger_log(logger, &format!("│ {}✅ SUCCESS{} : {} (Gemini {}/{})", GREEN, RESET, model, index, GEMINI_MODELS.len()));
+            logger_log(logger, &format!("│ \x1b[32m✅ SUCCESS\x1b[0m : {} (Gemini {}/{})", model, index, GEMINI_MODELS.len()));
             
             let gemini_response: GeminiResponse = response.json().await
                 .map_err(|e| format!("Failed to deserialize: {}", e))?;
@@ -478,7 +469,7 @@ async fn try_gemini_clarification(
         
         all_rate_limited = false;
         if logger.is_none() { clear_previous_trying_stdout(&mut last_trying); }
-        logger_log(logger, &format!("│ {}❌ FAILED{} : {} - HTTP {}", RED, RESET, model, status));
+        logger_log(logger, &format!("│ \x1b[31m❌ FAILED\x1b[0m : {} - HTTP {}", model, status));
     }
     
     if all_rate_limited {
@@ -531,7 +522,7 @@ async fn try_groq_reasoning_clarification(
             Ok(r) => r,
             Err(_) => {
                 if logger.is_none() { clear_previous_trying_stdout(&mut last_trying); }
-                logger_log(logger, &format!("│ {}❌ FAILED{} : {} - Network error", RED, RESET, model));
+                logger_log(logger, &format!("│ \x1b[31m❌ FAILED\x1b[0m : {} - Network error", model));
                 continue;
             }
         };
@@ -545,7 +536,7 @@ async fn try_groq_reasoning_clarification(
         
         if status.is_success() {
             if logger.is_none() { clear_previous_trying_stdout(&mut last_trying); }
-            logger_log(logger, &format!("│ {}✅ SUCCESS{} : {} (Groq Reasoning {}/{})", GREEN, RESET, model, index, GROQ_REASONING_MODELS.len()));
+            logger_log(logger, &format!("│ \x1b[32m✅ SUCCESS\x1b[0m : {} (Groq Reasoning {}/{})", model, index, GROQ_REASONING_MODELS.len()));
             
             let groq_response: GroqResponse = response.json().await
                 .map_err(|e| format!("Failed to deserialize: {}", e))?;
@@ -555,7 +546,7 @@ async fn try_groq_reasoning_clarification(
         }
         
         if logger.is_none() { clear_previous_trying_stdout(&mut last_trying); }
-        logger_log(logger, &format!("│ {}❌ FAILED{} : {} - HTTP {}", RED, RESET, model, status));
+        logger_log(logger, &format!("│ \x1b[31m❌ FAILED\x1b[0m : {} - HTTP {}", model, status));
     }
     
     Err("All Groq reasoning models failed".to_string())
@@ -603,7 +594,7 @@ async fn try_groq_standard_clarification(
             Ok(r) => r,
             Err(_) => {
                 if logger.is_none() { clear_previous_trying_stdout(&mut last_trying); }
-                logger_log(logger, &format!("│ {}❌ FAILED{} : {} - Network error", RED, RESET, model));
+                logger_log(logger, &format!("│ \x1b[31m❌ FAILED\x1b[0m : {} - Network error", model));
                 continue;
             }
         };
@@ -617,7 +608,7 @@ async fn try_groq_standard_clarification(
         
         if status.is_success() {
             if logger.is_none() { clear_previous_trying_stdout(&mut last_trying); }
-            logger_log(logger, &format!("│ {}✅ SUCCESS{} : {} (Groq Standard {}/{})", GREEN, RESET, model, index, GROQ_TEXT_MODELS.len()));
+            logger_log(logger, &format!("│ \x1b[32m✅ SUCCESS\x1b[0m : {} (Groq Standard {}/{})", model, index, GROQ_TEXT_MODELS.len()));
             
             let groq_response: GroqResponse = response.json().await
                 .map_err(|e| format!("Failed to deserialize: {}", e))?;
@@ -627,7 +618,7 @@ async fn try_groq_standard_clarification(
         }
         
         if logger.is_none() { clear_previous_trying_stdout(&mut last_trying); }
-        logger_log(logger, &format!("│ {}❌ FAILED{} : {} - HTTP {}", RED, RESET, model, status));
+        logger_log(logger, &format!("│ \x1b[31m❌ FAILED\x1b[0m : {} - HTTP {}", model, status));
     }
     
     Err("All Groq standard models failed".to_string())
@@ -939,7 +930,7 @@ fn detect_parallel_codes(text: &str) -> Vec<String> {
     let mut codes = Vec::new();
     if text.contains("semua") || text.contains("all") { return vec!["ALL".to_string()]; }
     
-    static RE_CODE: Lazy<Regex> = Lazy::new(|| Regex::new(r"\\b([KPR][1-4])\\b").unwrap());
+    static RE_CODE: Lazy<Regex> = Lazy::new(|| Regex::new(r"\b([KPR][1-4])\b").unwrap());
     for caps in RE_CODE.captures_iter(text) {
         codes.push(caps[1].to_uppercase());
     }
