@@ -465,7 +465,7 @@
                     <div class="job-row">
                         <div class="job-name">
                             <span class="job-status-icon">${getStatusIcon(job.status)}</span>
-                            <span class="job-sender">${escapeHtml(shorten(job.sender, 20))}</span>
+                            <span class="job-sender">${escapeHtml(job.sender)}</span>
                         </div>
                         <span class="job-duration" data-duration-id="${job.id}">${duration}</span>
                     </div>

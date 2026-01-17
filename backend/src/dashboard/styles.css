@@ -474,6 +474,8 @@ body {
     align-items: center;
     justify-content: space-between;
     margin-bottom: 2px;
+    gap: 8px;
+    min-width: 0;
 }
 
 .job-name {
@@ -483,6 +485,16 @@ body {
     display: flex;
     align-items: center;
     gap: 8px;
+    flex: 1;
+    min-width: 0;
+}
+
+.job-sender {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 1;
+    min-width: 0;
 }
 
 .job-status-icon {
