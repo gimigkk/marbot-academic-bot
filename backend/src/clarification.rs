@@ -170,7 +170,7 @@ fn logger_log_countdown(logger: Option<&JobLogger>, attempt: u32, remaining: u64
     } else {
         // stdout version will be handled by retry_with_countdown
         let _guard = PRINT_LOCK.lock().unwrap();
-        print!("\x1b[1A\x1b[2K│ \x1b[33m⏳ RETRY #{}\x1b[0m - Waiting {} seconds...\n", attempt, remaining);
+        print!("\x1b[1A\x1b[2K│ \x1b[33m⏳ RETRY #{}\x1b[0m - Waiting \x1b[36m{}\x1b[0m seconds...\n", attempt, remaining);
         let _ = stdout().flush();
     }
 }
@@ -181,7 +181,7 @@ async fn retry_with_countdown(attempt: u32, logger: Option<&JobLogger>) {
     if logger.is_some() {
         // TUI style
         logger_log(logger, "│");
-        logger_log(logger, &format!("│ \x1b[33m⏳ RETRY #{}\x1b[0m - Waiting {} seconds...", attempt, delay));
+        logger_log(logger, &format!("│ \x1b[33m⏳ RETRY #{}\x1b[0m - Waiting \x1b[36m{}\x1b[0m seconds...", attempt, delay));
 
         for remaining in (1..=delay).rev() {
             tokio::time::sleep(std::time::Duration::from_secs(1)).await;
@@ -192,14 +192,14 @@ async fn retry_with_countdown(attempt: u32, logger: Option<&JobLogger>) {
     } else {
         // stdout style with in-place update
         println!("│");
-        println!("│ \x1b[33m⏳ RETRY #{}\x1b[0m - Waiting {} seconds...", attempt, delay);
+        println!("│ \x1b[33m⏳ RETRY #{}\x1b[0m - Waiting \x1b[36m{}\x1b[0m seconds...", attempt, delay);
 
         for remaining in (1..=delay).rev().skip(1) {
             tokio::time::sleep(std::time::Duration::from_secs(1)).await;
 
             {
                 let _guard = PRINT_LOCK.lock().unwrap();
-                print!("\x1b[1A\x1b[2K│ \x1b[33m⏳ RETRY #{}\x1b[0m - Waiting {} seconds...\n", 
+                print!("\x1b[1A\x1b[2K│ \x1b[33m⏳ RETRY #{}\x1b[0m - Waiting \x1b[36m{}\x1b[0m seconds...\n", 
                        attempt, remaining);
                 let _ = stdout().flush();
             }
@@ -218,12 +218,12 @@ async fn retry_with_countdown(attempt: u32, logger: Option<&JobLogger>) {
 }
 
 fn log_trying_line_tui(model: &str, index: usize, total: usize, logger: &JobLogger) {
-    let formatted = format!("│ \x1b[34m🔄 TRYING\x1b[0m : {} ({} / {})", model, index, total);
+    let formatted = format!("│ \x1b[34m🔄 TRYING\x1b[0m : \x1b[35m{}\x1b[0m (\x1b[36m{}\x1b[0m / \x1b[36m{}\x1b[0m)", model, index, total);
     logger.log(&formatted);
 }
 
 fn print_trying_line_stdout(model: &str, index: usize, total: usize, last_trying: &mut bool) {
-    let formatted = format!("\x1b[34m🔄 TRYING\x1b[0m : {} ({} / {})", model, index, total);
+    let formatted = format!("\x1b[34m🔄 TRYING\x1b[0m : \x1b[35m{}\x1b[0m (\x1b[36m{}\x1b[0m / \x1b[36m{}\x1b[0m)", model, index, total);
 
     let _guard = PRINT_LOCK.lock().unwrap();
 
@@ -286,7 +286,7 @@ async fn parse_clarification_response_internal(
     let current_deadline = assignment.deadline.map(|d| d.naive_utc());
     let next_meeting_hint = resolve_next_meeting(assignment);
 
-    logger_log(logger, &format!("\n\x1b[1;30m┌── 🤖 CLARIFICATION PARSING ──────────────────\x1b[0m"));
+    logger_log(logger, &format!("\n\x1b[1;30m┌── \x1b[36m🤖 CLARIFICATION PARSING\x1b[1;30m ──────────────────\x1b[0m"));
     
     let message_display = text
         .replace('\n', "\\n")
@@ -294,8 +294,14 @@ async fn parse_clarification_response_internal(
         .take(60)
         .collect::<String>();
     
-    logger_log(logger, &format!("│ \x1b[36m📝 Message\x1b[0m : \"{}...\"", message_display));
-    logger_log(logger, &format!("│ \x1b[33m🔍 Missing\x1b[0m : {:?}", missing_fields));
+    logger_log(logger, &format!("│ \x1b[36m📝 Message\x1b[0m\t: \x1b[37m\"{}\x1b[33m...\x1b[37m\"\x1b[0m", message_display));
+    logger_log(logger, &format!("│ \x1b[33m🔍 Missing\x1b[0m\t: \x1b[31m{:?}\x1b[0m", missing_fields));
+    
+    // Show deadline hint if available
+    if let Some(hint) = next_meeting_hint {
+        logger_log(logger, &format!("│ \x1b[35m📅 Schedule\x1b[0m\t: Next meeting at \x1b[32m{}\x1b[0m", hint.format("%Y-%m-%d %H:%M")));
+    }
+    
     logger_log(logger, "│");
 
     // RETRY LOGIC
@@ -327,7 +333,7 @@ async fn parse_clarification_response_internal(
                 return Ok(result);
             }
             Err(e) if e == "rate limit" => {
-                logger_log(logger, &format!("│ \x1b[33m🔄 Falling back\x1b[0m to Groq..."));
+                logger_log(logger, &format!("│ \x1b[33m🔄 Fallback\x1b[0m\t: Switching to \x1b[35mGroq\x1b[0m..."));
                 logger_log(logger, "│");
             }
             Err(_) => {}
@@ -350,7 +356,7 @@ async fn parse_clarification_response_internal(
             }
             Err(_) => {
                 if attempt < MAX_RETRIES - 1 {
-                    logger_log(logger, &format!("│ \x1b[33m⚠️ All models failed\x1b[0m - will retry ({}/{})", 
+                    logger_log(logger, &format!("│ \x1b[33m⚠️  Attempt {}/{}\x1b[0m\t: All models failed, retrying...", 
                              attempt + 1, MAX_RETRIES - 1));
                 }
             }
@@ -359,12 +365,12 @@ async fn parse_clarification_response_internal(
 
     // Fallback to regex after all retries
     if logger.is_some() {
-        logger_log(logger, &format!("│ \x1b[31m❌ CRITICAL\x1b[0m: All AI models failed after {} retries", MAX_RETRIES));
-        logger_log(logger, &format!("│ \x1b[33m🔄 Falling back\x1b[0m to regex parser..."));
+        logger_log(logger, &format!("│ \x1b[31m❌ CRITICAL\x1b[0m\t: All AI models exhausted after \x1b[33m{}\x1b[0m retries", MAX_RETRIES));
+        logger_log(logger, &format!("│ \x1b[33m🔄 Fallback\x1b[0m\t: Using \x1b[35mregex parser\x1b[0m..."));
         logger_log(logger, &format!("\x1b[1;30m└──────────────────────────────────────────────\x1b[0m"));
     } else {
-        eprintln!("│ \x1b[31m❌ CRITICAL\x1b[0m: All AI models failed after {} retries", MAX_RETRIES);
-        println!("│ \x1b[33m🔄 Falling back\x1b[0m to regex parser...");
+        eprintln!("│ \x1b[31m❌ CRITICAL\x1b[0m\t: All AI models exhausted after \x1b[33m{}\x1b[0m retries", MAX_RETRIES);
+        println!("│ \x1b[33m🔄 Fallback\x1b[0m\t: Using \x1b[35mregex parser\x1b[0m...");
         println!("\x1b[1;30m└──────────────────────────────────────────────\x1b[0m");
     }
     
@@ -438,12 +444,10 @@ async fn try_gemini_clarification(
             Err(_) => {
                 all_rate_limited = false;
                 if let Some(_l) = logger {
-                    // TUI: clear trying marker then log failure
-                    // JobLogger doesn't need clear marker; just log
-                    logger_log(logger, &format!("│ \x1b[31m❌ FAILED\x1b[0m : {} - Network error", model));
+                    logger_log(logger, &format!("│ \x1b[31m❌ FAILED\x1b[0m\t: \x1b[35m{}\x1b[0m - \x1b[33mNetwork error\x1b[0m", model));
                 } else {
                     clear_previous_trying_stdout(&mut last_trying);
-                    println!("│ \x1b[31m❌ FAILED\x1b[0m : {} - Network error", model);
+                    println!("│ \x1b[31m❌ FAILED\x1b[0m\t: \x1b[35m{}\x1b[0m - \x1b[33mNetwork error\x1b[0m", model);
                 }
                 continue;
             }
@@ -453,12 +457,13 @@ async fn try_gemini_clarification(
         
         if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
             if logger.is_none() { clear_previous_trying_stdout(&mut last_trying); }
+            logger_log(logger, &format!("│ \x1b[33m⏳ RATE LIMIT\x1b[0m\t: \x1b[35m{}\x1b[0m - Trying next model...", model));
             continue;
         }
         
         if status.is_success() {
             if logger.is_none() { clear_previous_trying_stdout(&mut last_trying); }
-            logger_log(logger, &format!("│ \x1b[32m✅ SUCCESS\x1b[0m : {} (Gemini {}/{})", model, index, GEMINI_MODELS.len()));
+            logger_log(logger, &format!("│ \x1b[32m✅ SUCCESS\x1b[0m\t: \x1b[35m{}\x1b[0m (Gemini \x1b[36m{}\x1b[0m/\x1b[36m{}\x1b[0m)", model, index, GEMINI_MODELS.len()));
             
             let gemini_response: GeminiResponse = response.json().await
                 .map_err(|e| format!("Failed to deserialize: {}", e))?;
@@ -469,7 +474,7 @@ async fn try_gemini_clarification(
         
         all_rate_limited = false;
         if logger.is_none() { clear_previous_trying_stdout(&mut last_trying); }
-        logger_log(logger, &format!("│ \x1b[31m❌ FAILED\x1b[0m : {} - HTTP {}", model, status));
+        logger_log(logger, &format!("│ \x1b[31m❌ FAILED\x1b[0m\t: \x1b[35m{}\x1b[0m - HTTP \x1b[33m{}\x1b[0m", model, status));
     }
     
     if all_rate_limited {
@@ -522,7 +527,7 @@ async fn try_groq_reasoning_clarification(
             Ok(r) => r,
             Err(_) => {
                 if logger.is_none() { clear_previous_trying_stdout(&mut last_trying); }
-                logger_log(logger, &format!("│ \x1b[31m❌ FAILED\x1b[0m : {} - Network error", model));
+                logger_log(logger, &format!("│ \x1b[31m❌ FAILED\x1b[0m\t: \x1b[35m{}\x1b[0m - \x1b[33mNetwork error\x1b[0m", model));
                 continue;
             }
         };
@@ -531,12 +536,13 @@ async fn try_groq_reasoning_clarification(
         
         if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
             if logger.is_none() { clear_previous_trying_stdout(&mut last_trying); }
+            logger_log(logger, &format!("│ \x1b[33m⏳ RATE LIMIT\x1b[0m\t: \x1b[35m{}\x1b[0m - Trying next model...", model));
             continue;
         }
         
         if status.is_success() {
             if logger.is_none() { clear_previous_trying_stdout(&mut last_trying); }
-            logger_log(logger, &format!("│ \x1b[32m✅ SUCCESS\x1b[0m : {} (Groq Reasoning {}/{})", model, index, GROQ_REASONING_MODELS.len()));
+            logger_log(logger, &format!("│ \x1b[32m✅ SUCCESS\x1b[0m\t: \x1b[35m{}\x1b[0m (Groq Reasoning \x1b[36m{}\x1b[0m/\x1b[36m{}\x1b[0m)", model, index, GROQ_REASONING_MODELS.len()));
             
             let groq_response: GroqResponse = response.json().await
                 .map_err(|e| format!("Failed to deserialize: {}", e))?;
@@ -546,7 +552,7 @@ async fn try_groq_reasoning_clarification(
         }
         
         if logger.is_none() { clear_previous_trying_stdout(&mut last_trying); }
-        logger_log(logger, &format!("│ \x1b[31m❌ FAILED\x1b[0m : {} - HTTP {}", model, status));
+        logger_log(logger, &format!("│ \x1b[31m❌ FAILED\x1b[0m\t: \x1b[35m{}\x1b[0m - HTTP \x1b[33m{}\x1b[0m", model, status));
     }
     
     Err("All Groq reasoning models failed".to_string())
@@ -594,7 +600,7 @@ async fn try_groq_standard_clarification(
             Ok(r) => r,
             Err(_) => {
                 if logger.is_none() { clear_previous_trying_stdout(&mut last_trying); }
-                logger_log(logger, &format!("│ \x1b[31m❌ FAILED\x1b[0m : {} - Network error", model));
+                logger_log(logger, &format!("│ \x1b[31m❌ FAILED\x1b[0m\t: \x1b[35m{}\x1b[0m - \x1b[33mNetwork error\x1b[0m", model));
                 continue;
             }
         };
@@ -603,12 +609,13 @@ async fn try_groq_standard_clarification(
         
         if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
             if logger.is_none() { clear_previous_trying_stdout(&mut last_trying); }
+            logger_log(logger, &format!("│ \x1b[33m⏳ RATE LIMIT\x1b[0m\t: \x1b[35m{}\x1b[0m - Trying next model...", model));
             continue;
         }
         
         if status.is_success() {
             if logger.is_none() { clear_previous_trying_stdout(&mut last_trying); }
-            logger_log(logger, &format!("│ \x1b[32m✅ SUCCESS\x1b[0m : {} (Groq Standard {}/{})", model, index, GROQ_TEXT_MODELS.len()));
+            logger_log(logger, &format!("│ \x1b[32m✅ SUCCESS\x1b[0m\t: \x1b[35m{}\x1b[0m (Groq Standard \x1b[36m{}\x1b[0m/\x1b[36m{}\x1b[0m)", model, index, GROQ_TEXT_MODELS.len()));
             
             let groq_response: GroqResponse = response.json().await
                 .map_err(|e| format!("Failed to deserialize: {}", e))?;
@@ -618,7 +625,7 @@ async fn try_groq_standard_clarification(
         }
         
         if logger.is_none() { clear_previous_trying_stdout(&mut last_trying); }
-        logger_log(logger, &format!("│ \x1b[31m❌ FAILED\x1b[0m : {} - HTTP {}", model, status));
+        logger_log(logger, &format!("│ \x1b[31m❌ FAILED\x1b[0m\t: \x1b[35m{}\x1b[0m - HTTP \x1b[33m{}\x1b[0m", model, status));
     }
     
     Err("All Groq standard models failed".to_string())
@@ -930,7 +937,7 @@ fn detect_parallel_codes(text: &str) -> Vec<String> {
     let mut codes = Vec::new();
     if text.contains("semua") || text.contains("all") { return vec!["ALL".to_string()]; }
     
-    static RE_CODE: Lazy<Regex> = Lazy::new(|| Regex::new(r"\b([KPR][1-4])\b").unwrap());
+    static RE_CODE: Lazy<Regex> = Lazy::new(|| Regex::new(r"\\b([KPR][1-4])\\b").unwrap());
     for caps in RE_CODE.captures_iter(text) {
         codes.push(caps[1].to_uppercase());
     }
