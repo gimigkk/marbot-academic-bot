@@ -712,7 +712,7 @@ fn format_assignments_list(
 
         // Format parallel codes
         let parallel_display = if !a.parallel_codes.is_empty() {
-            format!(" [{}]", a.format_parallel_display())
+            format!(" {}", a.format_parallel_display())
         } else {
             String::new()
         };
