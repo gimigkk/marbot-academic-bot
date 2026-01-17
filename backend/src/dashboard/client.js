@@ -416,7 +416,7 @@
             return getJobLatestMs(b) - getJobLatestMs(a);
         });
 
-        const displayJobs = sorted.slice(0, 30);
+        const displayJobs = sorted.slice(0, 50);
         const currentJobIds = new Set(displayJobs.map(j => j.id));
 
         let jobList = sidebarContent.querySelector('.job-list');
@@ -465,7 +465,7 @@
                     <div class="job-row">
                         <div class="job-name">
                             <span class="job-status-icon">${getStatusIcon(job.status)}</span>
-                            <span class="job-sender">${escapeHtml(job.sender)}</span>
+                            <span class="job-sender">${escapeHtml(shorten(job.sender, 20))}</span>
                         </div>
                         <span class="job-duration" data-duration-id="${job.id}">${duration}</span>
                     </div>
