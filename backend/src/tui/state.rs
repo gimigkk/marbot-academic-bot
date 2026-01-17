@@ -1,7 +1,7 @@
 // src/tui/state.rs
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Instant, SystemTime};  // Add SystemTime here
 use tokio::sync::{mpsc, RwLock};
 
 // ===== JOB STATUS =====
@@ -52,13 +52,16 @@ pub struct JobEntry {
     pub sender: String,
     pub status: JobStatus,
     pub logs: Vec<String>,
-    pub started_at: Instant,
+    pub started_at: SystemTime,  // Changed from Instant to SystemTime
     pub completed_at: Option<Instant>,
     pub current_countdown: Option<CountdownState>,
     pub current_trying: Option<String>,
     pub message_body: Option<String>,
     pub quoted_message: Option<String>,
     pub tags: Vec<String>,
+    
+    // Keep Instant for duration calculation
+    started_at_instant: Instant,
 }
 
 #[derive(Debug, Clone)]
@@ -82,7 +85,8 @@ impl JobEntry {
             sender,
             status: JobStatus::Active,
             logs: Vec::new(),
-            started_at: Instant::now(),
+            started_at: SystemTime::now(),  // SystemTime for timestamps
+            started_at_instant: Instant::now(),  // Instant for duration
             completed_at: None,
             current_countdown: None,
             current_trying: None,
@@ -95,8 +99,8 @@ impl JobEntry {
     #[allow(non_snake_case)]
     pub fn duration(&self) -> std::time::Duration {
         match self.completed_at {
-            Some(end) => end.duration_since(self.started_at),
-            None => Instant::now().duration_since(self.started_at),
+            Some(end) => end.duration_since(self.started_at_instant),
+            None => Instant::now().duration_since(self.started_at_instant),
         }
     }
 

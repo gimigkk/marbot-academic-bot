@@ -808,23 +808,6 @@ fn format_date_id(date: NaiveDate) -> String {
     format!("{} {} {}", day, month, date.year())
 }
 
-fn preview_text(s: &str, max_chars: usize) -> String {
-    let one_line = s
-        .replace('\n', " ")
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ");
-
-    let mut out = String::new();
-    for (i, ch) in one_line.chars().enumerate() {
-        if i >= max_chars {
-            out.push('…');
-            return out;
-        }
-        out.push(ch);
-    }
-    out
-}
 
 fn sanitize_wa_md(s: &str) -> String {
     s.replace('*', "×")

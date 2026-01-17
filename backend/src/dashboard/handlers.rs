@@ -216,26 +216,34 @@ pub async fn get_dashboard_data(State(state): State<AppState>) -> Json<Dashboard
 
     let job_responses: Vec<JobResponse> = jobs
         .iter()
-        .map(|job| JobResponse {
-            id: job.id.clone(),
-            chat_id: job.chat_id.clone(),
-            sender: job.sender.clone(),
-            status: match job.status {
-                JobStatus::Active => "active".to_string(),
-                JobStatus::Completed => "completed".to_string(),
-                JobStatus::Failed => "failed".to_string(),
-            },
-            logs: job.logs.clone(),
-            duration_ms: job.duration().as_millis(),
-            current_countdown: job.current_countdown.as_ref().map(|cd| CountdownResponse {
-                attempt: cd.attempt,
-                remaining: cd.remaining,
-            }),
-            current_trying: job.current_trying.clone(),
-            last_message_ms: None,
-            message_body: job.message_body.clone(),
-            quoted_message: job.quoted_message.clone(),
-            tags: job.tags.clone(),
+        .map(|job| {
+            // Convert the job's creation timestamp to Unix timestamp in milliseconds
+            let last_message_ms = job.started_at
+                .duration_since(std::time::UNIX_EPOCH)
+                .ok()
+                .map(|d| d.as_millis());
+
+            JobResponse {
+                id: job.id.clone(),
+                chat_id: job.chat_id.clone(),
+                sender: job.sender.clone(),
+                status: match job.status {
+                    JobStatus::Active => "active".to_string(),
+                    JobStatus::Completed => "completed".to_string(),
+                    JobStatus::Failed => "failed".to_string(),
+                },
+                logs: job.logs.clone(),
+                duration_ms: job.duration().as_millis(),
+                current_countdown: job.current_countdown.as_ref().map(|cd| CountdownResponse {
+                    attempt: cd.attempt,
+                    remaining: cd.remaining,
+                }),
+                current_trying: job.current_trying.clone(),
+                last_message_ms,
+                message_body: job.message_body.clone(),
+                quoted_message: job.quoted_message.clone(),
+                tags: job.tags.clone(),
+            }
         })
         .collect();
 

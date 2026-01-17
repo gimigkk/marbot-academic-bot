@@ -365,17 +365,20 @@
     }
 
     function getJobLatestMs(job) {
+        // Prioritize the last_message_ms field as it's the actual message timestamp
         if (job.last_message_ms) {
             const n = Number(job.last_message_ms);
             if (!isNaN(n) && n > 0) return n;
         }
+        // Try to extract timestamp from the last log line
         const logs = job.logs || [];
         if (logs.length) {
             const last = logs[logs.length - 1];
             const parsed = extractTimestampFromLog(last);
             if (parsed) return parsed;
         }
-        return Date.now() - (Number(job.duration_ms) || 0);
+        // Fallback: use current time as timestamp (for jobs without proper timestamps)
+        return Date.now();
     }
 
     function formatTimestamp(ms) {
