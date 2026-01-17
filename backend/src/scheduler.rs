@@ -35,24 +35,24 @@ pub async fn start_scheduler(
     })?).await?;
 
     // 17:00 WIB = 10:00 UTC
-    let pool_sore = pool.clone();
-    let log_tx_sore = log_tx.clone();
-    sched.add(Job::new_async("0 0 10 * * *", move |_uuid, _l| {
-        let pool = pool_sore.clone();
-        let log_tx = log_tx_sore.clone();
-        Box::pin(async move {
-            let job_id = crate::tui::generate_job_id();
-            let logger = JobLogger::new(job_id, log_tx);
+    // let pool_sore = pool.clone();
+    // let log_tx_sore = log_tx.clone();
+    // sched.add(Job::new_async("0 0 10 * * *", move |_uuid, _l| {
+    //     let pool = pool_sore.clone();
+    //     let log_tx = log_tx_sore.clone();
+    //     Box::pin(async move {
+    //         let job_id = crate::tui::generate_job_id();
+    //         let logger = JobLogger::new(job_id, log_tx);
             
-            logger.log("⏰ REMINDER SORE (10:00 UTC / 17:00 WIB)");
-            if let Err(e) = run_reminder_task(pool, "🌇 Selamat sore Ilkomers!", &logger).await {
-                logger.log(&format!("❌ Error reminder sore: {}", e));
-                logger.set_status(crate::tui::state::JobStatus::Failed);
-            } else {
-                logger.set_status(crate::tui::state::JobStatus::Completed);
-            }
-        })
-    })?).await?;
+    //         logger.log("⏰ REMINDER SORE (10:00 UTC / 17:00 WIB)");
+    //         if let Err(e) = run_reminder_task(pool, "🌇 Selamat sore Ilkomers!", &logger).await {
+    //             logger.log(&format!("❌ Error reminder sore: {}", e));
+    //             logger.set_status(crate::tui::state::JobStatus::Failed);
+    //         } else {
+    //             logger.set_status(crate::tui::state::JobStatus::Completed);
+    //         }
+    //     })
+    // })?).await?;
 
     // 2. REMINDER DEADLINE MEPET (H-1 JAM)
     // Cek setiap 10 menit (Menit ke-1, 11, 21, dst)
