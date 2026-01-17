@@ -929,6 +929,29 @@ pub async fn set_user_course_parallel(
     }
 }
 
+pub async fn get_user_course_statuses(
+    pool: &sqlx::PgPool,
+    user_id: &str,
+) -> Result<Vec<crate::models::UserCourseStatus>, sqlx::Error> {
+    let query = r#"
+        SELECT 
+            c.name as course_name, 
+            ucs.parallel_code
+        FROM courses c
+        LEFT JOIN user_course_settings ucs 
+            ON c.id = ucs.course_id 
+            AND ucs.user_id = $1
+        ORDER BY c.name ASC
+    "#;
+
+    let rows = sqlx::query_as::<_, crate::models::UserCourseStatus>(query)
+        .bind(user_id)
+        .fetch_all(pool)
+        .await?;
+
+    Ok(rows)
+}
+
 // ========================================
 // ADDITIONAL HELPER IF NEEDED
 // ========================================

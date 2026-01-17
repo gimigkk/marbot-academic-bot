@@ -8,6 +8,8 @@ use crate::database::crud::{
     get_last_completed_assignment,
     delete_assignment,
     set_user_course_parallel,
+    // ========== FITUR MYKELAS ==========
+    get_user_course_statuses,  // Ditambahkan untuk fitur #mykelas
 };
 
 use crate::models::BotCommand;
@@ -171,6 +173,44 @@ pub async fn handle_command(
                     CommandResponse::Text(
                         "❌ Maaf, terjadi kesalahan saat mengambil data tugas.\n_Coba lagi sebentar ya._"
                             .to_string(),
+                    )
+                }
+            }
+        }
+
+        BotCommand::MyKelas => {
+            logger.log(&format!("📚 MyKelas command received from {}", user_phone));
+            
+            match get_user_course_statuses(&pool, user_phone).await {
+                Ok(statuses) => {
+                    if statuses.is_empty() {
+                        CommandResponse::Text(
+                            "📚 *Settingan Kelas Kamu:*\n\nBelum ada data mata kuliah di database.\n\nGunakan `#setkelas [nama_matkul] [kode]` untuk menambahkan.".to_string()
+                        )
+                    } else {
+                        // 2. Format pesan respon
+                        let mut response = String::from("📚 *Settingan Kelas Kamu:*\n\n");
+                        
+                        for status in statuses {
+                            // Cek apakah parallel_code ada isinya atau None
+                            let kode_kelas = match status.parallel_code {
+                                Some(code) => code.to_uppercase(), // Misal: "K1"
+                                None => "N/A".to_string(),         // Belum diset
+                            };
+                            
+                            // Format: Nama Matkul : KODE
+                            response.push_str(&format!("• {}: {}\n", status.course_name, kode_kelas));
+                        }
+                        
+                        response.push_str("\nGunakan `#setkelas [nama_matkul] [kode]` untuk mengubah.");
+
+                        CommandResponse::Text(response)
+                    }
+                }
+                Err(e) => {
+                    logger.log(&format!("❌ Gagal mengambil data mykelas: {:?}", e));
+                    CommandResponse::Text(
+                        "❌ Terjadi kesalahan saat mengambil data kelas.\n_Coba lagi nanti ya._".to_string()
                     )
                 }
             }
@@ -551,7 +591,8 @@ pub async fn handle_command(
 • #todo — lihat tugas pribadi kamu\n\
 • #<id> — lihat detail tugas dari #todo\n\
 • #done <id> — tandai selesai\n\
-• #undo — batalkan #done terakhir\n\n\
+• #undo — batalkan #done terakhir\n\
+• #mykelas — lihat setting kelas kamu\n\n\
 *Perintah Pengaturan:*
 • #setkelas <matkul> <kode1> [kode2]... — atur kelas pararel untuk matkul\n\n\
 *Perintah Admin (Grup Akademik):*\n\
