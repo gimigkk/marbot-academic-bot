@@ -144,12 +144,15 @@
                 return;
             }
 
+            // Build searchable text from ALL job fields
             const searchableText = [
-                ...(job.tags || []),
+                job.id || '',
+                job.sender || '',
+                job.chat_id || '',
                 job.message_body || '',
                 job.quoted_message || '',
-                job.sender || '',
-                job.chat_id || ''
+                ...(job.tags || []),
+                job.status || ''
             ].join(' ').toLowerCase();
 
             if (searchableText.includes(searchQuery)) {
@@ -384,19 +387,28 @@
     function formatTimestamp(ms) {
         const date = new Date(ms);
         const now = new Date();
-        const diffMs = now - date;
-        const diffSec = Math.floor(diffMs / 1000);
-        const diffMin = Math.floor(diffSec / 60);
-        const diffHr = Math.floor(diffMin / 60);
         
-        // If within last minute: "Xs ago"
-        if (diffSec < 60) return `${diffSec}s ago`;
-        // If within last hour: "Xm ago"
-        if (diffMin < 60) return `${diffMin}m ago`;
-        // If today: "Xh ago"
-        if (diffHr < 24 && date.getDate() === now.getDate()) return `${diffHr}h ago`;
-        // Otherwise: "HH:MM"
-        return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
+        // If today: show time only (HH:MM)
+        if (date.getDate() === now.getDate() && 
+            date.getMonth() === now.getMonth() && 
+            date.getFullYear() === now.getFullYear()) {
+            return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
+        }
+        
+        // If this year: show date without year (MMM DD, HH:MM)
+        if (date.getFullYear() === now.getFullYear()) {
+            const month = date.toLocaleString('en-US', { month: 'short' });
+            const day = date.getDate();
+            const time = date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
+            return `${month} ${day}, ${time}`;
+        }
+        
+        // Different year: show full date (MMM DD YYYY, HH:MM)
+        const month = date.toLocaleString('en-US', { month: 'short' });
+        const day = date.getDate();
+        const year = date.getFullYear();
+        const time = date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
+        return `${month} ${day} ${year}, ${time}`;
     }
 
     function jobSignature(job) {
@@ -414,7 +426,7 @@
             return;
         }
 
-        // FIX 1: Sort by latest message timestamp (newest first)
+        // Sort by latest message timestamp (newest first)
         const sorted = [...allJobs].sort((a, b) => {
             return getJobLatestMs(b) - getJobLatestMs(a);
         });
@@ -455,10 +467,9 @@
                 if (grayed) jobItem.classList.add(grayed);
                 if (job.id === selectedJobId) jobItem.classList.add('selected');
                 
-                // FIX 2: Add timestamp display
                 const timestamp = formatTimestamp(getJobLatestMs(job));
                 
-                // FIX 3: Clean up tags - remove duplicates and # prefix
+                // Clean up tags - remove duplicates and # prefix
                 const cleanTags = [...new Set(job.tags || [])].map(tag => tag.replace(/^#/, ''));
                 const tagsHtml = cleanTags.length > 0
                     ? `<div class="job-tags">${cleanTags.map(tag => `<span class="job-tag">${escapeHtml(tag)}</span>`).join('')}</div>`
