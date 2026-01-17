@@ -164,12 +164,10 @@ async fn check_urgent_deadlines(
         let time_str = deadline_wib.format("%H:%M").to_string();
         
         let message = format!(
-            "⚠️*JANGAN LUPA KUMPULKAN H-1 JAM*\n\n\
+            "*[JANGAN LUPA KUMPULKAN!]*\n\n\
             📌 *{}*\n\
             📚 {}\n\
-            ⏰ Deadline: Pukul *{}* WIB\n\
-            \n\
-            _Segera kumpulkan!!!!_",
+            ⏰ Deadline: Pukul *{}* WIB",
             sanitize_wa_md(&task.title),
             &task.course_name,
             time_str
@@ -212,22 +210,20 @@ async fn send_to_channels(
     let client = reqwest::Client::new();
     let waha_url = std::env::var("WAHA_URL").unwrap_or_else(|_| "http://waha:3000".to_string());
     let api_key = std::env::var("WAHA_API_KEY").unwrap_or_else(|_| "devkey123".to_string());
+    let payload = SendTextRequest {
+        chat_id: target_channels[0].to_string(),
+        text: message.clone(),
+        session: "default".to_string(),
+        reply_to: None,
+    };
 
-    for chat_id in target_channels {
-        let payload = SendTextRequest {
-            chat_id: chat_id.to_string(),
-            text: message.clone(),
-            session: "default".to_string(),
-            reply_to: None,
-        };
-
-        let _ = client
-            .post(format!("{}/api/sendText", waha_url))
-            .header("X-Api-Key", &api_key)
-            .json(&payload)
-            .send()
-            .await;
-    }
+    let _ = client
+        .post(format!("{}/api/sendText", waha_url))
+        .header("X-Api-Key", &api_key)
+        .json(&payload)
+        .send()
+        .await;
+    
     Ok(())
 }
 

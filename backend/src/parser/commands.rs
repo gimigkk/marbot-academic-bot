@@ -581,26 +581,26 @@ pub async fn handle_command(
             logger.log(&format!("❓ Help command received from {}", user_phone));
             CommandResponse::Text(
                 "*[MABOT — Academic Bot]*\n\n\
-*Perintah Umum:*\n\
-• #ping — cek bot hidup & latency\n\
-• #tugas — lihat semua tugas (global)\n\
-• #today — tugas deadline hari ini\n\
-• #week — tugas 7 hari ke depan\n\
-• #help — bantuan\n\n\
-*Perintah Personal:*
-• #todo — lihat tugas pribadi kamu\n\
-• #<id> — lihat detail tugas dari #todo\n\
-• #done <id> — tandai selesai\n\
-• #undo — batalkan #done terakhir\n\
-• #mykelas — lihat setting kelas kamu\n\n\
-*Perintah Pengaturan:*
-• #setkelas <matkul> <kode1> [kode2]... — atur kelas pararel untuk matkul\n\n\
-*Perintah Admin (Grup Akademik):*\n\
-• #delete <id> — hapus tugas (id dari #tugas)\n\n\
-*Penting:* #<id> dan #done selalu pakai nomor dari *#todo*. _Info tugas akan otomatis tersimpan via grup info akademik, tidak dari chat lain._
+                    *Perintah Umum:*\n\
+                    • #ping — cek bot hidup & latency\n\
+                    • #tugas — lihat semua tugas (global)\n\
+                    • #today — tugas deadline hari ini\n\
+                    • #week — tugas 7 hari ke depan\n\
+                    • #help — bantuan\n\n\
+                    *Perintah Personal:*
+                    • #todo — lihat tugas pribadi kamu\n\
+                    • #<id> — lihat detail tugas dari #todo\n\
+                    • #done <id> — tandai selesai\n\
+                    • #undo — batalkan #done terakhir\n\
+                    • #mykelas — lihat setting kelas kamu\n\n\
+                    *Perintah Pengaturan:*
+                    • #setkelas <matkul> <kode1> [kode2]... — atur kelas pararel untuk matkul\n\n\
+                    *Perintah Admin (Grup Akademik):*\n\
+                    • #delete <id> — hapus tugas (id dari #tugas)\n\n\
+                    *Penting:* #<id> dan #done selalu pakai nomor dari *#todo*. _Info tugas akan otomatis tersimpan via grup info akademik, tidak dari chat lain._
 
-*Want to Contribute?*
-github.com/gimigkk/marbot-academic-bot"
+                    *Want to Contribute?*
+                    github.com/gimigkk/marbot-academic-bot"
                     .to_string(),
             )
         }
@@ -707,34 +707,19 @@ fn format_assignments_list(
     for (i, a) in filtered_assignments.iter().enumerate() {
         let status_emoji = status_dot(&a.deadline);
         let course_alias = format!("{}", &a.first_alias);
-        let title_fmt = format!("{}", preview_text(&sanitize_wa_md(&a.title), 25));
+        let title_fmt = sanitize_wa_md(&a.title);
         let due_text = humanize_deadline(&a.deadline);
 
-        let desc_line = a
-            .description
-            .as_ref()
-            .map(|d| sanitize_wa_md(d))
-            .map(|d| d.trim().to_string())
-            .filter(|d| !d.is_empty())
-            .map(|d| format!("📝 {}", preview_text(&d, 25)))
-            .unwrap_or_default();
-
-        let code_line = if !a.parallel_codes.is_empty() {
-            format!("🧩 Kode: {}", a.format_parallel_display())
+        // Format parallel codes
+        let parallel_display = if !a.parallel_codes.is_empty() {
+            format!(" [{}]", a.format_parallel_display())
         } else {
             String::new()
         };
-        
-        response.push_str(&format!("{} *[{}] [{}]*\n", status_emoji, i + 1, title_fmt));
-        response.push_str(&format!("📌 {}\n", course_alias));
-        response.push_str(&format!("⏰ {}\n", due_text));
-        
-        if !desc_line.is_empty() {
-            response.push_str(&format!("{}\n", desc_line));
-        }
-        if !code_line.is_empty() {
-            response.push_str(&format!("{}\n", code_line));
-        }
+
+        response.push_str(&format!("{} *[{}]* *{}*\n", status_emoji, i + 1, title_fmt));
+        response.push_str(&format!("*├* {}\n", due_text));
+        response.push_str(&format!("*└* {}{}\n", course_alias, parallel_display));
         response.push('\n');
     }
 
