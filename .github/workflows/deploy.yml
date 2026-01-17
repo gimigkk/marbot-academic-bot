@@ -53,8 +53,8 @@ jobs:
           # For display (truncated, basic escaping)
           COMMIT_MSG=$(echo "$COMMIT_MSG_RAW" | head -c 150 | tr '\n' ' ' | tr '\r' ' ' | sed 's/  */ /g' | xargs)
           
-          # For JSON/WhatsApp (proper escaping + trim whitespace + escape underscores)
-          COMMIT_MSG_ESCAPED=$(echo "$COMMIT_MSG_RAW" | head -c 150 | tr '\n' ' ' | tr '\r' ' ' | sed 's/  */ /g' | xargs | sed 's/_/\\_/g' | jq -Rs '.' | sed 's/^"//;s/"$//')
+          # For JSON/WhatsApp - single line, escape underscores, properly escape quotes/backslashes
+          COMMIT_MSG_ESCAPED=$(echo "$COMMIT_MSG_RAW" | head -c 150 | tr '\n' ' ' | tr '\r' ' ' | sed 's/  */ /g' | xargs | sed 's/_/\\_/g' | sed 's/\\/\\\\/g' | sed 's/"/\\"/g')
           
           AUTHOR_NAME="${{ github.event.head_commit.author.name }}"
           
@@ -65,26 +65,22 @@ jobs:
             CARGO_LOCK_HASH="no-lock"
           fi
           
-          # Use delimiters for multiline output to avoid issues
+          # Set outputs - use single line for escaped message
           echo "additions=$ADDITIONS" >> $GITHUB_OUTPUT
           echo "deletions=$DELETIONS" >> $GITHUB_OUTPUT
           echo "short_sha=$SHORT_SHA" >> $GITHUB_OUTPUT
           echo "cargo_lock_hash=$CARGO_LOCK_HASH" >> $GITHUB_OUTPUT
+          echo "author_name=$AUTHOR_NAME" >> $GITHUB_OUTPUT
           
-          # Use EOF delimiter for safe multiline output
+          # Regular message with EOF delimiter
           {
             echo "commit_message<<EOF"
             echo "$COMMIT_MSG"
             echo "EOF"
           } >> $GITHUB_OUTPUT
           
-          {
-            echo "commit_message_escaped<<EOF"
-            echo "$COMMIT_MSG_ESCAPED"
-            echo "EOF"
-          } >> $GITHUB_OUTPUT
-          
-          echo "author_name=$AUTHOR_NAME" >> $GITHUB_OUTPUT
+          # Escaped message as SINGLE LINE (no EOF)
+          echo "commit_message_escaped=$COMMIT_MSG_ESCAPED" >> $GITHUB_OUTPUT
           
           echo -e "\033[0;32m✅ Statistics calculated:\033[0m"
           echo -e "  \033[1mCommit:\033[0m $SHORT_SHA"
