@@ -106,38 +106,55 @@ pub(super) fn parse_classification(ai_text: &str) -> Result<AIClassification, St
     }
 }
 
-pub(super) fn parse_match_result(ai_text: &str, logger: &JobLogger) -> Result<Option<(Uuid, String)>, String> {  // Change return type
+pub(super) fn parse_match_result(ai_text: &str, logger: &JobLogger) -> Result<Option<(Uuid, String)>, String> {
     let cleaned = ai_text.trim()
         .trim_start_matches("```json")
         .trim_start_matches("```")
         .trim_end_matches("```")
         .trim();
     
-    #[derive(Deserialize)]
-    struct MatchResult {
-        assignment_id: Option<String>,
-        confidence: String,
-        #[serde(default)]
-        reason: Option<String>,
-    }
-    
-    match serde_json::from_str::<MatchResult>(cleaned) {
-        Ok(result) => {
-            logger.log(&format!("│ 🔍 Confidence : {}", result.confidence));
+    // Use serde_json::Value for flexible parsing
+    match serde_json::from_str::<serde_json::Value>(cleaned) {
+        Ok(json_value) => {
+            // Extract fields manually to handle various formats
+            let confidence = json_value["confidence"]
+                .as_str()
+                .unwrap_or("low")
+                .to_string();
             
-            let reason_text = result.reason.clone().unwrap_or_default();
+            let assignment_id = json_value["assignment_id"]
+                .as_str()
+                .map(|s| s.to_string());
             
-            if let Some(ref reason) = result.reason {
-                logger.log(&format!("│ 📝 Reason     : {}", truncate_for_log(reason, 60)));
-            }
+            // Handle reason as either string or object
+            let reason_text = match &json_value["reason"] {
+                serde_json::Value::String(s) => s.clone(),
+                serde_json::Value::Object(_) => {
+                    // If it's an object, try common keys or serialize it
+                    json_value["reason"]["explanation"]
+                        .as_str()
+                        .or_else(|| json_value["reason"]["text"].as_str())
+                        .or_else(|| json_value["reason"]["details"].as_str())
+                        .unwrap_or("No reason provided")
+                        .to_string()
+                }
+                _ => "No reason provided".to_string()
+            };
             
-            if result.confidence == "high" {
-                if let Some(id_str) = result.assignment_id {
-                    Ok(Some((
-                        Uuid::parse_str(&id_str).map_err(|e| e.to_string())?,
-                        reason_text  // Return reason along with UUID
-                    )))
+            logger.log(&format!("│ 🔍 Confidence : {}", confidence));
+            logger.log(&format!("│ 📝 Reason     : {}", truncate_for_log(&reason_text, 60)));
+            
+            if confidence == "high" {
+                if let Some(id_str) = assignment_id {
+                    match Uuid::parse_str(&id_str) {
+                        Ok(uuid) => Ok(Some((uuid, reason_text))),
+                        Err(e) => {
+                            logger.log(&format!("│ ⚠️ Invalid UUID: {}", e));
+                            Ok(None)
+                        }
+                    }
                 } else {
+                    logger.log("│ ⚠️ High confidence but no assignment_id provided");
                     Ok(None)
                 }
             } else {
@@ -147,6 +164,7 @@ pub(super) fn parse_match_result(ai_text: &str, logger: &JobLogger) -> Result<Op
         }
         Err(e) => {
             logger.log(&format!("│ ❌ Failed to parse match result: {}", e));
+            logger.log(&format!("│ 📄 Raw response: {}", truncate_for_log(cleaned, 100)));
             Ok(None)
         }
     }
