@@ -146,7 +146,7 @@ pub async fn extract_with_ai(
         }
         Err(e) => {
             logger.log("│");
-            logger.log(&format!("│ ⚠️  Context failed\t: {}", e));
+            logger.log(&format!("│ \x1b[33m⚠️  Context failed\t: {}\x1b[0m", e));
             None
         }
     };
@@ -188,7 +188,7 @@ pub async fn extract_with_ai(
                                 Ok(text_result) => {
                                     match text_result {
                                         AIClassification::Unrecognized { .. } => {
-                                            logger.log("│ ⚠️  Gemini: Still unrecognized");
+                                            logger.log("│ \x1b[33m⚠️  Gemini: Still unrecognized\x1b[0m");
                                             logger.log("└──────────────────────────────────────────────");
                                             return Ok(AIClassification::Unrecognized { reason: None, category: crate::models::UnrecognizedCategory::Informal });
                                         }
@@ -247,7 +247,7 @@ pub async fn extract_with_ai(
             }
             Err(_) => {
                 if attempt < MAX_RETRIES - 1 {
-                    logger.log(&format!("│ ⚠️ All models failed - will retry ({}/{})", attempt + 1, MAX_RETRIES - 1));
+                    logger.log(&format!("│ \x1b[33m⚠️ All models failed - will retry ({}/{})\x1b[0m", attempt + 1, MAX_RETRIES - 1));
                 }
             }
         }
@@ -333,7 +333,7 @@ async fn try_gemini_models(prompt: &str, logger: &JobLogger) -> Result<AIClassif
             Err(e) => {
                 all_rate_limited = false;
                 clear_trying_line(logger);
-                logger.log(&format!("│ ❌ FAILED\t: {} - Network error", model));
+                logger.log(&format!("│ \x1b[31m❌ FAILED\t: {} - Network error\x1b[0m", model));
                 if index < GEMINI_MODELS.len() { continue; } else { return Err(format!("Network error: {}", e)); }
             }
         };
@@ -360,12 +360,12 @@ async fn try_gemini_models(prompt: &str, logger: &JobLogger) -> Result<AIClassif
 
         all_rate_limited = false;
         clear_trying_line(logger);
-        logger.log(&format!("│ ❌ FAILED : {} - HTTP {}", model, status));
+        logger.log(&format!("│ \x1b[31m❌ FAILED : {} - HTTP {}\x1b[0m", model, status));
         if index < GEMINI_MODELS.len() { continue; }
     }
 
     if all_rate_limited {
-        logger.log("│ ⚠️ R-LIMIT on all gemini models");
+        logger.log("│ \x1b[33m⚠️ R-LIMIT on all gemini models\x1b[0m");
         return Err("rate limit".to_string());
     }
 
@@ -408,7 +408,7 @@ async fn try_groq_reasoning(prompt: &str, logger: &JobLogger) -> Result<AIClassi
             Err(_) => {
                 all_rate_limited = false;
                 clear_trying_line(logger);
-                logger.log(&format!("│ ❌ FAILED\t: {} - Network error", model));
+                logger.log(&format!("│ \x1b[31m❌ FAILED\t: {} - Network error\x1b[0m", model));
                 if index < GROQ_REASONING_MODELS.len() { continue; } else {
                     logger.log("│ 🔄 Falling back to standard models...");
                     logger.log("│");
@@ -444,12 +444,12 @@ async fn try_groq_reasoning(prompt: &str, logger: &JobLogger) -> Result<AIClassi
 
         all_rate_limited = false;
         clear_trying_line(logger);
-        logger.log(&format!("│ ❌ FAILED : {} - HTTP {}", model, status));
+        logger.log(&format!("│ \x1b[31m❌ FAILED : {} - HTTP {}\x1b[0m", model, status));
         if index < GROQ_REASONING_MODELS.len() { continue; }
     }
 
     if all_rate_limited {
-        logger.log("│ ⚠️ R-LIMIT on all Groq reasoning models");
+        logger.log("│ \x1b[33m⚠️ R-LIMIT on all Groq reasoning models\x1b[0m");
         logger.log("│ 🔄 Falling back to standard models...");
         logger.log("│");
         return try_groq_standard_text(prompt, logger).await;
@@ -494,7 +494,7 @@ async fn try_groq_standard_text(prompt: &str, logger: &JobLogger) -> Result<AICl
             Ok(r) => r,
             Err(_) => {
                 clear_trying_line(logger);
-                logger.log(&format!("│ ❌ FAILED\t: {} - Network error", model));
+                logger.log(&format!("│ \x1b[31m❌ FAILED\t: {} - Network error\x1b[0m", model));
                 if index < GROQ_TEXT_MODELS.len() { continue; } else { return Err("All Groq standard models failed".to_string()); }
             }
         };
@@ -524,7 +524,7 @@ async fn try_groq_standard_text(prompt: &str, logger: &JobLogger) -> Result<AICl
         }
 
         clear_trying_line(logger);
-        logger.log(&format!("│ ❌ FAILED\t: {} - HTTP {}", model, status));
+        logger.log(&format!("│ \x1b[31m❌ FAILED\t: {} - HTTP {}\x1b[0m", model, status));
         if index < GROQ_TEXT_MODELS.len() { continue; }
     }
 
@@ -576,7 +576,7 @@ async fn try_groq_vision(prompt: &str, image_base64: &str, logger: &JobLogger) -
             Ok(r) => r,
             Err(_) => {
                 clear_trying_line(logger);
-                logger.log(&format!("│ ❌ FAILED\t: {} - Network error", model));
+                logger.log(&format!("│ \x1b[31m❌ FAILED\t: {} - Network error\x1b[0m", model));
                 if index < GROQ_VISION_MODELS.len() { continue; } else { return Err("All Groq vision models failed".to_string()); }
             }
         };
@@ -606,7 +606,7 @@ async fn try_groq_vision(prompt: &str, image_base64: &str, logger: &JobLogger) -
         }
 
         clear_trying_line(logger);
-        logger.log(&format!("│ ❌ FAILED\t: {} - HTTP {}", model, status));
+        logger.log(&format!("│ \x1b[31m❌ FAILED\t: {} - HTTP {}\x1b[0m", model, status));
         if index < GROQ_VISION_MODELS.len() { continue; }
     }
 
@@ -727,13 +727,13 @@ pub async fn check_duplicate_assignment(
             Ok(result) => return Ok(result),
             Err(_) => {
                 if attempt < MAX_RETRIES - 1 {
-                    logger.log(&format!("│ ⚠️ Attempt {}/{} failed\t: Retrying duplicate check...", attempt + 1, MAX_RETRIES - 1));
+                    logger.log(&format!("│ \x1b[33m⚠️ Attempt {}/{} failed\t: Retrying duplicate check...\x1b[0m", attempt + 1, MAX_RETRIES - 1));
                 }
             }
         }
     }
 
-    logger.log(&format!("│ ❌ All {} retry attempts failed\t: Treating as new assignment", MAX_RETRIES));
+    logger.log(&format!("│ \x1b[31m❌ All {} retry attempts failed\t: Treating as new assignment\x1b[0m", MAX_RETRIES));
     Err("All duplicate check attempts failed".to_string())
 }
 
@@ -774,7 +774,7 @@ async fn try_gemini_duplicate_check(prompt: &str, logger: &JobLogger) -> Result<
             Err(_) => {
                 all_rate_limited = false;
                 clear_trying_line(logger);
-                logger.log(&format!("│ ❌ FAILED\t\t\t: {} - Network error", model));
+                logger.log(&format!("│ \x1b[31m❌ FAILED\t\t\t: {} - Network error\x1b[0m", model));
                 continue;
             }
         };
@@ -797,7 +797,7 @@ async fn try_gemini_duplicate_check(prompt: &str, logger: &JobLogger) -> Result<
 
             let result: DuplicateCheckResult = serde_json::from_str(&ai_text)
                 .map_err(|e| {
-                    logger.log(&format!("│ ❌ JSON Parse Failed: {} | Raw: {}", 
+                    logger.log(&format!("│ \x1b[31m❌ JSON Parse Failed: {} | Raw: {}\x1b[0m", 
                         e, ai_text.chars().take(100).collect::<String>()));
                     format!("JSON error: {}", e)
                 })?;
@@ -812,16 +812,16 @@ async fn try_gemini_duplicate_check(prompt: &str, logger: &JobLogger) -> Result<
                             return Ok(Some((uuid, reason)));
                         }
                         Err(_) => {
-                            logger.log(&format!("│ ⚠️ Invalid UUID\t\t: {}", id_str));
+                            logger.log(&format!("│ \x1b[33m⚠️ Invalid UUID\t\t: {}\x1b[0m", id_str));
                             return Ok(None);
                         }
                     }
                 } else {
-                    logger.log("│ ⚠️ High confidence duplicate but no ID provided");
+                    logger.log("│ \x1b[33m⚠️ High confidence duplicate but no ID provided\x1b[0m");
                     return Ok(None);
                 }
             } else if result.is_duplicate {
-                logger.log(&format!("│ ⚠️ Low confidence ({})\t\t: Treating as non-duplicate", result.confidence));
+                logger.log(&format!("│ \x1b[33m⚠️ Low confidence ({})\t\t: Treating as non-duplicate\x1b[0m", result.confidence));
                 return Ok(None);
             } else {
                 logger.log("│ ✅ Not a duplicate");
@@ -831,7 +831,7 @@ async fn try_gemini_duplicate_check(prompt: &str, logger: &JobLogger) -> Result<
 
         all_rate_limited = false;
         clear_trying_line(logger);
-        logger.log(&format!("│ ❌ FAILED\t: {} - HTTP {}", model, status));
+        logger.log(&format!("│ \x1b[31m❌ FAILED\t: {} - HTTP {}\x1b[0m", model, status));
     }
 
     if all_rate_limited { return Err("rate limit".to_string()); }
@@ -869,7 +869,7 @@ async fn try_groq_duplicate_check(prompt: &str, logger: &JobLogger) -> Result<Op
             Ok(r) => r,
             Err(_) => {
                 clear_trying_line(logger);
-                logger.log(&format!("│ ❌ FAILED\t: {} - Network error", model));
+                logger.log(&format!("│ \x1b[31m❌ FAILED\t: {} - Network error\x1b[0m", model));
                 continue;
             }
         };
@@ -892,7 +892,7 @@ async fn try_groq_duplicate_check(prompt: &str, logger: &JobLogger) -> Result<Op
             
             let result: DuplicateCheckResult = serde_json::from_str(&ai_text)
                 .map_err(|e| {
-                    logger.log(&format!("│ ❌ JSON Parse Failed: {} | Raw: {}", 
+                    logger.log(&format!("│ \x1b[31m❌ JSON Parse Failed: {} | Raw: {}\x1b[0m", 
                         e, ai_text.chars().take(100).collect::<String>()));
                     format!("JSON error: {}", e)
                 })?;
@@ -907,16 +907,16 @@ async fn try_groq_duplicate_check(prompt: &str, logger: &JobLogger) -> Result<Op
                             return Ok(Some((uuid, reason)));
                         }
                         Err(_) => {
-                            logger.log(&format!("│ ⚠️ Invalid UUID\t: {}", id_str));
+                            logger.log(&format!("│ \x1b[33m⚠️ Invalid UUID\t: {}\x1b[0m", id_str));
                             return Ok(None);
                         }
                     }
                 } else {
-                    logger.log("│ ⚠️ High confidence duplicate but no ID provided");
+                    logger.log("│ \x1b[33m⚠️ High confidence duplicate but no ID provided\x1b[0m");
                     return Ok(None);
                 }
             } else if result.is_duplicate {
-                logger.log(&format!("│ ⚠️ Low confidence ({})\t: Treating as non-duplicate", result.confidence));
+                logger.log(&format!("│ \x1b[33m⚠️ Low confidence ({})\t: Treating as non-duplicate\x1b[0m", result.confidence));
                 return Ok(None);
             } else {
                 logger.log("│ ✅ Not a duplicate");
@@ -925,7 +925,7 @@ async fn try_groq_duplicate_check(prompt: &str, logger: &JobLogger) -> Result<Op
         }
 
         clear_trying_line(logger);
-        logger.log(&format!("│ ❌ FAILED\t: {} - HTTP {}", model, status));
+        logger.log(&format!("│ \x1b[31m❌ FAILED\t: {} - HTTP {}\x1b[0m", model, status));
     }
 
     Err("All Groq models failed".to_string())
@@ -975,13 +975,13 @@ pub async fn match_update_to_assignment(
             }
             Err(_) => {
                 if attempt < MAX_RETRIES - 1 {
-                    logger.log(&format!("│ ⚠️ Matching failed - will retry ({}/{})", attempt + 1, MAX_RETRIES - 1));
+                    logger.log(&format!("│ \x1b[33m⚠️ Matching failed - will retry ({}/{})\x1b[0m", attempt + 1, MAX_RETRIES - 1));
                 }
             }
         }
     }
 
-    logger.log(&format!("│ ❌ CRITICAL: Matching failed after {} retries", MAX_RETRIES));
+    logger.log(&format!("│ \x1b[31m❌ CRITICAL: Matching failed after {} retries\x1b[0m", MAX_RETRIES));
     logger.log("└──────────────────────────────────────────────");
     Err("All matching attempts failed".to_string())
 }
@@ -1022,7 +1022,7 @@ async fn try_gemini_matching(prompt: &str, logger: &JobLogger) -> Result<Option<
             Err(_) => {
                 all_rate_limited = false;
                 clear_trying_line(logger);
-                logger.log(&format!("│ ❌ FAILED\t: {} - Network error", model));
+                logger.log(&format!("│ \x1b[31m❌ FAILED\t: {} - Network error\x1b[0m", model));
                 continue;
             }
         };
@@ -1049,7 +1049,7 @@ async fn try_gemini_matching(prompt: &str, logger: &JobLogger) -> Result<Option<
 
         all_rate_limited = false;
         clear_trying_line(logger);
-        logger.log(&format!("│ ❌ FAILED\t: {} - HTTP {}", model, status));
+        logger.log(&format!("│ \x1b[31m❌ FAILED\t: {} - HTTP {}\x1b[0m", model, status));
     }
 
     if all_rate_limited { return Err("rate limit".to_string()); }
@@ -1087,7 +1087,7 @@ async fn try_groq_matching(prompt: &str, logger: &JobLogger) -> Result<Option<(U
             Ok(r) => r,
             Err(_) => {
                 clear_trying_line(logger);
-                logger.log(&format!("│ ❌ FAILED\t: {} - Network error", model));
+                logger.log(&format!("│ \x1b[31m❌ FAILED\t: {} - Network error\x1b[0m", model));
                 continue;
             }
         };
@@ -1113,7 +1113,7 @@ async fn try_groq_matching(prompt: &str, logger: &JobLogger) -> Result<Option<(U
         }
 
         clear_trying_line(logger);
-        logger.log(&format!("│ ❌ FAILED\t: {} - HTTP {}", model, status));
+        logger.log(&format!("│ \x1b[31m❌ FAILED\t: {} - HTTP {}\x1b[0m", model, status));
     }
 
     Err("All Groq models failed for matching".to_string())
