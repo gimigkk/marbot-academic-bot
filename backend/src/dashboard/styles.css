@@ -699,4 +699,14 @@ body {
         left: 8px;
         top: 8px;
     }
+
+    .topbar {
+        padding-top: 48px;
+        height: auto;
+        min-height: 64px;
+    }
+
+    .topbar-title {
+        padding-top: 8px;
+    }
 }
