@@ -329,7 +329,8 @@ pub struct Assignment {
     pub parallel_codes: Vec<String>,
     pub sender_id: Option<String>,
     pub message_ids: Vec<String>,
-    pub reminder_1h_sent: bool, 
+    pub reminder_1h_sent: bool,
+    pub personal_reminder_sent: bool, 
     pub relating_messages: Vec<String>,
 }
 
