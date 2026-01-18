@@ -238,6 +238,7 @@ async fn main() {
     });
     println!("    └─ ⏰ Scheduler\t: \x1b[32m✅ RUNNING\x1b[0m");
 
+    
     let state = AppState { 
         cache,
         spam_tracker, 
