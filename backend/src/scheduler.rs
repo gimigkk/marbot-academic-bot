@@ -13,15 +13,35 @@ pub async fn start_scheduler(
 ) -> Result<(), JobSchedulerError> {
     let sched = JobScheduler::new().await?;
 
+    // Get TUI state from global storage
+    let tui_state = crate::TUI_STATE.get().cloned();
+
     // 1. REMINDER HARIAN (UTC TIME)
     // 07:00 WIB = 00:00 UTC
     let pool_pagi = pool.clone();
     let log_tx_pagi = log_tx.clone();
+    let tui_state_pagi = tui_state.clone();
+    
     sched.add(Job::new_async("0 0 0 * * *", move |_uuid, _l| {
         let pool = pool_pagi.clone();
         let log_tx = log_tx_pagi.clone();
+        let tui_state = tui_state_pagi.clone();
+        
         Box::pin(async move {
             let job_id = crate::tui::generate_job_id();
+            
+            // Register system job in TUI
+            if let Some(tui) = &tui_state {
+                tui.create_job(
+                    job_id.clone(),
+                    "SYSTEM".to_string(),
+                    "Daily Reminder".to_string(),
+                    Some("Morning task reminder (07:00 WIB)".to_string()),
+                    None,
+                    vec!["#scheduler".to_string(), "#reminder".to_string(), "#daily".to_string()],
+                ).await;
+            }
+            
             let logger = JobLogger::new(job_id, log_tx);
             
             logger.log("⏰ REMINDER PAGI (00:00 UTC / 07:00 WIB)");
@@ -34,35 +54,56 @@ pub async fn start_scheduler(
         })
     })?).await?;
 
-    // 17:00 WIB = 10:00 UTC
-    // let pool_sore = pool.clone();
-    // let log_tx_sore = log_tx.clone();
-    // sched.add(Job::new_async("0 0 10 * * *", move |_uuid, _l| {
-    //     let pool = pool_sore.clone();
-    //     let log_tx = log_tx_sore.clone();
-    //     Box::pin(async move {
-    //         let job_id = crate::tui::generate_job_id();
-    //         let logger = JobLogger::new(job_id, log_tx);
-            
-    //         logger.log("⏰ REMINDER SORE (10:00 UTC / 17:00 WIB)");
-    //         if let Err(e) = run_reminder_task(pool, "🌇 Selamat sore Ilkomers!", &logger).await {
-    //             logger.log(&format!("❌ Error reminder sore: {}", e));
-    //             logger.set_status(crate::tui::state::JobStatus::Failed);
-    //         } else {
-    //             logger.set_status(crate::tui::state::JobStatus::Completed);
-    //         }
-    //     })
-    // })?).await?;
-
     // 2. REMINDER DEADLINE MEPET (H-1 JAM)
-    // Cek setiap 10 menit (Menit ke-1, 11, 21, dst)
+    // Cek setiap 10 menit - but only create job when there are urgent tasks
     let pool_urgent = pool.clone();
     let log_tx_urgent = log_tx.clone();
+    let tui_state_urgent = tui_state.clone();
+    
     sched.add(Job::new_async("0 1/10 * * * *", move |_uuid, _l| {
         let pool = pool_urgent.clone();
         let log_tx = log_tx_urgent.clone();
+        let tui_state = tui_state_urgent.clone();
+        
         Box::pin(async move {
+            // PRE-CHECK: Only create job if there are urgent tasks
+            let now = Utc::now();
+            let one_hour_later = now + chrono::Duration::hours(1);
+            
+            let urgent_count = sqlx::query_scalar::<_, i64>(
+                r#"
+                SELECT COUNT(*) 
+                FROM assignments a
+                WHERE a.deadline > $1 
+                  AND a.deadline <= $2 
+                  AND a.reminder_1h_sent = FALSE
+                "#
+            )
+            .bind(now)
+            .bind(one_hour_later)
+            .fetch_one(&pool)
+            .await
+            .unwrap_or(0);
+            
+            // Only create job entry if there's work to do
+            if urgent_count == 0 {
+                return; // Silent return - no logs, no job entry
+            }
+            
             let job_id = crate::tui::generate_job_id();
+            
+            // Register system job in TUI
+            if let Some(tui) = &tui_state {
+                tui.create_job(
+                    job_id.clone(),
+                    "SYSTEM".to_string(),
+                    "Urgent Alert".to_string(),
+                    Some(format!("Found {} urgent deadline(s)", urgent_count)),
+                    None,
+                    vec!["#scheduler".to_string(), "#urgent".to_string(), "#alert".to_string()],
+                ).await;
+            }
+            
             let logger = JobLogger::new(job_id, log_tx);
             
             if let Err(e) = check_urgent_deadlines(pool, &logger).await {
@@ -127,7 +168,7 @@ async fn check_urgent_deadlines(
     let now = Utc::now();
     let one_hour_later = now + chrono::Duration::hours(1);
 
-    // 2. Query tugas deadline < 1 jam & belum diingatkan
+    // Query urgent tasks (we already know there are some from pre-check)
     let urgent_tasks = sqlx::query!(
         r#"
         SELECT 
@@ -143,10 +184,6 @@ async fn check_urgent_deadlines(
     )
     .fetch_all(&pool)
     .await?;
-
-    if urgent_tasks.is_empty() {
-        return Ok(());
-    }
 
     logger.log(&format!("🚨 Menemukan {} tugas deadline < 1 jam", urgent_tasks.len()));
 

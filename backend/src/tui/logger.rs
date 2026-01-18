@@ -1,13 +1,9 @@
 // src/tui/logger.rs
 use super::state::{LogEntry, JobStatus};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 use tokio::sync::mpsc;
 
-/// Global flag to check if TUI is active
-pub static TUI_ACTIVE: AtomicBool = AtomicBool::new(false);
-
-/// Job-specific logger that ONLY sends to channel (never prints to stdout in TUI mode)
+/// Job-specific logger that logs to BOTH stdout and web dashboard channel
 #[derive(Clone)]
 pub struct JobLogger {
     job_id: String,
@@ -19,13 +15,12 @@ impl JobLogger {
         Self { job_id, tx }
     }
 
-    /// Log a regular message
+    /// Log a regular message (prints to stdout AND sends to dashboard)
     pub fn log(&self, message: &str) {
-        // When TUI is active, avoid printing anything to stdout to keep the alternate screen clean.
-        if !TUI_ACTIVE.load(Ordering::Relaxed) {
-            println!("{}", message);
-        }
+        // Always print to stdout for SSH/docker logs
+        println!("{}", message);
 
+        // Always send to dashboard channel
         let _ = self.tx.send(LogEntry::Message {
             job_id: self.job_id.clone(),
             timestamp: Instant::now(),
@@ -33,10 +28,14 @@ impl JobLogger {
         });
     }
 
-    /// Log a "TRYING" line that can be overwritten
+    /// Log a "TRYING" line that can be overwritten in dashboard
     pub fn log_trying(&self, model: &str, index: usize, total: usize) {
         let message = format!("│ 🔄 TRYING : {} ({}/{})", model, index, total);
         
+        // Print to stdout
+        println!("{}", message);
+        
+        // Send to dashboard with special trying update
         let _ = self.tx.send(LogEntry::TryingUpdate {
             job_id: self.job_id.clone(),
             message,
@@ -50,52 +49,36 @@ impl JobLogger {
         });
     }
 
-    /// Log countdown (handles both TUI and normal mode)
+    /// Log countdown with console overwrite using '\r'
     pub fn log_countdown(&self, attempt: u32, remaining: u64) {
-        if TUI_ACTIVE.load(Ordering::Relaxed) {
-            // TUI mode: send countdown update for live rendering
-            let _ = self.tx.send(LogEntry::CountdownUpdate {
-                job_id: self.job_id.clone(),
-                attempt,
-                remaining,
-            });
-        } else {
-            // Non-TUI: overwrite the current console line with '\r'
-            use std::io::Write;
-            print!("\r│ ⏳ RETRY #{} - Waiting {} seconds...     ", attempt, remaining);
-            let _ = std::io::stdout().flush();
-        }
+        // Console: overwrite current line with '\r'
+        use std::io::Write;
+        print!("\r│ ⏳ RETRY #{} - Waiting {} seconds...     ", attempt, remaining);
+        let _ = std::io::stdout().flush();
+        
+        // Dashboard: send countdown update for live rendering
+        let _ = self.tx.send(LogEntry::CountdownUpdate {
+            job_id: self.job_id.clone(),
+            attempt,
+            remaining,
+        });
     }
 
-    /// Clear countdown line (both TUI and console)
+    /// Clear countdown line
     pub fn log_countdown_clear(&self) {
-        if TUI_ACTIVE.load(Ordering::Relaxed) {
-            let _ = self.tx.send(LogEntry::CountdownClear {
-                job_id: self.job_id.clone(),
-            });
-        } else {
-            use std::io::Write;
-            print!("\r                                                                  \r");
-            let _ = std::io::stdout().flush();
-        }
+        // Console: clear the line
+        use std::io::Write;
+        print!("\r                                                                  \r");
+        let _ = std::io::stdout().flush();
+        
+        // Dashboard: clear countdown state
+        let _ = self.tx.send(LogEntry::CountdownClear {
+            job_id: self.job_id.clone(),
+        });
     }
 
     /// Update job status
     pub fn set_status(&self, status: JobStatus) {
-        // Add 2 blank lines before status change for separation
-        if matches!(status, JobStatus::Completed | JobStatus::Failed) {
-            let _ = self.tx.send(LogEntry::Message {
-                job_id: self.job_id.clone(),
-                timestamp: Instant::now(),
-                message: String::new(),
-            });
-            let _ = self.tx.send(LogEntry::Message {
-                job_id: self.job_id.clone(),
-                timestamp: Instant::now(),
-                message: String::new(),
-            });
-        }
-
         let _ = self.tx.send(LogEntry::StatusChange {
             job_id: self.job_id.clone(),
             status,

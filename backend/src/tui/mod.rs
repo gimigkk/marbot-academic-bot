@@ -4,7 +4,7 @@ pub mod state;
 pub mod logger;
 
 pub use state::TuiState;
-pub use logger::{JobLogger, generate_job_id, TUI_ACTIVE};
+pub use logger::{JobLogger, generate_job_id};
 
 use std::sync::Arc;
 use tokio::sync::mpsc;

@@ -583,6 +583,9 @@
         }
         const countdown = getClientSideCountdown(job.id);
         const countdownHtml = countdown ? `<div class="countdown-line">RETRY #${countdown.attempt} - Waiting ${countdown.remaining} seconds...</div>` : '';
+        
+        // FIX: Add trying line display
+        const tryingHtml = job.current_trying ? `<div class="countdown-line">${escapeHtml(job.current_trying)}</div>` : '';
 
         const sig = jobSignature(job);
 
@@ -592,16 +595,17 @@
         }
 
         const lines = [...job.logs];
-        if (job.current_trying) lines.push(job.current_trying);
+        // Don't add current_trying to logs - it's rendered separately
         const raw = lines.join('\n');
 
         try {
-            const html = ansiToHtml(raw) + countdownHtml;
+            // FIX: Include both trying and countdown in the HTML
+            const html = ansiToHtml(raw) + tryingHtml + countdownHtml;
             jobDetailHtmlCache[job.id] = html;
             jobDetailSig[job.id] = sig;
             terminalContent.innerHTML = html;
         } catch (e) {
-            const fallback = escapeHtml(raw).replace(/\n/g, '<br>') + countdownHtml;
+            const fallback = escapeHtml(raw).replace(/\n/g, '<br>') + tryingHtml + countdownHtml;
             terminalContent.innerHTML = fallback;
         }
 

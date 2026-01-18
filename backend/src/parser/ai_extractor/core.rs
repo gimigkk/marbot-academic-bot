@@ -15,9 +15,6 @@ use super::context_builder::build_context;
 // TUI integration
 use crate::tui::JobLogger;
 
-// not used, no more TUI
-//static PRINT_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
-
 pub static SCHEDULE_ORACLE: Lazy<ScheduleOracle> = Lazy::new(|| {
     ScheduleOracle::load_from_file("schedule.json")
         .expect("Failed to load schedule.json")
@@ -164,7 +161,6 @@ pub async fn extract_with_ai(
         context.as_ref()
     );
 
-    //logger.log("│   Stage 2 : Extracting with AI...");
     if image_base64.is_some() {
         logger.log("│ 🖼️  Image\t: Attached (may be irrelevant meme)");
     }
@@ -266,8 +262,6 @@ pub async fn extract_with_ai(
 async fn retry_with_countdown(attempt: u32, logger: &JobLogger) {
     let delay = 10 * attempt as u64;
 
-    //logger.log("│");
-
     for remaining in (1..=delay).rev() {
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
         logger.log_countdown(attempt, remaining);
@@ -279,35 +273,26 @@ async fn retry_with_countdown(attempt: u32, logger: &JobLogger) {
 }
 
 // ===== TRYING-LINE HELPERS =====
+// CLEANED UP: Always log to both console and dashboard
 
 fn print_trying_line(model: &str, index: usize, total: usize, logger: &JobLogger) {
-    use crate::tui::TUI_ACTIVE;
-    use std::sync::atomic::Ordering;
+    // Console: overwrite with \r for animation
+    use std::io::Write;
+    print!("\r│ 🔄 TRYING : {} ({}/{})                    ", model, index, total);
+    let _ = std::io::stdout().flush();
     
-    if TUI_ACTIVE.load(Ordering::Relaxed) {
-        // TUI mode: use special trying log that can be overwritten
-        logger.log_trying(model, index, total);
-    } else {
-        // Console mode: overwrite with \r
-        use std::io::Write;
-        print!("\r│ 🔄 TRYING : {} ({}/{})                    ", model, index, total);
-        let _ = std::io::stdout().flush();
-    }
+    // Dashboard: send trying update
+    logger.log_trying(model, index, total);
 }
 
 fn clear_trying_line(logger: &JobLogger) {
-    use crate::tui::TUI_ACTIVE;
-    use std::sync::atomic::Ordering;
+    // Console: clear line with \r
+    use std::io::Write;
+    print!("\r                                                                  \r");
+    let _ = std::io::stdout().flush();
     
-    if TUI_ACTIVE.load(Ordering::Relaxed) {
-        // TUI mode: clear the trying line
-        logger.log_trying_clear();
-    } else {
-        // Console mode: clear line with \r
-        use std::io::Write;
-        print!("\r                                                                  \r");
-        let _ = std::io::stdout().flush();
-    }
+    // Dashboard: clear trying state
+    logger.log_trying_clear();
 }
 
 // ===== GEMINI MODELS =====
@@ -638,7 +623,7 @@ pub async fn check_duplicate_assignment(
     existing_assignments: &[Assignment],
     course_map: &HashMap<Uuid, String>,
     logger: &JobLogger,
-) -> Result<Option<(Uuid, String)>, String> {  // ← CHANGED: Now returns (Uuid, String)
+) -> Result<Option<(Uuid, String)>, String> {
     let new_numbers = extract_numbers(title);
     let new_type = extract_assignment_type(title);
 
@@ -731,7 +716,7 @@ pub async fn check_duplicate_assignment(
         }
 
         match try_gemini_duplicate_check(&prompt, logger).await {
-            Ok(result) => return Ok(result),  // ← Returns Option<(Uuid, String)>
+            Ok(result) => return Ok(result),
             Err(e) if e == "rate limit" => {
                 logger.log("│ 🔄 Gemini rate limited\t: Trying Groq...");
             }
@@ -739,7 +724,7 @@ pub async fn check_duplicate_assignment(
         }
 
         match try_groq_duplicate_check(&prompt, logger).await {
-            Ok(result) => return Ok(result),  // ← Returns Option<(Uuid, String)>
+            Ok(result) => return Ok(result),
             Err(_) => {
                 if attempt < MAX_RETRIES - 1 {
                     logger.log(&format!("│ ⚠️ Attempt {}/{} failed\t: Retrying duplicate check...", attempt + 1, MAX_RETRIES - 1));
@@ -752,7 +737,7 @@ pub async fn check_duplicate_assignment(
     Err("All duplicate check attempts failed".to_string())
 }
 
-async fn try_gemini_duplicate_check(prompt: &str, logger: &JobLogger) -> Result<Option<(Uuid, String)>, String> {  // ← CHANGED
+async fn try_gemini_duplicate_check(prompt: &str, logger: &JobLogger) -> Result<Option<(Uuid, String)>, String> {
     let api_key = std::env::var("GEMINI_API_KEY")
         .map_err(|_| "GEMINI_API_KEY not set".to_string())?;
 
@@ -817,15 +802,14 @@ async fn try_gemini_duplicate_check(prompt: &str, logger: &JobLogger) -> Result<
                     format!("JSON error: {}", e)
                 })?;
 
-            let reason = result.reason.clone();  // ← Get reason
+            let reason = result.reason.clone();
 
-            // Make decision and log in one line
             if result.is_duplicate && result.confidence == "high" {
                 if let Some(ref id_str) = result.matched_assignment_id {
                     match Uuid::parse_str(id_str) {
                         Ok(uuid) => {
                             logger.log(&format!("│ ✅ Duplicate Match\t\t: {} (confidence: high)", uuid));
-                            return Ok(Some((uuid, reason)));  // ← Return tuple
+                            return Ok(Some((uuid, reason)));
                         }
                         Err(_) => {
                             logger.log(&format!("│ ⚠️ Invalid UUID\t\t: {}", id_str));
@@ -855,7 +839,7 @@ async fn try_gemini_duplicate_check(prompt: &str, logger: &JobLogger) -> Result<
     Err("All Gemini models failed".to_string())
 }
 
-async fn try_groq_duplicate_check(prompt: &str, logger: &JobLogger) -> Result<Option<(Uuid, String)>, String> {  // ← CHANGED
+async fn try_groq_duplicate_check(prompt: &str, logger: &JobLogger) -> Result<Option<(Uuid, String)>, String> {
     let api_key = std::env::var("GROQ_API_KEY")
         .map_err(|_| "GROQ_API_KEY not set".to_string())?;
 
@@ -913,15 +897,14 @@ async fn try_groq_duplicate_check(prompt: &str, logger: &JobLogger) -> Result<Op
                     format!("JSON error: {}", e)
                 })?;
 
-            let reason = result.reason.clone();  // ← Get reason
+            let reason = result.reason.clone();
 
-            // Make decision and log in one line
             if result.is_duplicate && result.confidence == "high" {
                 if let Some(ref id_str) = result.matched_assignment_id {
                     match Uuid::parse_str(id_str) {
                         Ok(uuid) => {
                             logger.log(&format!("│ ✅ Duplicate Match\t: {} (confidence: high)", uuid));
-                            return Ok(Some((uuid, reason)));  // ← Return tuple
+                            return Ok(Some((uuid, reason)));
                         }
                         Err(_) => {
                             logger.log(&format!("│ ⚠️ Invalid UUID\t: {}", id_str));
@@ -958,7 +941,7 @@ pub async fn match_update_to_assignment(
     course_map: &HashMap<Uuid, String>,
     parallel_codes: &[String],
     logger: &JobLogger,
-) -> Result<Option<(Uuid, String)>, String> {  // ← CHANGED: Now returns (Uuid, String)
+) -> Result<Option<(Uuid, String)>, String> {
     let prompt = build_matching_prompt(changes, keywords, active_assignments, course_map, parallel_codes);
 
     logger.log("┌──[AI MATCHING]────────────────────────────");
@@ -977,7 +960,7 @@ pub async fn match_update_to_assignment(
         match try_gemini_matching(&prompt, logger).await {
             Ok(result) => {
                 logger.log("└──────────────────────────────────────────────");
-                return Ok(result);  // ← Returns Option<(Uuid, String)>
+                return Ok(result);
             }
             Err(e) if e == "rate limit" => {
                 logger.log("│ 🔄 Falling back to Groq for matching...");
@@ -988,7 +971,7 @@ pub async fn match_update_to_assignment(
         match try_groq_matching(&prompt, logger).await {
             Ok(result) => {
                 logger.log("└──────────────────────────────────────────────");
-                return Ok(result);  // ← Returns Option<(Uuid, String)>
+                return Ok(result);
             }
             Err(_) => {
                 if attempt < MAX_RETRIES - 1 {
@@ -1003,7 +986,7 @@ pub async fn match_update_to_assignment(
     Err("All matching attempts failed".to_string())
 }
 
-async fn try_gemini_matching(prompt: &str, logger: &JobLogger) -> Result<Option<(Uuid, String)>, String> {  // ← CHANGED
+async fn try_gemini_matching(prompt: &str, logger: &JobLogger) -> Result<Option<(Uuid, String)>, String> {
     let api_key = std::env::var("GEMINI_API_KEY")
         .map_err(|_| "GEMINI_API_KEY not set in .env".to_string())?;
 
@@ -1059,9 +1042,9 @@ async fn try_gemini_matching(prompt: &str, logger: &JobLogger) -> Result<Option<
                 .map_err(|e| format!("Failed to deserialize: {}", e))?;
 
             let ai_text = extract_ai_text(&gemini_response)?;
-            let result = parse_match_result(ai_text, logger)?;  // ← Returns Option<(Uuid, String)>
+            let result = parse_match_result(ai_text, logger)?;
 
-            return Ok(result);  // ← Pass through the tuple
+            return Ok(result);
         }
 
         all_rate_limited = false;
@@ -1074,7 +1057,7 @@ async fn try_gemini_matching(prompt: &str, logger: &JobLogger) -> Result<Option<
     Err("All Gemini models failed for matching".to_string())
 }
 
-async fn try_groq_matching(prompt: &str, logger: &JobLogger) -> Result<Option<(Uuid, String)>, String> {  // ← CHANGED
+async fn try_groq_matching(prompt: &str, logger: &JobLogger) -> Result<Option<(Uuid, String)>, String> {
     let api_key = std::env::var("GROQ_API_KEY")
         .map_err(|_| "GROQ_API_KEY not set".to_string())?;
 
@@ -1124,9 +1107,9 @@ async fn try_groq_matching(prompt: &str, logger: &JobLogger) -> Result<Option<(U
                 .map_err(|e| format!("Failed to deserialize: {}", e))?;
 
             let ai_text = extract_groq_text(&groq_response)?;
-            let result = parse_match_result(&ai_text, logger)?;  // ← Returns Option<(Uuid, String)>
+            let result = parse_match_result(&ai_text, logger)?;
 
-            return Ok(result);  // ← Pass through the tuple
+            return Ok(result);
         }
 
         clear_trying_line(logger);
