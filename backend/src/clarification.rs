@@ -356,7 +356,7 @@ async fn parse_clarification_response_internal(
             }
             Err(_) => {
                 if attempt < MAX_RETRIES - 1 {
-                    logger_log(logger, &format!("│ \x1b[33m⚠️  Attempt {}/{}\x1b[0m\t: All models failed, retrying...", 
+                    logger_log(logger, &format!("│ \x1b[33m⚠️  Attempt {}/{}\t: All models failed, retrying...\x1b[0m", 
                              attempt + 1, MAX_RETRIES - 1));
                 }
             }
@@ -365,11 +365,11 @@ async fn parse_clarification_response_internal(
 
     // Fallback to regex after all retries
     if logger.is_some() {
-        logger_log(logger, &format!("│ \x1b[31m❌ CRITICAL\x1b[0m\t: All AI models exhausted after \x1b[33m{}\x1b[0m retries", MAX_RETRIES));
+        logger_log(logger, &format!("│ \x1b[31m❌ CRITICAL\t: All AI models exhausted after {} retries\x1b[0m", MAX_RETRIES));
         logger_log(logger, &format!("│ \x1b[33m🔄 Fallback\x1b[0m\t: Using \x1b[35mregex parser\x1b[0m..."));
         logger_log(logger, &format!("\x1b[1;30m└──────────────────────────────────────────────\x1b[0m"));
     } else {
-        eprintln!("│ \x1b[31m❌ CRITICAL\x1b[0m\t: All AI models exhausted after \x1b[33m{}\x1b[0m retries", MAX_RETRIES);
+        eprintln!("│ \x1b[31m❌ CRITICAL\t: All AI models exhausted after {} retries\x1b[0m", MAX_RETRIES);
         println!("│ \x1b[33m🔄 Fallback\x1b[0m\t: Using \x1b[35mregex parser\x1b[0m...");
         println!("\x1b[1;30m└──────────────────────────────────────────────\x1b[0m");
     }
@@ -444,10 +444,10 @@ async fn try_gemini_clarification(
             Err(_) => {
                 all_rate_limited = false;
                 if let Some(_l) = logger {
-                    logger_log(logger, &format!("│ \x1b[31m❌ FAILED\x1b[0m\t: \x1b[35m{}\x1b[0m - \x1b[33mNetwork error\x1b[0m", model));
+                    logger_log(logger, &format!("│ \x1b[31m❌ FAILED\t: {} - Network error\x1b[0m", model));
                 } else {
                     clear_previous_trying_stdout(&mut last_trying);
-                    println!("│ \x1b[31m❌ FAILED\x1b[0m\t: \x1b[35m{}\x1b[0m - \x1b[33mNetwork error\x1b[0m", model);
+                    println!("│ \x1b[31m❌ FAILED\t: {} - Network error\x1b[0m", model);
                 }
                 continue;
             }
@@ -457,7 +457,7 @@ async fn try_gemini_clarification(
         
         if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
             if logger.is_none() { clear_previous_trying_stdout(&mut last_trying); }
-            logger_log(logger, &format!("│ \x1b[33m⏳ RATE LIMIT\x1b[0m\t: \x1b[35m{}\x1b[0m - Trying next model...", model));
+            logger_log(logger, &format!("│ \x1b[33m⏳ RATE LIMIT\t: {} - Trying next model...\x1b[0m", model));
             continue;
         }
         
@@ -474,7 +474,7 @@ async fn try_gemini_clarification(
         
         all_rate_limited = false;
         if logger.is_none() { clear_previous_trying_stdout(&mut last_trying); }
-        logger_log(logger, &format!("│ \x1b[31m❌ FAILED\x1b[0m\t: \x1b[35m{}\x1b[0m - HTTP \x1b[33m{}\x1b[0m", model, status));
+        logger_log(logger, &format!("│ \x1b[31m❌ FAILED\t: {} - HTTP {}\x1b[0m", model, status));
     }
     
     if all_rate_limited {
@@ -527,7 +527,7 @@ async fn try_groq_reasoning_clarification(
             Ok(r) => r,
             Err(_) => {
                 if logger.is_none() { clear_previous_trying_stdout(&mut last_trying); }
-                logger_log(logger, &format!("│ \x1b[31m❌ FAILED\x1b[0m\t: \x1b[35m{}\x1b[0m - \x1b[33mNetwork error\x1b[0m", model));
+                logger_log(logger, &format!("│ \x1b[31m❌ FAILED\t: {} - Network error\x1b[0m", model));
                 continue;
             }
         };
@@ -536,7 +536,7 @@ async fn try_groq_reasoning_clarification(
         
         if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
             if logger.is_none() { clear_previous_trying_stdout(&mut last_trying); }
-            logger_log(logger, &format!("│ \x1b[33m⏳ RATE LIMIT\x1b[0m\t: \x1b[35m{}\x1b[0m - Trying next model...", model));
+            logger_log(logger, &format!("│ \x1b[33m⏳ RATE LIMIT\t: {} - Trying next model...\x1b[0m", model));
             continue;
         }
         
@@ -552,7 +552,7 @@ async fn try_groq_reasoning_clarification(
         }
         
         if logger.is_none() { clear_previous_trying_stdout(&mut last_trying); }
-        logger_log(logger, &format!("│ \x1b[31m❌ FAILED\x1b[0m\t: \x1b[35m{}\x1b[0m - HTTP \x1b[33m{}\x1b[0m", model, status));
+        logger_log(logger, &format!("│ \x1b[31m❌ FAILED\t: {} - HTTP {}\x1b[0m", model, status));
     }
     
     Err("All Groq reasoning models failed".to_string())
@@ -600,7 +600,7 @@ async fn try_groq_standard_clarification(
             Ok(r) => r,
             Err(_) => {
                 if logger.is_none() { clear_previous_trying_stdout(&mut last_trying); }
-                logger_log(logger, &format!("│ \x1b[31m❌ FAILED\x1b[0m\t: \x1b[35m{}\x1b[0m - \x1b[33mNetwork error\x1b[0m", model));
+                logger_log(logger, &format!("│ \x1b[31m❌ FAILED\t: {} - Network error\x1b[0m", model));
                 continue;
             }
         };
@@ -609,7 +609,7 @@ async fn try_groq_standard_clarification(
         
         if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
             if logger.is_none() { clear_previous_trying_stdout(&mut last_trying); }
-            logger_log(logger, &format!("│ \x1b[33m⏳ RATE LIMIT\x1b[0m\t: \x1b[35m{}\x1b[0m - Trying next model...", model));
+            logger_log(logger, &format!("│ \x1b[33m⏳ RATE LIMIT\t: {} - Trying next model...\x1b[0m", model));
             continue;
         }
         
@@ -625,7 +625,7 @@ async fn try_groq_standard_clarification(
         }
         
         if logger.is_none() { clear_previous_trying_stdout(&mut last_trying); }
-        logger_log(logger, &format!("│ \x1b[31m❌ FAILED\x1b[0m\t: \x1b[35m{}\x1b[0m - HTTP \x1b[33m{}\x1b[0m", model, status));
+        logger_log(logger, &format!("│ \x1b[31m❌ FAILED\t: {} - HTTP {}\x1b[0m", model, status));
     }
     
     Err("All Groq standard models failed".to_string())
