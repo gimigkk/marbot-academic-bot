@@ -450,8 +450,11 @@ async fn call_context_resolver_ai(
     // TIER 1: Try Gemini models first (PRIORITY)
     match try_gemini_context(&prompt, logger).await {
         Ok(hints) => return Ok(hints),
+        Err(e) if e == "rate limit" => {
+            logger.log("│ \x1b[33m⚠️ CONTEXT\t: Gemini rate limited - Falling back to Groq...\x1b[0m");
+        }
         Err(e) => {
-            logger.log(&format!("│ \x1b[33m⚠️ CONTEXT\x1b[0m\t: Gemini failed - {}", e));
+            logger.log(&format!("│ \x1b[33m⚠️ CONTEXT\t: Gemini failed - {}\x1b[0m", e));
             logger.log("│ \x1b[36m🔄 CONTEXT\x1b[0m\t: Falling back to Groq...");
         }
     }
@@ -460,7 +463,7 @@ async fn call_context_resolver_ai(
     match try_groq_reasoning_context(&prompt, logger).await {
         Ok(hints) => return Ok(hints),
         Err(e) => {
-            logger.log(&format!("│ \x1b[33m⚠️ CONTEXT\x1b[0m\t: Groq Reasoning failed - {}", e));
+            logger.log(&format!("│ \x1b[33m⚠️ CONTEXT\t: Groq Reasoning failed - {}\x1b[0m", e));
         }
     }
     
@@ -468,7 +471,7 @@ async fn call_context_resolver_ai(
     match try_groq_standard_context(&prompt, logger).await {
         Ok(hints) => return Ok(hints),
         Err(e) => {
-            logger.log(&format!("│ \x1b[31m❌ CONTEXT\x1b[0m\t: All models failed - {}", e));
+            logger.log(&format!("│ \x1b[31m❌ CONTEXT\t: All models failed - {}\x1b[0m", e));
         }
     }
     
@@ -543,7 +546,7 @@ async fn try_gemini_context(prompt: &str, logger: &JobLogger) -> Result<AIHints,
             Ok(r) => r,
             Err(_) => {
                 clear_trying_line(logger);
-                logger.log(&format!("│ ❌ FAILED\t: {} - Network error", model));
+                logger.log(&format!("│ \x1b[31m❌ FAILED\t: {} - Network error\x1b[0m", model));
                 continue;
             }
         };
@@ -565,7 +568,7 @@ async fn try_gemini_context(prompt: &str, logger: &JobLogger) -> Result<AIHints,
         }
         
         clear_trying_line(logger);
-        logger.log(&format!("│ ❌ FAILED\t: {} - HTTP {}", model, response.status()));
+        logger.log(&format!("│ \x1b[31m❌ FAILED\t: {} - HTTP {}\x1b[0m", model, response.status()));
     }
     
     Err("All Gemini models failed".to_string())
@@ -603,7 +606,7 @@ async fn try_groq_reasoning_context(prompt: &str, logger: &JobLogger) -> Result<
             Ok(r) => r,
             Err(_) => {
                 clear_trying_line(logger);
-                logger.log(&format!("│ ❌ FAILED\t: {} - Network error", model));
+                logger.log(&format!("│ \x1b[31m❌ FAILED\t: {} - Network error\x1b[0m", model));
                 continue;
             }
         };
@@ -625,7 +628,7 @@ async fn try_groq_reasoning_context(prompt: &str, logger: &JobLogger) -> Result<
         }
         
         clear_trying_line(logger);
-        logger.log(&format!("│ ❌ FAILED\t: {} - HTTP {}", model, response.status()));
+        logger.log(&format!("│ \x1b[31m❌ FAILED\t: {} - HTTP {}\x1b[0m", model, response.status()));
     }
 
     Err("All Groq reasoning models failed".to_string())
@@ -662,7 +665,7 @@ async fn try_groq_standard_context(prompt: &str, logger: &JobLogger) -> Result<A
             Ok(r) => r,
             Err(e) => {
                 clear_trying_line(logger);
-                logger.log(&format!("│ ❌ FAILED\t: {} - Network error", model));
+                logger.log(&format!("│ \x1b[31m❌ FAILED\t: {} - Network error\x1b[0m", model));
                 if index == GROQ_TEXT_MODELS.len() - 1 {
                     return Err(format!("Request failed: {}", e));
                 }
@@ -702,14 +705,14 @@ async fn try_groq_standard_context(prompt: &str, logger: &JobLogger) -> Result<A
         
         if status == reqwest::StatusCode::BAD_REQUEST {
             clear_trying_line(logger);
-            logger.log(&format!("│ ❌ FAILED\t: {} - 400 Bad Request", model));
+            logger.log(&format!("│ \x1b[31m❌ FAILED\t: {} - 400 Bad Request\x1b[0m", model));
             if index < GROQ_TEXT_MODELS.len() - 1 {
                 continue;
             }
         }
         
         clear_trying_line(logger);
-        logger.log(&format!("│ ❌ FAILED\t: {} - HTTP {}", model, status));
+        logger.log(&format!("│ \x1b[31m❌ FAILED\t: {} - HTTP {}\x1b[0m", model, status));
     }
     
     Err("All Groq standard models failed".to_string())
