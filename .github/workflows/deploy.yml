@@ -305,20 +305,40 @@ jobs:
           file marbot
           ldd marbot 2>/dev/null || echo -e "\033[0;33m⚡ Static binary\033[0m"
       
-      - name: 📤 Transfer deployment package to VPS
-        uses: appleboy/scp-action@v1
-        with:
-          host: ${{ secrets.VPS_HOST }}
-          username: ${{ secrets.VPS_USERNAME }}
-          key: ${{ secrets.VPS_SSH_KEY }}
-          port: ${{ secrets.VPS_PORT }}
-          source: "deploy/*"
-          target: "/tmp/marbot-deploy-${{ needs.prepare.outputs.short_sha }}/"
-          strip_components: 1
-          overwrite: true
+      - name: 🔧 Setup SSH key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
       
-      - name: 🚀 Execute deployment on VPS
-        uses: appleboy/ssh-action@v1
+      - name: 📤 Transfer deployment package to VPS (with retry)
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 10
+          max_attempts: 3
+          retry_wait_seconds: 20
+          shell: bash
+          command: |
+            echo -e "\033[0;36m📤 Transferring deployment package...\033[0m"
+            
+            # Create tarball for faster transfer
+            tar czf deploy.tar.gz -C deploy .
+            
+            # SCP with connection options
+            scp -i ~/.ssh/deploy_key \
+                -o StrictHostKeyChecking=no \
+                -o UserKnownHostsFile=/dev/null \
+                -o ConnectTimeout=30 \
+                -o ServerAliveInterval=10 \
+                -o ServerAliveCountMax=3 \
+                -P ${{ secrets.VPS_PORT }} \
+                deploy.tar.gz \
+                ${{ secrets.VPS_USERNAME }}@${{ secrets.VPS_HOST }}:/tmp/marbot-deploy-${{ needs.prepare.outputs.short_sha }}.tar.gz
+            
+            echo -e "\033[0;32m✅ Transfer complete\033[0m"
+      
+      - name: 🚀 Execute deployment on VPS (with retry)
+        uses: nick-fields/retry@v3
         env:
           COMMIT_SHA: ${{ needs.prepare.outputs.short_sha }}
           COMMIT_MSG: ${{ needs.prepare.outputs.commit_message }}
@@ -326,12 +346,21 @@ jobs:
           ADDITIONS: ${{ needs.prepare.outputs.additions }}
           DELETIONS: ${{ needs.prepare.outputs.deletions }}
         with:
-          host: ${{ secrets.VPS_HOST }}
-          username: ${{ secrets.VPS_USERNAME }}
-          key: ${{ secrets.VPS_SSH_KEY }}
-          port: ${{ secrets.VPS_PORT }}
-          envs: COMMIT_SHA,COMMIT_MSG,AUTHOR,ADDITIONS,DELETIONS
-          script: |
+          timeout_minutes: 20
+          max_attempts: 3
+          retry_wait_seconds: 20
+          shell: bash
+          command: |
+            echo -e "\033[0;36m🚀 Executing deployment on VPS...\033[0m"
+            
+            ssh -i ~/.ssh/deploy_key \
+                -o StrictHostKeyChecking=no \
+                -o UserKnownHostsFile=/dev/null \
+                -o ConnectTimeout=30 \
+                -o ServerAliveInterval=10 \
+                -o ServerAliveCountMax=3 \
+                -p ${{ secrets.VPS_PORT }} \
+                ${{ secrets.VPS_USERNAME }}@${{ secrets.VPS_HOST }} << 'ENDSSH'
             set -e
             
             # Colors for VPS output
@@ -343,10 +372,15 @@ jobs:
             BOLD='\033[1m'
             NC='\033[0m'
             
+            COMMIT_SHA="${{ needs.prepare.outputs.short_sha }}"
             DEPLOY_DIR="/tmp/marbot-deploy-${COMMIT_SHA}"
             PROJECT_DIR="/opt/marbot-academic-bot"
             
-            echo -e "${CYAN}📦 Deployment package received${NC}"
+            echo -e "${CYAN}📦 Extracting deployment package${NC}"
+            mkdir -p "$DEPLOY_DIR"
+            tar xzf "/tmp/marbot-deploy-${COMMIT_SHA}.tar.gz" -C "$DEPLOY_DIR"
+            rm "/tmp/marbot-deploy-${COMMIT_SHA}.tar.gz"
+            
             ls -la "$DEPLOY_DIR"
             
             # Read deployment mode
@@ -399,7 +433,13 @@ jobs:
             fi
             
             # Run update script with environment variables
-            export COMMIT_SHA COMMIT_MSG AUTHOR ADDITIONS DELETIONS DEPLOY_MODE
+            export COMMIT_SHA="${{ needs.prepare.outputs.short_sha }}"
+            export COMMIT_MSG="${{ needs.prepare.outputs.commit_message }}"
+            export AUTHOR="${{ needs.prepare.outputs.author_name }}"
+            export ADDITIONS="${{ needs.prepare.outputs.additions }}"
+            export DELETIONS="${{ needs.prepare.outputs.deletions }}"
+            export DEPLOY_MODE
+            
             echo -e "${CYAN}🚀 Running update script...${NC}"
             bash update.sh
             
@@ -407,6 +447,15 @@ jobs:
             rm -rf "$DEPLOY_DIR"
             
             echo -e "${GREEN}${BOLD}✅ Deployment complete!${NC}"
+            ENDSSH
+            
+            echo -e "\033[0;32m✅ Deployment executed successfully\033[0m"
+      
+      - name: 🧹 Cleanup
+        if: always()
+        run: |
+          rm -f ~/.ssh/deploy_key
+          rm -f deploy.tar.gz
       
       - name: ✅ Deployment successful
         run: |
@@ -421,7 +470,7 @@ jobs:
             echo -e "\033[0;32m✅ Full source deployed for VPS build\033[0m"
             echo -e "\033[0;32m✅ VPS will build from source\033[0m"
           fi
-          echo -e "\033[0;32m\033[1m✅ Deployment package transferred successfully\033[0m"
+          echo -e "\033[0;32m\033[1m✅ Deployment package transferred successfully (with retry)\033[0m"
 
   notify-success:
     name: 📱 Send Success Notification
@@ -494,10 +543,12 @@ jobs:
               echo "**GLIBC:** Compatible with Debian Bookworm" >> $GITHUB_STEP_SUMMARY
               echo "**Query Verification:** Runtime (no DATABASE_URL needed)" >> $GITHUB_STEP_SUMMARY
               echo "**Caching:** Enabled (Cargo registry + target)" >> $GITHUB_STEP_SUMMARY
+              echo "**Retry Logic:** Enabled (3 attempts, 20s interval)" >> $GITHUB_STEP_SUMMARY
             else
               echo "🎉 Deployment completed with VPS build fallback!" >> $GITHUB_STEP_SUMMARY
               echo "" >> $GITHUB_STEP_SUMMARY
               echo "**Build Method:** VPS Fallback (GitHub Actions build failed)" >> $GITHUB_STEP_SUMMARY
+              echo "**Retry Logic:** Enabled (3 attempts, 20s interval)" >> $GITHUB_STEP_SUMMARY
               echo "" >> $GITHUB_STEP_SUMMARY
               echo "⚠️ **Note:** GitHub Actions build failed but deployment succeeded via VPS build." >> $GITHUB_STEP_SUMMARY
             fi
