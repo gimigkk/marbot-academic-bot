@@ -951,6 +951,28 @@ pub async fn get_user_course_statuses(
 
     Ok(rows)
 }
+#[derive(sqlx::FromRow)]
+struct UserTarget {
+    user_id: String,
+    parallel_code: String,
+}
+pub async fn get_users_for_course_reminder(
+    pool: &PgPool,
+    course_id: Uuid,
+) -> Result<Vec<(String, String)>, sqlx::Error> {
+    let rows = sqlx::query_as::<_, UserTarget>(
+        r#"
+        SELECT user_id, parallel_code 
+        FROM user_course_settings 
+        WHERE course_id = $1
+        "#
+    )
+    .bind(course_id)
+    .fetch_all(pool)
+    .await?;
+
+    Ok(rows.into_iter().map(|r| (r.user_id, r.parallel_code)).collect())
+}
 
 // ========================================
 // ADDITIONAL HELPER IF NEEDED
