@@ -582,9 +582,9 @@
             updateClientSideCountdown(job.id, job.current_countdown.attempt, job.current_countdown.remaining);
         }
         const countdown = getClientSideCountdown(job.id);
-        const countdownHtml = countdown ? `<div class="countdown-line">RETRY #${countdown.attempt} - Waiting ${countdown.remaining} seconds...</div>` : '';
+        const countdownHtml = countdown ? `<div class="countdown-line">│ ⏳ RETRY #${countdown.attempt} - Waiting ${countdown.remaining} seconds...</div>` : '';
         
-        // FIX: Add trying line display
+        // FIX: Add trying line display with proper formatting
         const tryingHtml = job.current_trying ? `<div class="countdown-line">${escapeHtml(job.current_trying)}</div>` : '';
 
         const sig = jobSignature(job);

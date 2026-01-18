@@ -477,11 +477,16 @@ async fn call_context_resolver_ai(
 
 // ===== GEMINI CONTEXT RESOLUTION =====
 
-async fn try_gemini_context(prompt: &str, _logger: &JobLogger) -> Result<AIHints, String> {
+async fn try_gemini_context(prompt: &str, logger: &JobLogger) -> Result<AIHints, String> {
     let api_key = std::env::var("GEMINI_API_KEY")
         .map_err(|_| "GEMINI_API_KEY not set".to_string())?;
     
-    for model in GEMINI_MODELS {
+    for (idx, model) in GEMINI_MODELS.iter().enumerate() {
+        let index = idx + 1;
+        
+        // Log trying line with box formatting
+        print_trying_line(model, index, GEMINI_MODELS.len(), logger);
+        
         let url = format!(
             "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent",
             model
@@ -536,20 +541,31 @@ async fn try_gemini_context(prompt: &str, _logger: &JobLogger) -> Result<AIHints
             .await
         {
             Ok(r) => r,
-            Err(_) => continue,
+            Err(_) => {
+                clear_trying_line(logger);
+                logger.log(&format!("│ ❌ FAILED\t: {} - Network error", model));
+                continue;
+            }
         };
         
         if response.status() == reqwest::StatusCode::TOO_MANY_REQUESTS {
+            clear_trying_line(logger);
             continue;
         }
         
         if response.status().is_success() {
+            clear_trying_line(logger);
+            logger.log(&format!("│ ✅ SUCCESS\t: {} (Gemini {}/{})", model, index, GEMINI_MODELS.len()));
+            
             let gemini_response: GeminiResponse = response.json().await
                 .map_err(|e| format!("Parse error: {}", e))?;
             
             let ai_text = extract_ai_text(&gemini_response)?;
             return parse_ai_hints(&ai_text);
         }
+        
+        clear_trying_line(logger);
+        logger.log(&format!("│ ❌ FAILED\t: {} - HTTP {}", model, response.status()));
     }
     
     Err("All Gemini models failed".to_string())
@@ -557,14 +573,16 @@ async fn try_gemini_context(prompt: &str, _logger: &JobLogger) -> Result<AIHints
 
 // ===== GROQ REASONING CONTEXT RESOLUTION =====
 
-async fn try_groq_reasoning_context(prompt: &str, _logger: &JobLogger) -> Result<AIHints, String> {
+async fn try_groq_reasoning_context(prompt: &str, logger: &JobLogger) -> Result<AIHints, String> {
     let api_key = std::env::var("GROQ_API_KEY")
         .map_err(|_| "GROQ_API_KEY not set".to_string())?;
     
-    for model in GROQ_REASONING_MODELS {
+    for (idx, model) in GROQ_REASONING_MODELS.iter().enumerate() {
+        let index = idx + 1;
+        print_trying_line(model, index, GROQ_REASONING_MODELS.len(), logger);
+        
         let url = "https://api.groq.com/openai/v1/chat/completions";
         
-        // Match core.rs approach - use json_object instead of json_schema
         let request_body = json!({
             "model": model,
             "messages": [{"role": "user", "content": prompt}],
@@ -583,35 +601,48 @@ async fn try_groq_reasoning_context(prompt: &str, _logger: &JobLogger) -> Result
             .await
         {
             Ok(r) => r,
-            Err(_) => continue,
+            Err(_) => {
+                clear_trying_line(logger);
+                logger.log(&format!("│ ❌ FAILED\t: {} - Network error", model));
+                continue;
+            }
         };
         
         if response.status() == reqwest::StatusCode::TOO_MANY_REQUESTS {
+            clear_trying_line(logger);
             continue;
         }
         
         if response.status().is_success() {
+            clear_trying_line(logger);
+            logger.log(&format!("│ ✅ SUCCESS\t: {} (Groq Reasoning {}/{})", model, index, GROQ_REASONING_MODELS.len()));
+            
             let groq_response: GroqResponse = response.json().await
                 .map_err(|e| format!("Parse error: {}", e))?;
             
             let ai_text = extract_groq_text(&groq_response)?;
             return parse_ai_hints(&ai_text);
         }
+        
+        clear_trying_line(logger);
+        logger.log(&format!("│ ❌ FAILED\t: {} - HTTP {}", model, response.status()));
     }
 
     Err("All Groq reasoning models failed".to_string())
 }
 
-// ===== GROQ STANDARD CONTEXT RESOLUTION (FINAL FALLBACK) =====
+// ===== GROQ STANDARD CONTEXT RESOLUTION =====
 
 async fn try_groq_standard_context(prompt: &str, logger: &JobLogger) -> Result<AIHints, String> {
     let api_key = std::env::var("GROQ_API_KEY")
         .map_err(|_| "GROQ_API_KEY not set".to_string())?;
     
-    for (index, model) in GROQ_TEXT_MODELS.iter().enumerate() {
+    for (idx, model) in GROQ_TEXT_MODELS.iter().enumerate() {
+        let index = idx + 1;
+        print_trying_line(model, index, GROQ_TEXT_MODELS.len(), logger);
+        
         let url = "https://api.groq.com/openai/v1/chat/completions";
         
-        // Match core.rs exactly - simple json_object mode
         let request_body = json!({
             "model": model,
             "messages": [{"role": "user", "content": prompt}],
@@ -630,6 +661,8 @@ async fn try_groq_standard_context(prompt: &str, logger: &JobLogger) -> Result<A
         {
             Ok(r) => r,
             Err(e) => {
+                clear_trying_line(logger);
+                logger.log(&format!("│ ❌ FAILED\t: {} - Network error", model));
                 if index == GROQ_TEXT_MODELS.len() - 1 {
                     return Err(format!("Request failed: {}", e));
                 }
@@ -640,13 +673,13 @@ async fn try_groq_standard_context(prompt: &str, logger: &JobLogger) -> Result<A
         let status = response.status();
         
         if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
-            let error_text = response.text().await
-                .unwrap_or_else(|_| String::new());
+            clear_trying_line(logger);
+            let error_text = response.text().await.unwrap_or_default();
             
             if let Some(retry_after) = extract_retry_after(&error_text) {
-                logger.log(&format!("│ \x1b[33m⚠️ CONTEXT\x1b[0m\t: {} - ⏳ Rate limit (retry in {})", model, retry_after));
+                logger.log(&format!("│ ⏳ RATE LIMIT\t: {} - retry in {}", model, retry_after));
             } else {
-                logger.log(&format!("│ \x1b[33m⚠️ CONTEXT\x1b[0m\t: {} - ⏳ Rate limit", model));
+                logger.log(&format!("│ ⏳ RATE LIMIT\t: {}", model));
             }
             
             if index < GROQ_TEXT_MODELS.len() - 1 {
@@ -657,6 +690,9 @@ async fn try_groq_standard_context(prompt: &str, logger: &JobLogger) -> Result<A
         }
         
         if status.is_success() {
+            clear_trying_line(logger);
+            logger.log(&format!("│ ✅ SUCCESS\t: {} (Groq Standard {}/{})", model, index, GROQ_TEXT_MODELS.len()));
+            
             let groq_response: GroqResponse = response.json().await
                 .map_err(|e| format!("Parse error: {}", e))?;
             
@@ -665,20 +701,41 @@ async fn try_groq_standard_context(prompt: &str, logger: &JobLogger) -> Result<A
         }
         
         if status == reqwest::StatusCode::BAD_REQUEST {
-            logger.log(&format!("│ \x1b[31m❌ CONTEXT\x1b[0m\t: {} - 400 Bad Request", model));
+            clear_trying_line(logger);
+            logger.log(&format!("│ ❌ FAILED\t: {} - 400 Bad Request", model));
             if index < GROQ_TEXT_MODELS.len() - 1 {
                 continue;
             }
         }
         
-        if index == GROQ_TEXT_MODELS.len() - 1 {
-            return Err(format!("{}", status.as_u16()));
-        }
+        clear_trying_line(logger);
+        logger.log(&format!("│ ❌ FAILED\t: {} - HTTP {}", model, status));
     }
     
     Err("All Groq standard models failed".to_string())
 }
 
+// ===== TRYING LINE HELPERS =====
+
+fn print_trying_line(model: &str, index: usize, total: usize, logger: &JobLogger) {
+    // Console: overwrite with \r
+    use std::io::Write;
+    print!("\r│ 🔄 TRYING : {} ({}/{})                    ", model, index, total);
+    let _ = std::io::stdout().flush();
+    
+    // Dashboard: send trying update
+    logger.log_trying(model, index, total);
+}
+
+fn clear_trying_line(logger: &JobLogger) {
+    // Console: clear with \r
+    use std::io::Write;
+    print!("\r                                                                  \r");
+    let _ = std::io::stdout().flush();
+    
+    // Dashboard: clear trying state
+    logger.log_trying_clear();
+}
 
 /// Format sender history for prompt with relevance scoring
 fn format_history_for_prompt(history: &SenderHistory) -> String {
