@@ -5,8 +5,9 @@ on:
     branches:
       - main
 
+# Prevent concurrent deployments - cancel old runs when new push happens
 concurrency:
-  group: deploy-${{ github.ref }}
+  group: deploy-production
   cancel-in-progress: true
 
 env:
@@ -270,6 +271,7 @@ jobs:
           cp -r backend/migrations deploy/backend/
           cp backend/schedule.json deploy/backend/
           cp update.sh deploy/
+          cp docker-compose.yml deploy/
           
           # Create deployment marker
           echo "prebuilt" > deploy/DEPLOY_MODE
@@ -289,6 +291,7 @@ jobs:
           # Copy entire backend for building
           cp -r backend deploy/
           cp update.sh deploy/
+          cp docker-compose.yml deploy/
           
           # Create deployment marker
           echo "vps-build" > deploy/DEPLOY_MODE
@@ -396,6 +399,9 @@ jobs:
             # Copy update script
             cp "$DEPLOY_DIR/update.sh" ./update.sh
             chmod +x ./update.sh
+            
+            # Copy docker-compose.yml to ensure it's up to date
+            cp "$DEPLOY_DIR/docker-compose.yml" ./docker-compose.yml
             
             # Copy backend files based on mode
             if [ "$DEPLOY_MODE" = "prebuilt" ]; then
@@ -548,11 +554,13 @@ jobs:
               echo "**Query Verification:** Runtime (no DATABASE_URL needed)" >> $GITHUB_STEP_SUMMARY
               echo "**Caching:** Enabled (Cargo registry + target)" >> $GITHUB_STEP_SUMMARY
               echo "**Retry Logic:** Enabled (3 attempts, 20s interval)" >> $GITHUB_STEP_SUMMARY
+              echo "**Config Sync:** docker-compose.yml auto-updated" >> $GITHUB_STEP_SUMMARY
             else
               echo "🎉 Deployment completed with VPS build fallback!" >> $GITHUB_STEP_SUMMARY
               echo "" >> $GITHUB_STEP_SUMMARY
               echo "**Build Method:** VPS Fallback (GitHub Actions build failed)" >> $GITHUB_STEP_SUMMARY
               echo "**Retry Logic:** Enabled (3 attempts, 20s interval)" >> $GITHUB_STEP_SUMMARY
+              echo "**Config Sync:** docker-compose.yml auto-updated" >> $GITHUB_STEP_SUMMARY
               echo "" >> $GITHUB_STEP_SUMMARY
               echo "⚠️ **Note:** GitHub Actions build failed but deployment succeeded via VPS build." >> $GITHUB_STEP_SUMMARY
             fi
