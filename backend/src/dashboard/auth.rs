@@ -5,7 +5,7 @@ use axum::{
     extract::Request,
     http::{StatusCode, HeaderMap},
     middleware::Next,
-    response::{Response, IntoResponse},
+    response::{Response},
 };
 use base64::{Engine as _, engine::general_purpose};
 
