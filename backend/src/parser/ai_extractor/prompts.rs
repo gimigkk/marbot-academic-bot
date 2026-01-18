@@ -180,6 +180,20 @@ NOT ASSIGNMENTS (no deliverable to submit):
 
 CRITICAL: "Praktikum besok" = NO assignment | "Tugas dikumpulkan ketika praktikum" = Assignment"
 
+═══════════════════════════════════════════════════════════════════
+REQUIRED INFORMATION
+═══════════════════════════════════════════════════════════════════
+
+To classify as assignment, you MUST identify:
+1. **Course name** (mandatory - from message or context)
+2. **Specific identifier** (number, name, or distinguishing feature)
+
+If missing course name or only generic keywords ("tugas", "assignment") without context:
+→ UNRECOGNIZED (academic_related) with reason stating what's missing
+
+Principle: Would a student know WHICH assignment for WHICH course?
+- NO → UNRECOGNIZED
+- YES → Classify normally
 
 ═══════════════════════════════════════════════════════════════════
 CONTEXT
@@ -442,9 +456,9 @@ UNRECOGNIZED:
 }}
 
 Rules:
-- category="informal": No academic context (social chat, memes, greetings)
-- category="academic_related": Has academic context but fails THREE REQUIREMENTS
-- reason: Required for academic_related (explain which requirement fails), omit for informal
+- category="informal": No academic context whatsoever
+- category="academic_related": Has academic context but fails REQUIRED INFORMATION THRESHOLD
+- reason: MANDATORY for academic_related (state which required field is missing), null for informal
 
 MULTIPLE_ASSIGNMENTS:
 {{
