@@ -200,7 +200,8 @@ pub async fn get_recent_assignments_for_duplicate_check(
             sender_id,
             message_ids,
             reminder_1h_sent,
-            relating_messages
+            relating_messages,
+            personal_reminder_sent
         FROM assignments
         WHERE created_at > NOW() - INTERVAL '30 days'
         ORDER BY created_at DESC
@@ -233,7 +234,8 @@ pub async fn get_recent_assignments_for_matching(
             sender_id,
             message_ids,
             reminder_1h_sent,
-            relating_messages
+            relating_messages,
+            personal_reminder_sent
         FROM assignments
         WHERE created_at > NOW() - INTERVAL '30 days'
         ORDER BY created_at DESC
@@ -268,7 +270,8 @@ pub async fn get_assignments_for_classification(
             sender_id,
             message_ids,
             reminder_1h_sent,
-            relating_messages
+            relating_messages,
+            personal_reminder_sent
         FROM assignments
         ORDER BY created_at DESC
         LIMIT 15
@@ -312,7 +315,8 @@ pub async fn get_assignments(
             sender_id,
             message_ids,
             reminder_1h_sent,
-            relating_messages
+            relating_messages,
+            personal_reminder_sent
         FROM assignments
         ORDER BY created_at DESC
         LIMIT 20
@@ -368,7 +372,8 @@ pub async fn get_assignment_by_title_and_course(
             sender_id,
             message_ids,
             reminder_1h_sent,
-            relating_messages
+            relating_messages,
+            personal_reminder_sent
         FROM assignments
         WHERE title = $1 AND course_id = $2
         "#
@@ -402,7 +407,8 @@ pub async fn get_active_assignments(
             sender_id,
             message_ids,
             reminder_1h_sent,
-            relating_messages
+            relating_messages,
+            personal_reminder_sent
         FROM assignments
         WHERE deadline > $1 OR deadline IS NULL
         ORDER BY created_at DESC
@@ -636,7 +642,7 @@ pub async fn find_assignment_by_keywords(
         let mut query = String::from(
             r#"SELECT 
                 id, created_at, course_id, title, description, deadline, 
-                parallel_codes, sender_id, message_ids, reminder_1h_sent, relating_messages
+                parallel_codes, sender_id, message_ids, reminder_1h_sent, relating_messages, personal_reminder_sent
             FROM assignments WHERE course_id = $1 AND ("#
         );
         
@@ -683,7 +689,7 @@ pub async fn find_assignment_by_keywords(
     let query = format!(
         r#"SELECT 
             id, created_at, course_id, title, description, deadline, 
-            parallel_codes, sender_id, message_ids, reminder_1h_sent, relating_messages
+            parallel_codes, sender_id, message_ids, reminder_1h_sent, relating_messages, personal_reminder_sent
         FROM assignments WHERE {} ORDER BY created_at DESC LIMIT 5"#,
         conditions.join(" OR ")
     );
@@ -722,7 +728,7 @@ pub async fn update_assignment_fields(
     let current = sqlx::query_as::<_, Assignment>(
         r#"SELECT 
             id, created_at, course_id, title, description, deadline,
-            parallel_codes, sender_id, message_ids, reminder_1h_sent, relating_messages
+            parallel_codes, sender_id, message_ids, reminder_1h_sent, relating_messages, personal_reminder_sent
         FROM assignments WHERE id = $1"#
     )
     .bind(id)
@@ -771,7 +777,7 @@ pub async fn update_assignment_fields(
         WHERE id = $1
         RETURNING 
             id, created_at, course_id, title, description, deadline,
-            parallel_codes, sender_id, message_ids, reminder_1h_sent, relating_messages
+            parallel_codes, sender_id, message_ids, reminder_1h_sent, relating_messages, personal_reminder_sent
         "#
     )
     .bind(id)
