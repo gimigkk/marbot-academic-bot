@@ -62,7 +62,7 @@ pub async fn serve_dashboard_page() -> impl IntoResponse {
 <html lang="en">
 <head>
 <meta charset="utf-8" />
-<meta name="viewport" content="width=device-width,initial-scale=1" />
+<meta name="viewport" content="width=device-width,initial-scale=0.7,maximum-scale=1.5,user-scalable=yes" />
 <title>MARBOT Dashboard</title>
 <style>
 {}
