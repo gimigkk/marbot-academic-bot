@@ -5,6 +5,7 @@ use axum::{
     Router,
 };
 use axum::http::StatusCode;
+use axum::middleware;
 use std::collections::HashSet;
 use std::net::SocketAddr;
 use std::sync::Arc;  
@@ -246,11 +247,17 @@ async fn main() {
         tui_state: tui_state.clone(),  
     };
     
+    // Create dashboard routes with auth middleware
+    let dashboard_routes = Router::new()
+        .route("/tui", get(dashboard::serve_dashboard_page))
+        .route("/tui/api/data", get(dashboard::get_dashboard_data))
+        .route_layer(middleware::from_fn(dashboard::basic_auth_middleware));
+    
+    // Build the complete app - public routes + protected dashboard
     let app = Router::new()
         .route("/webhook", post(webhook))
         .route("/health", get(health_check))
-        .route("/tui", get(dashboard::serve_dashboard_page))
-        .route("/tui/api/data", get(dashboard::get_dashboard_data))
+        .merge(dashboard_routes)
         .with_state(state);
 
     let port = 3000;
