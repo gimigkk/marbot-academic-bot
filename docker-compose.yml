@@ -10,8 +10,13 @@ services:
       - DATABASE_URL=${DATABASE_URL}
       - WAHA_URL=${WAHA_URL}
       - WAHA_API_KEY=${WAHA_API_KEY}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - GROQ_API_KEY=${GROQ_API_KEY}
+      - ACADEMIC_CHANNELS=${ACADEMIC_CHANNELS}
       - DEBUG_GROUP_ID=${DEBUG_GROUP_ID}
-      # Add other env vars as needed
+      - RUST_LOG=${RUST_LOG:-info}
+      - DASHBOARD_USER=${DASHBOARD_USER:-admin}
+      - DASHBOARD_PASS=${DASHBOARD_PASS:-changeme}
     ports:
       - "3000:3000"
     restart: unless-stopped
