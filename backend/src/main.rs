@@ -87,7 +87,7 @@ async fn health_check() -> Json<serde_json::Value> {
 async fn check_waha_health() -> String {
     // Try multiple URLs in order of preference
     let waha_urls = vec![
-        std::env::var("WAHA_URL").unwrap_or_else(|_| "http://waha:3000".to_string()),
+        std::env::var("WAHA_URL").unwrap_or_else(|_| "http://marbot_waha:3001".to_string()),
         "http://localhost:3001".to_string(),
         "http://127.0.0.1:3001".to_string(),
     ];
@@ -1433,8 +1433,8 @@ fn extract_parallel_code(title: &str) -> Option<String> {
 }
 
 async fn fetch_image_from_url(url: &str, api_key: &str, logger: &tui::JobLogger) -> Result<String, String> {
-    let waha_base = std::env::var("WAHA_URL").unwrap_or_else(|_| "http://waha:3000".to_string());
-    let url = url.replace("http://localhost:3000", &waha_base);
+    let waha_base = std::env::var("WAHA_URL").unwrap_or_else(|_| "http://marbot_waha:3001".to_string());
+    let url = url.replace("http://localhost:3001", &waha_base);
     let client = reqwest::Client::new();
     let res = client.get(&url).header("X-Api-Key", api_key).send().await.map_err(|e| e.to_string())?;
     
