@@ -369,21 +369,46 @@
     function categorizeJob(job) {
         const tags = (job.tags || []).map(t => t.toLowerCase().replace(/^#/, ''));
         
-        // Check for bot command tags
-        const botKeywords = ['bot', 'command', 'cmd', 'whatsapp', 'message'];
-        if (tags.some(tag => botKeywords.some(kw => tag.includes(kw)))) {
+        // Bot commands - based on actual BotCommand enum variants from main.rs
+        const botCommandTags = [
+            'ping',      // BotCommand::Ping
+            'tugas',     // BotCommand::Tugas
+            'todo',      // BotCommand::Todo
+            'today',     // BotCommand::Today
+            'week',      // BotCommand::Week
+            'help',      // BotCommand::Help
+            'undo',      // BotCommand::Undo
+            'done',      // BotCommand::Done
+            'delete',    // BotCommand::Delete
+            'expand',    // BotCommand::Expand
+            'setkelas',  // BotCommand::SetKelas
+            'mykelas',   // BotCommand::MyKelas
+            'error',     // BotCommand::MissingArgument
+            'unknown'    // BotCommand::UnknownCommand
+        ];
+        
+        if (tags.some(tag => botCommandTags.includes(tag))) {
             return 'bot';
         }
         
-        // Check for AI processing tags
-        const aiKeywords = ['ai', 'llm', 'processing', 'claude', 'gpt', 'model'];
-        if (tags.some(tag => aiKeywords.some(kw => tag.includes(kw)))) {
+        // AI processing - based on AIClassification enum variants from main.rs
+        const aiTags = [
+            'ai',                // MessageType::NeedsAI (initial tag)
+            'assignment',        // AIClassification::AssignmentInfo
+            'update',            // AIClassification::AssignmentUpdate
+            'batch',             // AIClassification::MultipleAssignments
+            'informal',          // AIClassification::Unrecognized (Informal)
+            'academic-related'   // AIClassification::Unrecognized (AcademicRelated)
+        ];
+        
+        if (tags.some(tag => aiTags.includes(tag))) {
             return 'ai';
         }
         
-        // Unrecognized
+        // Unrecognized - shouldn't happen with proper tagging
         return 'unrecognized';
     }
+
 
     function getTimeBuckets(jobs) {
         if (jobs.length === 0) return [];

@@ -268,6 +268,17 @@ impl TuiState {
         }
     }
 
+    /// Add a tag to an existing job
+    pub async fn add_job_tag(&self, job_id: String, tag: String) {
+        let mut jobs = self.jobs.write().await;
+        if let Some(job) = jobs.get_mut(&job_id) {
+            // Only add if not already present
+            if !job.tags.contains(&tag) {
+                job.tags.push(tag);
+            }
+        }
+    }
+
     pub async fn create_job(
         &self, 
         id: String, 

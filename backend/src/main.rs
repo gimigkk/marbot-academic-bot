@@ -419,22 +419,9 @@ async fn webhook(
             tags.push(format!("#{}", cmd_tag));
         }
         MessageType::NeedsAI(_) => {
+            // Just mark as needs AI processing
+            // Final classification tags will be added after AI processes the message
             tags.push("#ai".to_string());
-            
-            // Add content-based tags for AI messages
-            let body_lower = payload.payload.body.to_lowercase();
-            if body_lower.contains("tugas") || body_lower.contains("assignment") {
-                tags.push("#tugas".to_string());
-            }
-            if body_lower.contains("todo") || body_lower.contains("deadline") {
-                tags.push("#todo".to_string());
-            }
-            if body_lower.contains("update") {
-                tags.push("#update".to_string());
-            }
-            if body_lower.contains("clarif") || body_lower.contains("klarif") {
-                tags.push("#clarification".to_string());
-            }
         }
     }
 
@@ -802,6 +789,11 @@ async fn handle_ai_classification(
     match classification {
         // NEW: Handle multiple assignments
         AIClassification::MultipleAssignments { assignments, .. } => {
+            // Add batch tag
+            if let Some(tui_state) = TUI_STATE.get() {
+                tui_state.add_job_tag(logger.job_id().to_string(), "#batch".to_string()).await;
+            }
+            
             let debug_group = debug_group_id.clone();
             
             if let Some(debug_id) = &debug_group {
@@ -866,7 +858,7 @@ async fn handle_ai_classification(
                     assignment.parallel_codes,
                     &message_id,
                     &sender_id,
-                    &message_body,  // FIX: Pass message_body here
+                    &message_body,
                     debug_group_id.clone(),
                     index + 1,
                     logger.clone(),
@@ -878,6 +870,11 @@ async fn handle_ai_classification(
         
         // Single assignment - USE AI FOR DUPLICATE DETECTION
         AIClassification::AssignmentInfo { course_name, title, deadline, description, parallel_codes, .. } => {
+            // Add assignment tag
+            if let Some(tui_state) = TUI_STATE.get() {
+                tui_state.add_job_tag(logger.job_id().to_string(), "#assignment".to_string()).await;
+            }
+            
             let debug_group = debug_group_id.clone();
             let msg_body = message_body.to_string();
             let logger_clone = logger.clone();
@@ -902,7 +899,7 @@ async fn handle_ai_classification(
             });
         }
         
-        // ============ FITUR: NOTIFIKASI AKADEMIK PADA UPDATE ============
+        // Assignment Update
         AIClassification::AssignmentUpdate { 
             reference_keywords, 
             changes, 
@@ -912,11 +909,16 @@ async fn handle_ai_classification(
             parallel_codes, 
             .. 
         } => {
+            // Add update tag
+            if let Some(tui_state) = TUI_STATE.get() {
+                tui_state.add_job_tag(logger.job_id().to_string(), "#update".to_string()).await;
+            }
+            
             let pool_clone = pool.clone();
             let msg_id = message_id.clone();
             let msg_body = message_body.clone();
             let debug_clone = debug_group_id.clone();
-            let source_chat_clone = source_chat_id.clone(); // Clone untuk spawn
+            let source_chat_clone = source_chat_id.clone();
             let logger_clone = logger.clone();
 
             tokio::spawn(async move {
@@ -939,33 +941,25 @@ async fn handle_ai_classification(
                     .await
                     .unwrap_or_default();
                 
-                // ============ HELPER FUNCTION: NOTIFIKASI AKADEMIK ============
                 async fn send_academic_alert(
                     title: &str, 
-                    _course: &str, // Course tidak dipakai di format singkat, jadi beri underscore prefix
+                    _course: &str,
                     deadline_utc: Option<chrono::DateTime<chrono::Utc>>,
                     source_chat: &str,
-                    original_msg_id: Option<String> // <--- PARAMETER BARU
+                    original_msg_id: Option<String>
                 ) {
-                    // Hanya kirim notifikasi jika ada deadline baru
                     if let Some(deadline) = deadline_utc {
-                        // Ambil daftar channel akademik dari environment variable
                         let academic_env = std::env::var("ACADEMIC_CHANNELS").unwrap_or_default();
                         let channels: Vec<&str> = academic_env.split(',').map(|s| s.trim()).collect();
                         
-                        // Format waktu : "15 Jan 2026, 10.00 WIB"
                         let wib = chrono::FixedOffset::east_opt(7 * 3600).unwrap();
                         let deadline_wib = deadline.with_timezone(&wib);
-                        // %d=Tanggal, %b=Bulan(Singkat), %Y=Tahun, %H.%M=Jam.Menit
                         let deadline_str = deadline_wib.format("%d %b %Y, %H.%M WIB").to_string();
 
                         for channel_id in channels {
                             if channel_id.is_empty() { continue; }
                             
-                            // SYARAT PENTING: 
-                            // Jangan kirim notifikasi jika update berasal dari grup akademik itu sendiri
                             if source_chat != channel_id {
-                                // FORMAT SINGKAT SESUAI REQUEST
                                 let msg = format!(
                                     "[Update] {}\nDeadline: {}",
                                     title, deadline_str
@@ -976,7 +970,6 @@ async fn handle_ai_classification(
                         }
                     }
                 }
-                // ============ END HELPER FUNCTION ============
 
                 // LOGIC 1: RE-ANNOUNCEMENT CHECK
                 if let Some(ref title) = new_title {
@@ -988,7 +981,7 @@ async fn handle_ai_classification(
                             &parallel_codes,
                             &active_assignments,
                             &course_map,
-                            &logger_clone,  // Pass logger
+                            &logger_clone,
                         ).await;
                         
                         if let Ok(Some((id, reason))) = dup_check { 
@@ -997,7 +990,6 @@ async fn handle_ai_classification(
                             let deadline_parsed = new_deadline.as_ref()
                                 .and_then(|d| crud::parse_deadline(d).ok());
                             
-                            // Update Database
                             let updated_res = crud::update_assignment_fields(
                                 &pool_clone,
                                 id,
@@ -1010,18 +1002,9 @@ async fn handle_ai_classification(
                                 Some(&logger_clone),
                             ).await;
                             
-                            // KIRIM NOTIFIKASI
                             if let Ok(updated_assign) = updated_res {
                                 if deadline_parsed.is_some() {
-                                    // Ambil ID pesan terakhir yang tersimpan di database untuk tugas ini
-                                    // Kita ambil index 0 (pesan pertama/original) atau last (pesan terbaru)
-                                    // Di sini kita ambil yang terakhir (updated_assign.message_ids.last()) atau previous
-                                    // Tapi amannya ambil pesan pertama kali tugas dibuat jika ingin konteks "Original"
-                                    // Atau ambil pesan terakhir jika ingin konteks "Thread terbaru"
-                                    
-                                    // Strategy: Coba reply ke pesan ID terakhir yang ada di database
                                     let reply_target_id = updated_assign.message_ids.last().cloned();
-
                                     send_academic_alert(title, cname, deadline_parsed, &source_chat_clone, reply_target_id).await;
                                 }
                             }
@@ -1054,7 +1037,7 @@ async fn handle_ai_classification(
                     &parallel_codes,
                     &logger_clone,
                 ).await {
-                    Ok(Some((assignment_id, reason))) => {  // Destructure to get both id and reason
+                    Ok(Some((assignment_id, reason))) => {
                         let current_title = active_assignments.iter()
                             .find(|a| a.id == assignment_id)
                             .map(|a| a.title.clone())
@@ -1065,7 +1048,6 @@ async fn handle_ai_classification(
                         let deadline_parsed = new_deadline.as_ref()
                             .and_then(|d| crud::parse_deadline(d).ok());
                         
-                        // Update database
                         if let Ok(updated_assign) = crud::update_assignment_fields(
                             &pool_clone,
                             assignment_id,
@@ -1077,8 +1059,6 @@ async fn handle_ai_classification(
                             Some(msg_body),
                             Some(&logger_clone),
                         ).await {
-
-                            // KIRIM NOTIFIKASI
                             if deadline_parsed.is_some() {
                                 let course_name_for_alert = if let Some(cid) = updated_assign.course_id {
                                     course_map.get(&cid)
@@ -1089,7 +1069,6 @@ async fn handle_ai_classification(
                                 };
                                 
                                 let reply_target_id = updated_assign.message_ids.last().cloned();
-
                                 send_academic_alert(
                                     &updated_assign.title, 
                                     &course_name_for_alert, 
@@ -1100,7 +1079,6 @@ async fn handle_ai_classification(
                             }
                             
                             if let Some(debug_id) = debug_clone {
-                                // Include reason in the message
                                 let reason_display = if !reason.is_empty() {
                                     format!("\n_{}_", reason)
                                 } else {
@@ -1109,7 +1087,7 @@ async fn handle_ai_classification(
                                 
                                 let _ = send_reply(
                                     &debug_id,
-                                    &format!("🔄 *UPDATED*: {}\n_{}_{}",  // Add reason here
+                                    &format!("🔄 *UPDATED*: {}\n_{}_{}",
                                         current_title, 
                                         changes,
                                         reason_display
@@ -1141,13 +1119,20 @@ async fn handle_ai_classification(
         }
         
         AIClassification::Unrecognized { reason, category } => {
+            // Add unrecognized category tag
+            if let Some(tui_state) = TUI_STATE.get() {
+                let tag = match category {
+                    UnrecognizedCategory::Informal => "#informal",
+                    UnrecognizedCategory::AcademicRelated => "#academic-related",
+                };
+                tui_state.add_job_tag(logger.job_id().to_string(), tag.to_string()).await;
+            }
+            
             match category {
                 UnrecognizedCategory::Informal => {
-                    // Completely informal - don't send anything to debug group
                     logger.log("💬 Informal chat detected - ignoring");
                 }
                 UnrecognizedCategory::AcademicRelated => {
-                    // Academic-related but not an assignment - send reason to debug
                     if let Some(debug_id) = debug_group_id {
                         let message = reason
                             .as_ref()
