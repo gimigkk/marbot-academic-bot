@@ -194,33 +194,28 @@ pub async fn handle_command(
                         )
                     } else {
                         // LOGIC SPACING KHUSUS HP
-                        // Kita tentukan lebar maksimum nama matkul agar tidak wrapping di layar HP
                         let max_width = 22; 
-                        
                         let mut body = String::new();
                         
                         for status in statuses {
-                            // 1. Truncate (potong) nama matkul jika kepanjangan
-                            // Supaya tampilan tetap rapi satu baris
+                            // 1. Truncate (potong) nama matkul
                             let raw_name = &status.course_name;
                             let name_len = raw_name.chars().count();
                             
                             let display_name = if name_len > max_width {
-                                // Ambil (max - 3) karakter lalu tambah "..."
                                 format!("{}...", raw_name.chars().take(max_width - 3).collect::<String>())
                             } else {
                                 raw_name.to_string()
                             };
+
+                            // 2. Hitung Padding (DIPINDAH KESINI AGAR BISA DIPAKAI KEDUANYA)
+                            let current_len = display_name.chars().count();
+                            let padding_needed = max_width.saturating_sub(current_len);
+                            let padding = " ".repeat(padding_needed);
                             
-                            // 2. Logic Icon & Padding
+                            // 3. Tentukan Icon & Kode
                             match &status.parallel_code {
                                 Some(code) if !code.is_empty() => {
-                                    // Hitung berapa spasi yang dibutuhkan
-                                    let current_len = display_name.chars().count();
-                                    // Saturating sub mencegah error jika ada length aneh
-                                    let padding_needed = max_width.saturating_sub(current_len);
-                                    let padding = " ".repeat(padding_needed);
-                                    
                                     // Format: ✅ NamaMatkul     (KODE)
                                     body.push_str(&format!(
                                         "✅ {}{} ({})\n", 
@@ -228,16 +223,18 @@ pub async fn handle_command(
                                     ));
                                 }
                                 _ => {
-                                    // Format: ❌ NamaMatkul
-                                    // (Tidak perlu padding kanan karena tidak ada kode di kanannya)
-                                    body.push_str(&format!("❌ {}\n", display_name));
+                                    // Format: ❌ NamaMatkul     (N/A)
+                                    // Sekarang kita pakai padding juga disini agar lurus
+                                    body.push_str(&format!(
+                                        "❌ {}{} (N/A)\n", 
+                                        display_name, padding
+                                    ));
                                 }
                             }
                         }
 
-                        // Bungkus body dengan ``` (Code Block) agar spasi lurus di HP
                         let response = format!(
-                            "📚 Kelas Saya _{}_\n\n```\n{}```\n\n_Ubah: #setkelas <matkul> <kode>_",
+                            "📚 Kelas Saya _{}_\n\n```\n{}```\n\nUbah: `#setkelas <matkul> <kode>`",
                             clean_name, body
                         );
 
