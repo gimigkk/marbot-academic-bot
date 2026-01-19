@@ -2,10 +2,8 @@ version: '3.8'
 
 services:
   backend:
-    # Use the image that was built by update.sh
-    # update.sh builds it with the correct Dockerfile based on deploy mode
     image: marbot-academic-bot-backend:latest
-    container_name: marbot_backend
+    container_name: marbot-backend  # ← Back to hyphen
     environment:
       - DATABASE_URL=${DATABASE_URL}
       - WAHA_URL=${WAHA_URL}
@@ -29,13 +27,16 @@ services:
 
   waha:
     image: devlikeapro/waha
-    container_name: marbot_waha
+    container_name: waha
     ports:
       - "3001:3000"
     environment:
       - WAHA_API_KEY=${WAHA_API_KEY}
-      - WHATSAPP_HOOK_URL=http://localhost:3001/webhook  
-      - WHATSAPP_HOOK_EVENTS=message.any                 
+      - WHATSAPP_HOOK_URL=http://172.17.0.1:3000/webhook
+      - WHATSAPP_HOOK_EVENTS=message.any
+      - WHATSAPP_HOOK_MEDIA=true
+      - WHATSAPP_DOWNLOAD_MEDIA=true
+      - WHATSAPP_WEBHOOK_INCLUDE_QUOTED=true
     volumes:
       - ./waha/waha_data:/app/.sessions
     restart: unless-stopped
