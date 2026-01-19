@@ -140,14 +140,14 @@ pub async fn handle_command(
                 "🏓 *PONG!*\n\
                 _{}_\n\n\
                 🖥️ *System Health:*\n\
-                • Bot: 🟢 Online ({:.2?})\n\
-                • Database: {} {}\n\
-                • AI Engine: {}\n\n\
+                - Bot: 🟢 Online ({:.2?})\n\
+                - Database: {} {}\n\
+                - AI Engine: {}\n\n\
                 📊 *Live Stats:*\n\
-                • Active Tasks: {}\n\
-                • Active Users: {}\n\
-                • Completed Today: {} ✓\n\
-                • Next Deadline: {}\n\n\
+                - Active Tasks: {}\n\
+                - Active Users: {}\n\
+                - Completed Today: {} ✓\n\
+                - Next Deadline: {}\n\n\
                 🕐 {} | _v1.0.0_",
                 motivation,
                 bot_duration,
@@ -599,21 +599,21 @@ pub async fn handle_command(
             CommandResponse::Text(
                 "*[MABOT — Academic Bot]*\n\n\
                     *Perintah Umum:*\n\
-                    • #ping — cek bot hidup & latency\n\
-                    • #tugas — lihat semua tugas (global)\n\
-                    • #today — tugas deadline hari ini\n\
-                    • #week — tugas 7 hari ke depan\n\
-                    • #help — bantuan\n\n\
+                    - #ping — cek bot hidup & latency\n\
+                    - #tugas — lihat semua tugas (global)\n\
+                    - #today — tugas deadline hari ini\n\
+                    - #week — tugas 7 hari ke depan\n\
+                    - #help — bantuan\n\n\
                     *Perintah Personal:*\n\
-                    • #todo — lihat tugas pribadi kamu\n\
-                    • #<id> — lihat detail tugas dari #todo\n\
-                    • #done <id> — tandai selesai\n\
-                    • #undo — batalkan #done terakhir\n\
-                    • #mykelas — lihat setting kelas kamu\n\n\
+                    - #todo — lihat tugas pribadi kamu\n\
+                    - #<id> — lihat detail tugas dari #todo\n\
+                    - #done <id> — tandai selesai\n\
+                    - #undo — batalkan #done terakhir\n\n\
                     *Perintah Pengaturan:*\n\
-                    • #setkelas <matkul> <kode1> [kode2]... — atur kelas pararel untuk matkul\n\n\
+                    - #setkelas <matkul> <kode1> [kode2]... — atur kelas pararel untuk matkul\n\
+                    - #mykelas — lihat setting kelas parallel kamu\n\n\
                     *Perintah Admin (Grup Akademik):*\n\
-                    • #delete <id> — hapus tugas (id dari #tugas)\n\n\
+                    - #delete <id> — hapus tugas (id dari #tugas)\n\n\
                     *Penting:* #<id> dan #done selalu pakai nomor dari *#todo*. _Info tugas akan otomatis tersimpan via grup info akademik, tidak dari chat lain._\n\n\
                     *Want to Contribute?*\n\
                     github.com/gimigkk/marbot-academic-bot"
@@ -630,24 +630,24 @@ pub async fn handle_command(
                     #expand <nomor>\n\
                     atau cukup: #<nomor>\n\n\
                     *Contoh:*\n\
-                    • #expand 1\n\
-                    • #1\n\n\
+                    - #expand 1\n\
+                    - #1\n\n\
                     💡 _Gunakan #todo untuk lihat daftar tugas dengan nomornya._"
                 }
                 "done" => {
                     "⚠️ *Cara pakai yang benar:*\n\n\
                     #done <nomor>\n\n\
                     *Contoh:*\n\
-                    • #done 1\n\
-                    • #done 3\n\n\
+                    - #done 1\n\
+                    - #done 3\n\n\
                     💡 _Gunakan #todo untuk lihat daftar tugas dengan nomornya._"
                 }
                 "delete" | "hapus" => {
                     "⚠️ *Cara pakai yang benar:*\n\n\
                     #delete <nomor>\n\n\
                     *Contoh:*\n\
-                    • #delete 1\n\
-                    • #hapus 2\n\n\
+                    - #delete 1\n\
+                    - #hapus 2\n\n\
                     💡 _Gunakan #tugas untuk lihat daftar dengan nomornya._\n\
                     ⚠️ _Command ini hanya bisa dijalankan di grup akademik._"
                 }
@@ -655,9 +655,9 @@ pub async fn handle_command(
                     "⚠️ *Cara pakai yang benar:*\n\n\
                     #setkelas <matkul> <kode1> [kode2]...\n\n\
                     *Contoh:*\n\
-                    • #setkelas pmk k1\n\
-                    • #setkelas algorithm c3\n\
-                    • #setkelas pemrog k1 p2\n\n\
+                    - #setkelas pmk k1\n\
+                    - #setkelas algorithm c3\n\
+                    - #setkelas pemrog k1 p2\n\n\
                     💡 _Gunakan nama matkul yang benar (lihat di #tugas)_"
                 }
                 _ => {
