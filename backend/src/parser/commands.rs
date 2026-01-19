@@ -180,44 +180,46 @@ pub async fn handle_command(
 
         BotCommand::MyKelas => {
             logger.log(&format!("📚 MyKelas command received from {}", user_phone));
-            
+
             match get_user_course_statuses(&pool, user_phone).await {
                 Ok(statuses) => {
-                    // Ambil nama user dan sanitasi agar aman
                     let clean_name = sanitize_wa_md(user_name);
 
                     if statuses.is_empty() {
-                        CommandResponse::Text(
-                            format!(
-                                "👤 *KELAS SAYA* _{}_\n\n_Belum ada data mata kuliah._\n\n_Tambah: #setkelas <matkul> <kode>_", 
-                                clean_name
-                            )
-                        )
+                        CommandResponse::Text(format!(
+                            "👤 *KELAS SAYA* _{}_\n\n_Belum ada data mata kuliah._\n\n_Tambah: #setkelas <matkul> <kode>_",
+                            clean_name
+                        ))
                     } else {
-                        // Header Style Modern + Nama User
-                        let mut response = format!("👤 *KELAS SAYA* _{}_\n\n", clean_name);
-                        
-                        for status in statuses {
+                        // Opsi B — Super simple, mobile-friendly
+                        let mut response = format!("*📚 Kelas Kamu* _{}_\n", clean_name);
+
+                        for (i, status) in statuses.into_iter().enumerate() {
+                            let course = sanitize_wa_md(&status.course_name);
+
+                            // Tampilkan kode dalam kurung agar rapih di HP
                             let kode_display = match status.parallel_code {
-                                Some(code) if !code.is_empty() => format!("*{}*", code.to_uppercase()),
-                                _ => "_(belum)_".to_string(),
+                                Some(code) if !code.trim().is_empty() => code.trim().to_uppercase(),
+                                _ => "_belum_".to_string(),
                             };
-                            
-                            // Format: Nama Matkul ➜ *KODE*
-                            response.push_str(&format!("{} ➜ {}\n", sanitize_wa_md(&status.course_name), kode_display));
+
+                            response.push_str(&format!(
+                                "{}{}) {} ({})\n",
+                                i + 1,
+                                ")",
+                                course,
+                                kode_display
+                            ));
                         }
-                        
-                        // Footer simple
-                        response.push_str("\n_Ubah: #setkelas <matkul> <kode>_");
+
+                        response.push_str("\n_#setkelas <matkul> <kode1> [kode2]..._");
 
                         CommandResponse::Text(response)
                     }
                 }
                 Err(e) => {
                     logger.log(&format!("❌ Gagal mengambil data mykelas: {:?}", e));
-                    CommandResponse::Text(
-                        "❌ Terjadi kesalahan saat mengambil data kelas.".to_string()
-                    )
+                    CommandResponse::Text("❌ Terjadi kesalahan saat mengambil data kelas.".to_string())
                 }
             }
         }
