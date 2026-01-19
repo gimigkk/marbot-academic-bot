@@ -31,13 +31,14 @@ services:
     ports:
       - "3001:3000"
     environment:
-      - WHATSAPP_DEFAULT_ENGINE=GOWS
       - WAHA_API_KEY=${WAHA_API_KEY}
+      - WHATSAPP_DEFAULT_ENGINE=GOWS
       - WHATSAPP_HOOK_URL=http://172.17.0.1:3000/webhook
       - WHATSAPP_HOOK_EVENTS=message.any
       - WHATSAPP_HOOK_MEDIA=true
       - WHATSAPP_DOWNLOAD_MEDIA=true
       - WHATSAPP_WEBHOOK_INCLUDE_QUOTED=true
+      - WAHA_PUBLIC_URL=http://43.133.129.209:3001
     volumes:
       - ./waha/waha_data:/app/.sessions
     restart: unless-stopped
