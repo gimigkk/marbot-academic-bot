@@ -23,6 +23,8 @@
     let analyticsOpen = false;
     let showBars = true;
     let analyticsChart = null;
+    let lastJobCount = 0;
+    let lastJobStates = new Map(); // Track job states for change detection
 
     const jobDetailHtmlCache = {};
     const jobDetailSig = {};
@@ -89,6 +91,7 @@
             }
             analyticsPanel.classList.add('open');
             analyticsBtn.classList.add('active');
+            // Chart will be initialized on first data fetch
         }
 
         const savedShowBars = localStorage.getItem(SHOW_BARS_KEY);
@@ -209,6 +212,8 @@
             analyticsPanel.classList.add('open');
             analyticsBtn.classList.add('active');
             initializeChart();
+            // Trigger first update when opening
+            setTimeout(() => updateChart(), 100);
         } else {
             analyticsPanel.style.width = '0px';
             analyticsPanel.classList.remove('open');
@@ -481,6 +486,13 @@
             return;
         }
 
+        // Initialize tracking state
+        lastJobCount = allJobs.length;
+        lastJobStates.clear();
+        allJobs.forEach(job => {
+            lastJobStates.set(job.id, `${job.status}:${(job.tags || []).join(',')}`);
+        });
+
         const ctx = analyticsChartCanvas.getContext('2d');
         
         analyticsChart = new Chart(ctx, {
@@ -674,6 +686,8 @@
         if (analyticsChart) {
             analyticsChart.destroy();
             analyticsChart = null;
+            lastJobCount = 0;
+            lastJobStates.clear();
         }
     }
 
@@ -1094,8 +1108,40 @@
     }
 
     function processFetchedData(data) {
+        const previousJobs = allJobs;
         allJobs = data.jobs;
         generalLog = data.general_log;
+
+        // Detect if we need to update analytics chart
+        let analyticsNeedsUpdate = false;
+        
+        if (analyticsOpen && analyticsChart) {
+            // Check if job count changed
+            if (allJobs.length !== lastJobCount) {
+                analyticsNeedsUpdate = true;
+                lastJobCount = allJobs.length;
+            }
+            
+            // Check if any job status or tags changed
+            if (!analyticsNeedsUpdate) {
+                for (const job of allJobs) {
+                    const prevState = lastJobStates.get(job.id);
+                    const currentState = `${job.status}:${(job.tags || []).join(',')}`;
+                    
+                    if (prevState !== currentState) {
+                        analyticsNeedsUpdate = true;
+                        lastJobStates.set(job.id, currentState);
+                    }
+                }
+            }
+            
+            // Update state map for new jobs
+            if (analyticsNeedsUpdate) {
+                allJobs.forEach(job => {
+                    lastJobStates.set(job.id, `${job.status}:${(job.tags || []).join(',')}`);
+                });
+            }
+        }
 
         allJobs.forEach(job => {
             if (!jobStartTimes[job.id]) {
@@ -1134,8 +1180,8 @@
             }
         });
 
-        // Update analytics chart
-        if (analyticsOpen && analyticsChart) {
+        // Update analytics chart only if data changed
+        if (analyticsNeedsUpdate) {
             updateChart();
         }
     }
@@ -1150,6 +1196,13 @@
                 console.info('reconnected');
             }
             processFetchedData(data);
+            
+            // Initialize chart on first fetch if analytics is open
+            if (analyticsOpen && !analyticsChart) {
+                initializeChart();
+                updateChart();
+            }
+            
             renderView();
             const now = new Date();
             lastUpdateEl.textContent = now.toLocaleTimeString('en-US', { hour12:false });
