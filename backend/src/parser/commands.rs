@@ -604,19 +604,18 @@ pub async fn handle_command(
                     • #today — tugas deadline hari ini\n\
                     • #week — tugas 7 hari ke depan\n\
                     • #help — bantuan\n\n\
-                    *Perintah Personal:*
+                    *Perintah Personal:*\n\
                     • #todo — lihat tugas pribadi kamu\n\
                     • #<id> — lihat detail tugas dari #todo\n\
                     • #done <id> — tandai selesai\n\
                     • #undo — batalkan #done terakhir\n\
                     • #mykelas — lihat setting kelas kamu\n\n\
-                    *Perintah Pengaturan:*
+                    *Perintah Pengaturan:*\n\
                     • #setkelas <matkul> <kode1> [kode2]... — atur kelas pararel untuk matkul\n\n\
                     *Perintah Admin (Grup Akademik):*\n\
                     • #delete <id> — hapus tugas (id dari #tugas)\n\n\
-                    *Penting:* #<id> dan #done selalu pakai nomor dari *#todo*. _Info tugas akan otomatis tersimpan via grup info akademik, tidak dari chat lain._
-
-                    *Want to Contribute?*
+                    *Penting:* #<id> dan #done selalu pakai nomor dari *#todo*. _Info tugas akan otomatis tersimpan via grup info akademik, tidak dari chat lain._\n\n\
+                    *Want to Contribute?*\n\
                     github.com/gimigkk/marbot-academic-bot"
                     .to_string(),
             )
