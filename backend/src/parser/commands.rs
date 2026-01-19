@@ -188,50 +188,37 @@ pub async fn handle_command(
                     if statuses.is_empty() {
                         CommandResponse::Text(
                             format!(
-                                "📚 *KELAS SAYA* _{}_\n\n_Belum ada data mata kuliah._\n\n_Tambah: #setkelas <matkul> <kode>_", 
+                                "⚙️ *SETTING KELAS* _{}_\n\n_Belum ada data mata kuliah._\n\n_Tambah: #setkelas <matkul> <kode>_", 
                                 clean_name
                             )
                         )
                     } else {
-                        // LOGIC TEXT BIASA (TANPA MONOSPACE)
-                        let max_width = 25; // Kita perlebar sedikit karena tidak ada kotak
+                        // STYLE HIERARKI (Mirip #todo)
+                        // Header
                         let mut body = String::new();
                         
-                        for status in statuses {
-                            // 1. Truncate (potong) nama matkul agar tidak terlalu panjang
-                            let raw_name = &status.course_name;
-                            let name_len = raw_name.chars().count();
-                            
-                            let display_name = if name_len > max_width {
-                                format!("{}...", raw_name.chars().take(max_width - 3).collect::<String>())
-                            } else {
-                                raw_name.to_string()
-                            };
-                            
-                            // 2. Format Tampilan (Tanpa Padding Spasi)
-                            // Kita gunakan Bold (*) pada nama matkul agar "spacing" visualnya jelas
+                        for (i, status) in statuses.iter().enumerate() {
+                            let no = i + 1;
+                            let matkul = sanitize_wa_md(&status.course_name);
+
                             match &status.parallel_code {
                                 Some(code) if !code.is_empty() => {
-                                    // Format: ✅ *NamaMatkul* (KODE)
-                                    body.push_str(&format!(
-                                        "✅ *{}* ({})\n", 
-                                        display_name, code.to_uppercase()
-                                    ));
+                                    // Sudah diset: Pakai Centang Hijau ✅
+                                    body.push_str(&format!("✅ *[{}] {}*\n", no, matkul));
+                                    body.push_str(&format!("└ Kelas: *{}*\n", code.to_uppercase()));
                                 }
                                 _ => {
-                                    // Format: ❌ NamaMatkul (N/A)
-                                    // Nama matkul tidak di-bold untuk yang belum diset (opsional, biar beda)
-                                    body.push_str(&format!(
-                                        "❌ {}\n", 
-                                        display_name
-                                    ));
+                                    // Belum diset: Pakai Segitiga Merah/Orange 🔻
+                                    body.push_str(&format!("❌ *[{}] {}*\n", no, matkul));
+                                    body.push_str("└ Kelas: _(belum diset)_\n");
                                 }
                             }
+                            // Tambah baris kosong antar item biar tidak sumpek
+                            body.push('\n');
                         }
 
-                        // Gabungkan tanpa ``` (backticks)
                         let response = format!(
-                            "📚 *KELAS SAYA* _{}_\n\n{}\n_Ubah: #setkelas <matkul> <kode>_",
+                            "⚙️ *SETTING KELAS* _{}_\n\n{}Ubah: `#setkelas <matkul> <kode>`",
                             clean_name, body
                         );
 
