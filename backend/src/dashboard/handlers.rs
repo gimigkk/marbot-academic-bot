@@ -54,6 +54,7 @@ pub struct StatsResponse {
 }
 
 const CSS: &str = include_str!("styles.css");
+// Analytics styles are in styles.css
 const JS: &str = include_str!("client.js");
 
 pub async fn serve_dashboard_page() -> impl IntoResponse {
@@ -64,6 +65,7 @@ pub async fn serve_dashboard_page() -> impl IntoResponse {
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=0.7,maximum-scale=1.5,user-scalable=yes" />
 <title>MARBOT Dashboard</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <style>
 {}
 </style>
@@ -75,6 +77,14 @@ pub async fn serve_dashboard_page() -> impl IntoResponse {
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
                 <rect x="3" y="3" width="18" height="18" rx="2"/>
                 <line x1="9" y1="3" x2="9" y2="21"/>
+            </svg>
+        </button>
+
+        <button class="control-btn analytics-btn" id="analytics-btn" title="Toggle analytics">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <line x1="12" y1="20" x2="12" y2="10"/>
+                <line x1="18" y1="20" x2="18" y2="4"/>
+                <line x1="6" y1="20" x2="6" y2="16"/>
             </svg>
         </button>
 
@@ -165,6 +175,28 @@ pub async fn serve_dashboard_page() -> impl IntoResponse {
             </div>
         </div>
     </aside>
+
+    <div class="analytics-panel" id="analytics-panel">
+        <div class="analytics-resize-handle" id="analytics-resize-handle"></div>
+        <div class="analytics-header">
+            <div class="analytics-title">Analytics</div>
+            <button class="analytics-close" id="analytics-close" title="Close analytics">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <line x1="18" y1="6" x2="6" y2="18"/>
+                    <line x1="6" y1="6" x2="18" y2="18"/>
+                </svg>
+            </button>
+        </div>
+        <div class="chart-container">
+            <canvas id="analytics-chart"></canvas>
+        </div>
+        <div class="analytics-footer">
+            <label class="analytics-toggle-label">
+                <input type="checkbox" id="show-bars-toggle" checked />
+                <span>Show success/fail bars</span>
+            </label>
+        </div>
+    </div>
 
     <main class="main-content" id="main-content">
         <div class="topbar">

@@ -7,6 +7,9 @@
     const SIDEBAR_COLLAPSED_KEY = 'marbot:sidebarCollapsed';
     const VIEW_KEY = 'marbot:currentView';
     const SEARCH_EXPANDED_KEY = 'marbot:searchExpanded';
+    const ANALYTICS_OPEN_KEY = 'marbot:analyticsOpen';
+    const ANALYTICS_WIDTH_KEY = 'marbot:analyticsWidth';
+    const SHOW_BARS_KEY = 'marbot:showBars';
 
     let currentView = 'tasks';
     let selectedJobId = null;
@@ -17,6 +20,9 @@
     let isConnected = true;
     let searchQuery = '';
     let searchExpanded = false;
+    let analyticsOpen = false;
+    let showBars = true;
+    let analyticsChart = null;
 
     const jobDetailHtmlCache = {};
     const jobDetailSig = {};
@@ -36,19 +42,20 @@
     const searchContainer = document.getElementById('search-container');
     const searchToggle = document.getElementById('search-toggle');
     const searchInput = document.getElementById('search-input');
+    const analyticsBtn = document.getElementById('analytics-btn');
+    const analyticsPanel = document.getElementById('analytics-panel');
+    const analyticsResizeHandle = document.getElementById('analytics-resize-handle');
+    const analyticsClose = document.getElementById('analytics-close');
+    const showBarsToggle = document.getElementById('show-bars-toggle');
+    const analyticsChartCanvas = document.getElementById('analytics-chart');
 
     let renderedJobIds = new Set();
     let isResizing = false;
     let resizeStartX = 0;
     let resizeStartWidth = 0;
-
-    // Update search width based on current sidebar width
-    function updateSearchWidth() {
-        if (!searchExpanded) return;
-        const sidebarWidth = sidebar.offsetWidth;
-        const maxWidth = sidebarWidth - 72;
-        searchContainer.style.width = maxWidth + 'px';
-    }
+    let isAnalyticsResizing = false;
+    let analyticsResizeStartX = 0;
+    let analyticsResizeStartWidth = 0;
 
     // Initialize
     try {
@@ -56,12 +63,15 @@
         if (collapsed) {
             sidebar.classList.add('collapsed');
             searchContainer.classList.add('hidden');
+            analyticsBtn.classList.add('hidden');
             collapseBtn.classList.add('collapsed');
         }
         const savedWidth = localStorage.getItem('marbot:sidebarWidth');
         if (savedWidth && !collapsed) sidebar.style.width = savedWidth + 'px';
+        
         const savedView = localStorage.getItem(VIEW_KEY);
         if (savedView === 'general') currentView = 'general';
+        
         const savedSearchExpanded = localStorage.getItem(SEARCH_EXPANDED_KEY) === 'true';
         if (savedSearchExpanded && !collapsed) {
             searchExpanded = true;
@@ -69,7 +79,32 @@
             updateSearchWidth();
             setTimeout(() => searchInput.focus(), 350);
         }
+
+        const savedAnalyticsOpen = localStorage.getItem(ANALYTICS_OPEN_KEY) === 'true';
+        if (savedAnalyticsOpen && !collapsed) {
+            analyticsOpen = true;
+            const savedAnalyticsWidth = localStorage.getItem(ANALYTICS_WIDTH_KEY);
+            if (savedAnalyticsWidth) {
+                analyticsPanel.style.width = savedAnalyticsWidth + 'px';
+            }
+            analyticsPanel.classList.add('open');
+            analyticsBtn.classList.add('active');
+        }
+
+        const savedShowBars = localStorage.getItem(SHOW_BARS_KEY);
+        if (savedShowBars !== null) {
+            showBars = savedShowBars === 'true';
+            showBarsToggle.checked = showBars;
+        }
     } catch (e) {}
+
+    // Update search width based on current sidebar width
+    function updateSearchWidth() {
+        if (!searchExpanded) return;
+        const sidebarWidth = sidebar.offsetWidth;
+        const maxWidth = sidebarWidth - 112; // Account for collapse (32) + gap (8) + analytics (32) + gap (8) + margins (32)
+        searchContainer.style.width = maxWidth + 'px';
+    }
 
     // Search toggle functionality
     searchToggle.addEventListener('click', (e) => {
@@ -144,7 +179,6 @@
                 return;
             }
 
-            // Build searchable text from ALL job fields
             const searchableText = [
                 job.id || '',
                 job.sender || '',
@@ -163,6 +197,87 @@
         });
     }
 
+    // Analytics toggle
+    analyticsBtn.addEventListener('click', () => {
+        analyticsOpen = !analyticsOpen;
+        
+        if (analyticsOpen) {
+            const savedWidth = localStorage.getItem(ANALYTICS_WIDTH_KEY);
+            const targetWidth = savedWidth || Math.max(300, Math.floor(document.getElementById('main-content').offsetWidth * 0.5));
+            
+            analyticsPanel.style.width = targetWidth + 'px';
+            analyticsPanel.classList.add('open');
+            analyticsBtn.classList.add('active');
+            initializeChart();
+        } else {
+            analyticsPanel.style.width = '0px';
+            analyticsPanel.classList.remove('open');
+            analyticsBtn.classList.remove('active');
+            destroyChart();
+        }
+
+        try {
+            localStorage.setItem(ANALYTICS_OPEN_KEY, analyticsOpen);
+        } catch (e) {}
+    });
+
+    analyticsClose.addEventListener('click', () => {
+        analyticsOpen = false;
+        analyticsPanel.style.width = '0px';
+        analyticsPanel.classList.remove('open');
+        analyticsBtn.classList.remove('active');
+        destroyChart();
+        try {
+            localStorage.setItem(ANALYTICS_OPEN_KEY, false);
+        } catch (e) {}
+    });
+
+    // Analytics resize
+    analyticsResizeHandle.addEventListener('mousedown', (e) => {
+        isAnalyticsResizing = true;
+        analyticsResizeStartX = e.clientX;
+        analyticsResizeStartWidth = analyticsPanel.offsetWidth;
+        analyticsPanel.classList.add('resizing');
+        analyticsResizeHandle.classList.add('active');
+        document.body.style.cursor = 'col-resize';
+        document.body.style.userSelect = 'none';
+        e.preventDefault();
+    });
+
+    document.addEventListener('mousemove', (e) => {
+        if (isAnalyticsResizing) {
+            const delta = e.clientX - analyticsResizeStartX;
+            const newWidth = Math.max(250, Math.min(800, analyticsResizeStartWidth + delta));
+            analyticsPanel.style.width = newWidth + 'px';
+            if (analyticsChart) {
+                analyticsChart.resize();
+            }
+        }
+    });
+
+    document.addEventListener('mouseup', () => {
+        if (isAnalyticsResizing) {
+            isAnalyticsResizing = false;
+            analyticsPanel.classList.remove('resizing');
+            analyticsResizeHandle.classList.remove('active');
+            document.body.style.cursor = '';
+            document.body.style.userSelect = '';
+            try {
+                localStorage.setItem(ANALYTICS_WIDTH_KEY, analyticsPanel.offsetWidth);
+            } catch (e) {}
+        }
+    });
+
+    // Show bars toggle
+    showBarsToggle.addEventListener('change', (e) => {
+        showBars = e.target.checked;
+        try {
+            localStorage.setItem(SHOW_BARS_KEY, showBars);
+        } catch (e) {}
+        updateChart();
+    });
+
+    // Collapse button - close analytics when collapsing sidebar
     collapseBtn.addEventListener('click', () => {
         const wasCollapsed = sidebar.classList.contains('collapsed');
         
@@ -171,11 +286,25 @@
             sidebar.style.width = savedWidth;
             sidebar.classList.remove('collapsed');
             searchContainer.classList.remove('hidden');
+            analyticsBtn.classList.remove('hidden');
             collapseBtn.classList.remove('collapsed');
         } else {
             sidebar.classList.add('collapsed');
             searchContainer.classList.add('hidden');
+            analyticsBtn.classList.add('hidden');
             collapseBtn.classList.add('collapsed');
+            
+            // Close analytics when collapsing sidebar
+            if (analyticsOpen) {
+                analyticsOpen = false;
+                analyticsPanel.style.width = '0px';
+                analyticsPanel.classList.remove('open');
+                analyticsBtn.classList.remove('active');
+                destroyChart();
+                try {
+                    localStorage.setItem(ANALYTICS_OPEN_KEY, false);
+                } catch (e) {}
+            }
             
             if (searchExpanded) {
                 searchExpanded = false;
@@ -195,6 +324,7 @@
         } catch (e) {}
     });
 
+    // Sidebar resize
     resizeHandle.addEventListener('mousedown', (e) => {
         isResizing = true;
         resizeStartX = e.clientX;
@@ -208,11 +338,12 @@
     });
 
     document.addEventListener('mousemove', (e) => {
-        if (!isResizing) return;
-        const delta = e.clientX - resizeStartX;
-        const newWidth = Math.max(200, Math.min(600, resizeStartWidth + delta));
-        sidebar.style.width = newWidth + 'px';
-        updateSearchWidth();
+        if (isResizing) {
+            const delta = e.clientX - resizeStartX;
+            const newWidth = Math.max(200, Math.min(600, resizeStartWidth + delta));
+            sidebar.style.width = newWidth + 'px';
+            updateSearchWidth();
+        }
     });
 
     document.addEventListener('mouseup', () => {
@@ -228,6 +359,323 @@
             } catch (e) {}
         }
     });
+
+    // Analytics functions
+    function categorizeJob(job) {
+        const tags = (job.tags || []).map(t => t.toLowerCase().replace(/^#/, ''));
+        
+        // Check for bot command tags
+        const botKeywords = ['bot', 'command', 'cmd', 'whatsapp', 'message'];
+        if (tags.some(tag => botKeywords.some(kw => tag.includes(kw)))) {
+            return 'bot';
+        }
+        
+        // Check for AI processing tags
+        const aiKeywords = ['ai', 'llm', 'processing', 'claude', 'gpt', 'model'];
+        if (tags.some(tag => aiKeywords.some(kw => tag.includes(kw)))) {
+            return 'ai';
+        }
+        
+        // Unrecognized
+        return 'unrecognized';
+    }
+
+    function getTimeBuckets(jobs) {
+        if (jobs.length === 0) return [];
+
+        const timestamps = jobs.map(j => getJobLatestMs(j)).filter(t => t > 0);
+        if (timestamps.length === 0) return [];
+
+        const minTime = Math.min(...timestamps);
+        const maxTime = Math.max(...timestamps);
+        const spanMs = maxTime - minTime;
+        const spanHours = spanMs / (1000 * 60 * 60);
+
+        // If span is less than 24 hours, use 12-hour buckets
+        // Otherwise use daily buckets
+        const bucketMs = spanHours < 24 ? 12 * 60 * 60 * 1000 : 24 * 60 * 60 * 1000;
+
+        const buckets = [];
+        let currentBucket = Math.floor(minTime / bucketMs) * bucketMs;
+        
+        while (currentBucket <= maxTime) {
+            buckets.push(currentBucket);
+            currentBucket += bucketMs;
+        }
+
+        return buckets;
+    }
+
+    function formatBucketLabel(timestamp, bucketMs) {
+        const date = new Date(timestamp);
+        const is12Hour = bucketMs === 12 * 60 * 60 * 1000;
+
+        if (is12Hour) {
+            const hours = date.getHours();
+            const period = hours < 12 ? 'AM' : 'PM';
+            const displayHour = hours === 0 ? 12 : (hours > 12 ? hours - 12 : hours);
+            return `${date.getMonth() + 1}/${date.getDate()} ${displayHour}${period}`;
+        } else {
+            return `${date.getMonth() + 1}/${date.getDate()}`;
+        }
+    }
+
+    function processAnalyticsData(jobs) {
+        const buckets = getTimeBuckets(jobs);
+        if (buckets.length === 0) {
+            return {
+                labels: [],
+                totalJobs: [],
+                botJobs: [],
+                aiJobs: [],
+                unrecognizedJobs: [],
+                successJobs: [],
+                failedJobs: []
+            };
+        }
+
+        const bucketMs = buckets.length > 1 ? buckets[1] - buckets[0] : 24 * 60 * 60 * 1000;
+        const labels = buckets.map(b => formatBucketLabel(b, bucketMs));
+        
+        const data = {
+            labels,
+            totalJobs: new Array(buckets.length).fill(0),
+            botJobs: new Array(buckets.length).fill(0),
+            aiJobs: new Array(buckets.length).fill(0),
+            unrecognizedJobs: new Array(buckets.length).fill(0),
+            successJobs: new Array(buckets.length).fill(0),
+            failedJobs: new Array(buckets.length).fill(0)
+        };
+
+        jobs.forEach(job => {
+            const jobTime = getJobLatestMs(job);
+            if (jobTime <= 0) return;
+
+            const bucketIndex = Math.floor((jobTime - buckets[0]) / bucketMs);
+            if (bucketIndex < 0 || bucketIndex >= buckets.length) return;
+
+            data.totalJobs[bucketIndex]++;
+
+            const category = categorizeJob(job);
+            if (category === 'bot') {
+                data.botJobs[bucketIndex]++;
+            } else if (category === 'ai') {
+                data.aiJobs[bucketIndex]++;
+            } else {
+                data.unrecognizedJobs[bucketIndex]++;
+            }
+
+            if (job.status === 'completed') {
+                data.successJobs[bucketIndex]++;
+            } else if (job.status === 'failed') {
+                data.failedJobs[bucketIndex]++;
+            }
+        });
+
+        return data;
+    }
+
+    function initializeChart() {
+        if (analyticsChart) {
+            updateChart();
+            return;
+        }
+
+        const ctx = analyticsChartCanvas.getContext('2d');
+        
+        analyticsChart = new Chart(ctx, {
+            type: 'bar',
+            data: {
+                labels: [],
+                datasets: []
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: {
+                    mode: 'index',
+                    intersect: false
+                },
+                plugins: {
+                    legend: {
+                        labels: {
+                            color: '#e0e0e0',
+                            font: {
+                                family: 'JetBrains Mono, monospace',
+                                size: 11
+                            },
+                            usePointStyle: true,
+                            pointStyle: 'circle',
+                            boxWidth: 6,
+                            boxHeight: 6,
+                            padding: 12
+                        }
+                    },
+                    tooltip: {
+                        backgroundColor: 'rgba(26, 26, 26, 0.95)',
+                        titleColor: '#e0e0e0',
+                        bodyColor: '#e0e0e0',
+                        borderColor: '#2a2a2a',
+                        borderWidth: 1,
+                        padding: 12,
+                        displayColors: true,
+                        titleFont: {
+                            family: 'JetBrains Mono, monospace',
+                            size: 12
+                        },
+                        bodyFont: {
+                            family: 'JetBrains Mono, monospace',
+                            size: 11
+                        }
+                    }
+                },
+                scales: {
+                    x: {
+                        stacked: true,
+                        grid: {
+                            color: '#2a2a2a',
+                            drawBorder: false
+                        },
+                        ticks: {
+                            color: '#999',
+                            font: {
+                                family: 'JetBrains Mono, monospace',
+                                size: 10
+                            }
+                        }
+                    },
+                    y: {
+                        stacked: true,
+                        grid: {
+                            color: '#2a2a2a',
+                            drawBorder: false
+                        },
+                        ticks: {
+                            color: '#999',
+                            font: {
+                                family: 'JetBrains Mono, monospace',
+                                size: 10
+                            },
+                            precision: 0
+                        }
+                    }
+                }
+            }
+        });
+
+        updateChart();
+    }
+
+    function updateChart() {
+        if (!analyticsChart) return;
+
+        const data = processAnalyticsData(allJobs);
+        
+        // Preserve hidden state of existing datasets
+        const hiddenStates = {};
+        if (analyticsChart.data.datasets) {
+            analyticsChart.data.datasets.forEach((dataset, index) => {
+                hiddenStates[dataset.label] = analyticsChart.getDatasetMeta(index).hidden;
+            });
+        }
+        
+        const datasets = [];
+
+        // Stacked bars (if enabled)
+        if (showBars) {
+            datasets.push({
+                label: 'Success',
+                data: data.successJobs,
+                backgroundColor: 'rgba(74, 222, 128, 0.6)',
+                borderColor: 'rgba(74, 222, 128, 1)',
+                borderWidth: 1,
+                type: 'bar',
+                order: 2
+            });
+
+            datasets.push({
+                label: 'Failed',
+                data: data.failedJobs,
+                backgroundColor: 'rgba(248, 113, 113, 0.6)',
+                borderColor: 'rgba(248, 113, 113, 1)',
+                borderWidth: 1,
+                type: 'bar',
+                order: 2
+            });
+        }
+
+        // Line charts
+        datasets.push({
+            label: 'Total Jobs',
+            data: data.totalJobs,
+            borderColor: '#e0e0e0',
+            backgroundColor: 'rgba(224, 224, 224, 0.1)',
+            borderWidth: 1,
+            tension: 0.3,
+            type: 'line',
+            order: 1,
+            pointRadius: 3,
+            pointHoverRadius: 5
+        });
+
+        datasets.push({
+            label: 'Bot Commands',
+            data: data.botJobs,
+            borderColor: '#c66143',
+            backgroundColor: 'rgba(198, 97, 67, 0.1)',
+            borderWidth: 2,
+            tension: 0.3,
+            type: 'line',
+            order: 1,
+            pointRadius: 3,
+            pointHoverRadius: 5
+        });
+
+        datasets.push({
+            label: 'AI Processing',
+            data: data.aiJobs,
+            borderColor: '#38bdf8',
+            backgroundColor: 'rgba(56, 189, 248, 0.1)',
+            borderWidth: 2,
+            tension: 0.3,
+            type: 'line',
+            order: 1,
+            pointRadius: 3,
+            pointHoverRadius: 5
+        });
+
+        datasets.push({
+            label: 'Unrecognized',
+            data: data.unrecognizedJobs,
+            borderColor: '#e879f9',
+            backgroundColor: 'rgba(232, 121, 249, 0.1)',
+            borderWidth: 2,
+            tension: 0.3,
+            type: 'line',
+            order: 1,
+            pointRadius: 3,
+            pointHoverRadius: 5
+        });
+
+        analyticsChart.data.labels = data.labels;
+        analyticsChart.data.datasets = datasets;
+        
+        // Restore hidden state for datasets that existed before
+        datasets.forEach((dataset, index) => {
+            if (hiddenStates[dataset.label] !== undefined) {
+                analyticsChart.getDatasetMeta(index).hidden = hiddenStates[dataset.label];
+            }
+        });
+        
+        analyticsChart.update('none');
+    }
+
+    function destroyChart() {
+        if (analyticsChart) {
+            analyticsChart.destroy();
+            analyticsChart = null;
+        }
+    }
 
     function getStatusIcon(status) {
         const icons = {
@@ -368,19 +816,16 @@
     }
 
     function getJobLatestMs(job) {
-        // Prioritize the last_message_ms field as it's the actual message timestamp
         if (job.last_message_ms) {
             const n = Number(job.last_message_ms);
             if (!isNaN(n) && n > 0) return n;
         }
-        // Try to extract timestamp from the last log line
         const logs = job.logs || [];
         if (logs.length) {
             const last = logs[logs.length - 1];
             const parsed = extractTimestampFromLog(last);
             if (parsed) return parsed;
         }
-        // Fallback: use current time as timestamp (for jobs without proper timestamps)
         return Date.now();
     }
 
@@ -388,14 +833,12 @@
         const date = new Date(ms);
         const now = new Date();
         
-        // If today: show time only (HH:MM)
         if (date.getDate() === now.getDate() && 
             date.getMonth() === now.getMonth() && 
             date.getFullYear() === now.getFullYear()) {
             return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
         }
         
-        // If this year: show date without year (MMM DD, HH:MM)
         if (date.getFullYear() === now.getFullYear()) {
             const month = date.toLocaleString('en-US', { month: 'short' });
             const day = date.getDate();
@@ -403,7 +846,6 @@
             return `${month} ${day}, ${time}`;
         }
         
-        // Different year: show full date (MMM DD YYYY, HH:MM)
         const month = date.toLocaleString('en-US', { month: 'short' });
         const day = date.getDate();
         const year = date.getFullYear();
@@ -426,7 +868,6 @@
             return;
         }
 
-        // Sort by latest message timestamp (newest first)
         const sorted = [...allJobs].sort((a, b) => {
             return getJobLatestMs(b) - getJobLatestMs(a);
         });
@@ -469,7 +910,6 @@
                 
                 const timestamp = formatTimestamp(getJobLatestMs(job));
                 
-                // Clean up tags - remove duplicates and # prefix
                 const cleanTags = [...new Set(job.tags || [])].map(tag => tag.replace(/^#/, ''));
                 const tagsHtml = cleanTags.length > 0
                     ? `<div class="job-tags">${cleanTags.map(tag => `<span class="job-tag">${escapeHtml(tag)}</span>`).join('')}</div>`
@@ -512,7 +952,6 @@
                     }
                 }
                 
-                // Update timestamp
                 const timestampEl = jobItem.querySelector('.job-timestamp');
                 if (timestampEl) {
                     const newTimestamp = formatTimestamp(getJobLatestMs(job));
@@ -584,7 +1023,6 @@
         const countdown = getClientSideCountdown(job.id);
         const countdownHtml = countdown ? `<div class="countdown-line">│ ⏳ RETRY #${countdown.attempt} - Waiting ${countdown.remaining} seconds...</div>` : '';
         
-        // FIX: Add trying line display with proper formatting
         const tryingHtml = job.current_trying ? `<div class="countdown-line">${escapeHtml(job.current_trying)}</div>` : '';
 
         const sig = jobSignature(job);
@@ -595,11 +1033,9 @@
         }
 
         const lines = [...job.logs];
-        // Don't add current_trying to logs - it's rendered separately
         const raw = lines.join('\n');
 
         try {
-            // FIX: Include both trying and countdown in the HTML
             const html = ansiToHtml(raw) + tryingHtml + countdownHtml;
             jobDetailHtmlCache[job.id] = html;
             jobDetailSig[job.id] = sig;
@@ -697,6 +1133,11 @@
                 delete jobDetailSig[job.id];
             }
         });
+
+        // Update analytics chart
+        if (analyticsOpen && analyticsChart) {
+            updateChart();
+        }
     }
 
     async function fetchData() {

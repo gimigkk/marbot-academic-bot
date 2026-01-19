@@ -75,6 +75,22 @@ body {
     transform: rotate(180deg);
 }
 
+.analytics-btn.active {
+    background: var(--hover-bg);
+    color: var(--accent);
+    border-color: var(--accent);
+}
+
+.analytics-btn {
+    transition: all 0.2s ease, opacity 0.2s ease, visibility 0.2s ease;
+}
+
+.analytics-btn.hidden {
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+}
+
 .search-container {
     display: flex;
     align-items: center;
@@ -514,7 +530,6 @@ body {
     font-family: 'JetBrains Mono', monospace;
 }
 
-/* NEW: Job meta row for chat + timestamp */
 .job-meta {
     display: flex;
     align-items: center;
@@ -596,6 +611,148 @@ body {
     color: var(--text-tertiary);
     text-transform: uppercase;
     letter-spacing: 0.5px;
+}
+
+/* Analytics Panel */
+.analytics-panel {
+    width: 0;
+    background: var(--sidebar-bg);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.3s ease;
+    position: relative;
+    flex-shrink: 0;
+    overflow: hidden;
+    opacity: 0;
+}
+
+.analytics-panel.open {
+    opacity: 1;
+}
+
+.analytics-panel.resizing {
+    transition: none;
+    user-select: none;
+}
+
+.analytics-resize-handle {
+    position: absolute;
+    right: 0;
+    top: 0;
+    bottom: 0;
+    width: 8px;
+    cursor: col-resize;
+    z-index: 10;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.2s ease;
+}
+
+.analytics-resize-handle::before {
+    content: '';
+    position: absolute;
+    width: 2px;
+    height: 32px;
+    background: var(--text-tertiary);
+    border-radius: 1px;
+    opacity: 0;
+    transition: opacity 0.2s ease;
+}
+
+.analytics-resize-handle:hover::before,
+.analytics-resize-handle.active::before {
+    opacity: 0.5;
+}
+
+.analytics-resize-handle:hover,
+.analytics-resize-handle.active {
+    background: rgba(198, 97, 67, 0.1);
+}
+
+.analytics-header {
+    height: 64px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 20px;
+    flex-shrink: 0;
+}
+
+.analytics-title {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.analytics-close {
+    width: 28px;
+    height: 28px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text-secondary);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s ease;
+    padding: 0;
+}
+
+.analytics-close:hover {
+    background: var(--hover-bg);
+    color: var(--text-primary);
+    border-color: var(--accent);
+}
+
+.analytics-close svg {
+    width: 14px;
+    height: 14px;
+}
+
+.chart-container {
+    flex: 1;
+    padding: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 0;
+    position: relative;
+}
+
+.chart-container canvas {
+    max-height: 100%;
+    max-width: 100%;
+}
+
+.analytics-footer {
+    padding: 16px 20px;
+    border-top: 1px solid var(--border);
+    flex-shrink: 0;
+}
+
+.analytics-toggle-label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    color: var(--text-primary);
+    cursor: pointer;
+    user-select: none;
+}
+
+.analytics-toggle-label input[type="checkbox"] {
+    width: 16px;
+    height: 16px;
+    cursor: pointer;
+    accent-color: var(--accent);
+}
+
+.analytics-toggle-label:hover {
+    color: var(--accent);
 }
 
 .main-content {
@@ -695,12 +852,24 @@ body {
         transform: translateX(-100%);
     }
 
+    .analytics-panel {
+        position: absolute;
+        left: 0;
+        top: 0;
+        bottom: 0;
+        z-index: 99;
+    }
+
+    .analytics-panel.open {
+        width: 100%;
+    }
+
     .top-left-controls {
         left: 8px;
         top: 8px;
     }
 
     .topbar {
-        padding-left: 80px;
+        padding-left: 120px;
     }
 }
