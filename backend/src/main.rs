@@ -765,7 +765,7 @@ async fn webhook(
     
     // STOP MONITORING: Global Request Timer
     let total_duration = request_start.elapsed();
-    logger.log(&format!("⏱️  Total Request Processed in: {:.2?}\n", total_duration));
+    logger.log(&format!("⏱️ Total Request Processed in: {:.2?}\n", total_duration));
 
     StatusCode::OK
 }

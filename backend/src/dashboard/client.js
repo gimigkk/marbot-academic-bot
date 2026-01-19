@@ -826,10 +826,58 @@
 
     function ansiToHtml(text) {
         if (!text) return '';
-        let escaped = String(text).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-        escaped = escaped.replace(/\x1b\[38;2;(\d+);(\d+);(\d+)m/g, (m,r,g,b) => `<span style="color: rgb(${r},${g},${b})">`);
-        escaped = escaped.replace(/\x1b\[(\d+)m/g, (m,code) => code === '0' ? '</span>' : `<span class="ansi-${code}">`);
-        return escaped.replace(/\n/g, '<br>');
+        
+        // Escape HTML first
+        let escaped = String(text)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;');
+        
+        // Handle 24-bit RGB colors: \x1b[38;2;R;G;Bm
+        escaped = escaped.replace(/\x1b\[38;2;(\d+);(\d+);(\d+)m/g, (m, r, g, b) => 
+            `<span style="color: rgb(${r},${g},${b})">`
+        );
+        
+        // Handle standard ANSI color codes
+        const colorMap = {
+            '0': '</span>',      // Reset
+            '1': '<span style="font-weight: bold">',
+            '30': '<span style="color: #1a1a1a">',  // Black (dark gray for visibility)
+            '31': '<span style="color: #f87171">',  // Red
+            '32': '<span style="color: #4ade80">',  // Green
+            '33': '<span style="color: #fbbf24">',  // Yellow
+            '34': '<span style="color: #60a5fa">',  // Blue
+            '35': '<span style="color: #e879f9">',  // Magenta
+            '36': '<span style="color: #38bdf8">',  // Cyan
+            '37': '<span style="color: #e0e0e0">',  // White
+            '90': '<span style="color: #999">',     // Bright black (gray)
+            '91': '<span style="color: #fca5a5">',  // Bright red
+            '92': '<span style="color: #86efac">',  // Bright green
+            '93': '<span style="color: #fde047">',  // Bright yellow
+            '94': '<span style="color: #93c5fd">',  // Bright blue
+            '95': '<span style="color: #f0abfc">',  // Bright magenta
+            '96': '<span style="color: #7dd3fc">',  // Bright cyan
+            '97': '<span style="color: #f5f5f5">',  // Bright white
+        };
+        
+        // Replace ANSI codes with HTML spans
+        escaped = escaped.replace(/\x1b\[(\d+)m/g, (match, code) => {
+            return colorMap[code] || '';
+        });
+        
+        // Convert newlines to <br>
+        escaped = escaped.replace(/\n/g, '<br>');
+        
+        // Clean up any nested or unclosed spans at the end
+        const openSpans = (escaped.match(/<span/g) || []).length;
+        const closeSpans = (escaped.match(/<\/span>/g) || []).length;
+        
+        // Add missing closing tags
+        for (let i = 0; i < openSpans - closeSpans; i++) {
+            escaped += '</span>';
+        }
+        
+        return escaped;
     }
 
     function getClientDuration(jobId, status) {

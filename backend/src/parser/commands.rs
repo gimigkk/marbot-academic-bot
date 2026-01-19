@@ -622,7 +622,7 @@ pub async fn handle_command(
         }
 
         BotCommand::MissingArgument(cmd) => {
-            logger.log(&format!("⚠️  Missing argument for command '{}' from {}", cmd, user_phone));
+            logger.log(&format!("⚠️ Missing argument for command '{}' from {}", cmd, user_phone));
             
             let usage_msg = match cmd.as_str() {
                 "expand" => {
