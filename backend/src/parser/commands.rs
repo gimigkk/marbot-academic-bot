@@ -180,51 +180,79 @@ pub async fn handle_command(
 
         BotCommand::MyKelas => {
             logger.log(&format!("📚 MyKelas command received from {}", user_phone));
-
+            
             match get_user_course_statuses(&pool, user_phone).await {
                 Ok(statuses) => {
                     let clean_name = sanitize_wa_md(user_name);
 
                     if statuses.is_empty() {
-                        CommandResponse::Text(format!(
-                            "👤 *KELAS SAYA* _{}_\n\n_Belum ada data mata kuliah._\n\n_Tambah: #setkelas <matkul> <kode>_",
-                            clean_name
-                        ))
+                        CommandResponse::Text(
+                            format!(
+                                "📚 Kelas Saya _{}_\n\n_Belum ada data mata kuliah._\n\n_Tambah: #setkelas <matkul> <kode>_", 
+                                clean_name
+                            )
+                        )
                     } else {
-                        // Opsi B — Super simple, mobile-friendly
-                        let mut response = format!("*📚 Kelas Kamu* _{}_\n", clean_name);
-
-                        for (i, status) in statuses.into_iter().enumerate() {
-                            let course = sanitize_wa_md(&status.course_name);
-
-                            // Tampilkan kode dalam kurung agar rapih di HP
-                            let kode_display = match status.parallel_code {
-                                Some(code) if !code.trim().is_empty() => code.trim().to_uppercase(),
-                                _ => "_belum_".to_string(),
+                        // LOGIC SPACING KHUSUS HP
+                        // Kita tentukan lebar maksimum nama matkul agar tidak wrapping di layar HP
+                        let max_width = 22; 
+                        
+                        let mut body = String::new();
+                        
+                        for status in statuses {
+                            // 1. Truncate (potong) nama matkul jika kepanjangan
+                            // Supaya tampilan tetap rapi satu baris
+                            let raw_name = &status.course_name;
+                            let name_len = raw_name.chars().count();
+                            
+                            let display_name = if name_len > max_width {
+                                // Ambil (max - 3) karakter lalu tambah "..."
+                                format!("{}...", raw_name.chars().take(max_width - 3).collect::<String>())
+                            } else {
+                                raw_name.to_string()
                             };
-
-                            response.push_str(&format!(
-                                "{}{}) {} ({})\n",
-                                i + 1,
-                                ")",
-                                course,
-                                kode_display
-                            ));
+                            
+                            // 2. Logic Icon & Padding
+                            match &status.parallel_code {
+                                Some(code) if !code.is_empty() => {
+                                    // Hitung berapa spasi yang dibutuhkan
+                                    let current_len = display_name.chars().count();
+                                    // Saturating sub mencegah error jika ada length aneh
+                                    let padding_needed = max_width.saturating_sub(current_len);
+                                    let padding = " ".repeat(padding_needed);
+                                    
+                                    // Format: ✅ NamaMatkul     (KODE)
+                                    body.push_str(&format!(
+                                        "✅ {}{} ({})\n", 
+                                        display_name, padding, code.to_uppercase()
+                                    ));
+                                }
+                                _ => {
+                                    // Format: ❌ NamaMatkul
+                                    // (Tidak perlu padding kanan karena tidak ada kode di kanannya)
+                                    body.push_str(&format!("❌ {}\n", display_name));
+                                }
+                            }
                         }
 
-                        response.push_str("\n_#setkelas <matkul> <kode1> [kode2]..._");
+                        // Bungkus body dengan ``` (Code Block) agar spasi lurus di HP
+                        let response = format!(
+                            "📚 Kelas Saya _{}_\n\n```\n{}```\n\n_Ubah: #setkelas <matkul> <kode>_",
+                            clean_name, body
+                        );
 
                         CommandResponse::Text(response)
                     }
                 }
                 Err(e) => {
                     logger.log(&format!("❌ Gagal mengambil data mykelas: {:?}", e));
-                    CommandResponse::Text("❌ Terjadi kesalahan saat mengambil data kelas.".to_string())
+                    CommandResponse::Text(
+                        "❌ Terjadi kesalahan saat mengambil data kelas.".to_string()
+                    )
                 }
             }
         }
 
-        // Update Handler SetKelas untuk menerima Vec<String>
         BotCommand::SetKelas(matkul, codes) => {
             // codes sekarang adalah vector, misal ["k1", "p2"]
             // Join dengan spasi hanya untuk log display
