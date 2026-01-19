@@ -568,7 +568,6 @@
                 },
                 scales: {
                     x: {
-                        stacked: true,
                         grid: {
                             color: '#2a2a2a',
                             drawBorder: false
@@ -582,7 +581,7 @@
                         }
                     },
                     y: {
-                        stacked: true,
+                        grace: '15%',  // Add 15% headroom to top
                         grid: {
                             color: '#2a2a2a',
                             drawBorder: false
