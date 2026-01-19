@@ -188,17 +188,17 @@ pub async fn handle_command(
                     if statuses.is_empty() {
                         CommandResponse::Text(
                             format!(
-                                "📚 Kelas Saya _{}_\n\n_Belum ada data mata kuliah._\n\n_Tambah: #setkelas <matkul> <kode>_", 
+                                "📚 *KELAS SAYA* _{}_\n\n_Belum ada data mata kuliah._\n\n_Tambah: #setkelas <matkul> <kode>_", 
                                 clean_name
                             )
                         )
                     } else {
-                        // LOGIC SPACING KHUSUS HP
-                        let max_width = 22; 
+                        // LOGIC TEXT BIASA (TANPA MONOSPACE)
+                        let max_width = 25; // Kita perlebar sedikit karena tidak ada kotak
                         let mut body = String::new();
                         
                         for status in statuses {
-                            // 1. Truncate (potong) nama matkul
+                            // 1. Truncate (potong) nama matkul agar tidak terlalu panjang
                             let raw_name = &status.course_name;
                             let name_len = raw_name.chars().count();
                             
@@ -207,34 +207,31 @@ pub async fn handle_command(
                             } else {
                                 raw_name.to_string()
                             };
-
-                            // 2. Hitung Padding (DIPINDAH KESINI AGAR BISA DIPAKAI KEDUANYA)
-                            let current_len = display_name.chars().count();
-                            let padding_needed = max_width.saturating_sub(current_len);
-                            let padding = " ".repeat(padding_needed);
                             
-                            // 3. Tentukan Icon & Kode
+                            // 2. Format Tampilan (Tanpa Padding Spasi)
+                            // Kita gunakan Bold (*) pada nama matkul agar "spacing" visualnya jelas
                             match &status.parallel_code {
                                 Some(code) if !code.is_empty() => {
-                                    // Format: ✅ NamaMatkul     (KODE)
+                                    // Format: ✅ *NamaMatkul* (KODE)
                                     body.push_str(&format!(
-                                        "✅ {}{} ({})\n", 
-                                        display_name, padding, code.to_uppercase()
+                                        "✅ *{}* ({})\n", 
+                                        display_name, code.to_uppercase()
                                     ));
                                 }
                                 _ => {
-                                    // Format: ❌ NamaMatkul     (N/A)
-                                    // Sekarang kita pakai padding juga disini agar lurus
+                                    // Format: ❌ NamaMatkul (N/A)
+                                    // Nama matkul tidak di-bold untuk yang belum diset (opsional, biar beda)
                                     body.push_str(&format!(
-                                        "❌ {}{} (N/A)\n", 
-                                        display_name, padding
+                                        "❌ {}\n", 
+                                        display_name
                                     ));
                                 }
                             }
                         }
 
+                        // Gabungkan tanpa ``` (backticks)
                         let response = format!(
-                            "📚 Kelas Saya _{}_\n\n```\n{}```\n\nUbah: `#setkelas <matkul> <kode>`",
+                            "📚 *KELAS SAYA* _{}_\n\n{}\n_Ubah: #setkelas <matkul> <kode>_",
                             clean_name, body
                         );
 
