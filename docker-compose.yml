@@ -5,7 +5,7 @@ services:
     # Use the image that was built by update.sh
     # update.sh builds it with the correct Dockerfile based on deploy mode
     image: marbot-academic-bot-backend:latest
-    container_name: marbot-backend
+    container_name: marbot_backend
     environment:
       - DATABASE_URL=${DATABASE_URL}
       - WAHA_URL=${WAHA_URL}
@@ -29,7 +29,7 @@ services:
 
   waha:
     image: devlikeapro/waha
-    container_name: waha
+    container_name: marbot_waha
     ports:
       - "3001:3000"
     environment:
