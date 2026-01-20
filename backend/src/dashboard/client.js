@@ -810,9 +810,10 @@
         if (id && id !== selectedJobId) {
             selectedJobId = id;
             try { localStorage.setItem(STORAGE_KEY, id); } catch (e) {}
-            // Preserve search query from input before re-rendering
+            // Preserve search query and expanded state from input before re-rendering
             if (searchInput.value) {
                 searchQuery = searchInput.value.toLowerCase();
+                searchExpanded = true;
             }
             renderView(true);
         }
