@@ -211,7 +211,7 @@ pub async fn get_recent_assignments_for_duplicate_check(
     .fetch_all(pool)
     .await?;
     
-    log!(logger, "🔍 Fetched {} assignments for duplicate check", assignments.len());
+    log!(logger, "\x1b[36m🔍 Fetched {} assignments for duplicate check\x1b[0m", assignments.len());
     
     Ok(assignments)
 }
@@ -245,7 +245,7 @@ pub async fn get_recent_assignments_for_matching(
     .fetch_all(pool)
     .await?;
     
-    log!(logger, "🔍 Fetched {} assignments for update matching", assignments.len());
+    log!(logger, "\x1b[36m🔍 Fetched {} assignments for update matching\x1b[0m", assignments.len());
     
     Ok(assignments)
 }
@@ -255,7 +255,7 @@ pub async fn get_assignments_for_classification(
     pool: &PgPool,
     logger: Option<&JobLogger>,
 ) -> Result<Vec<Assignment>> {
-    log!(logger, "🔍 DEBUG: Calling get_assignments_for_classification()...");
+    log!(logger, "\x1b[36m🔍 DEBUG: Calling get_assignments_for_classification()...\x1b[0m");
     
     let result = sqlx::query_as::<_, Assignment>(
         r#"
@@ -282,13 +282,13 @@ pub async fn get_assignments_for_classification(
 
     match &result {
         Ok(assignments) => {
-            log!(logger, "✅ DEBUG: Successfully fetched {} assignments for classification", assignments.len());
+            log!(logger, "\x1b[32m✅ DEBUG: Successfully fetched {} assignments for classification\x1b[0m", assignments.len());
             if assignments.is_empty() {
-                log!(logger, "⚠️  DEBUG: No assignments found in database!");
+                log!(logger, "\x1b[33m⚠️  DEBUG: No assignments found in database!\x1b[0m");
             }
         }
         Err(e) => {
-            log!(logger, "❌ DEBUG: get_assignments_for_classification() failed: {:?}", e);
+            log!(logger, "\x1b[31m❌ DEBUG: get_assignments_for_classification() failed: {:?}\x1b[0m", e);
         }
     }
 
@@ -300,7 +300,7 @@ pub async fn get_assignments(
     pool: &PgPool,
     logger: Option<&JobLogger>,
 ) -> Result<Vec<Assignment>> {
-    log!(logger, "🔍 DEBUG: Calling get_assignments()...");
+    log!(logger, "\x1b[36m🔍 DEBUG: Calling get_assignments()...\x1b[0m");
     
     let result = sqlx::query_as::<_, Assignment>(
         r#"
@@ -327,13 +327,13 @@ pub async fn get_assignments(
 
     match &result {
         Ok(assignments) => {
-            log!(logger, "✅ DEBUG: Successfully fetched {} assignments", assignments.len());
+            log!(logger, "\x1b[32m✅ DEBUG: Successfully fetched {} assignments\x1b[0m", assignments.len());
             if assignments.is_empty() {
-                log!(logger, "⚠️  DEBUG: No assignments found in database!");
+                log!(logger, "\x1b[33m⚠️  DEBUG: No assignments found in database!\x1b[0m");
             }
         }
         Err(e) => {
-            log!(logger, "❌ DEBUG: get_assignments() failed: {:?}", e);
+            log!(logger, "\x1b[31m❌ DEBUG: get_assignments() failed: {:?}\x1b[0m", e);
         }
     }
 
@@ -419,7 +419,7 @@ pub async fn get_active_assignments(
     .fetch_all(pool)
     .await?;
     
-    log!(logger, "✅ Found {} active assignments", assignments.len());
+    log!(logger, "\x1b[32m✅ Found {} active assignments\x1b[0m", assignments.len());
     
     Ok(assignments)
 }
@@ -457,7 +457,7 @@ pub async fn get_active_assignments_sorted(
     .fetch_all(pool)
     .await?;
     
-    log!(logger, "✅ Found {} active assignments (scheduler)\n", assignments.len());
+    log!(logger, "\x1b[32m✅ Found {} active assignments (scheduler)\x1b[0m\n", assignments.len());
     
     Ok(assignments)
 }
