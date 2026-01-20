@@ -1010,7 +1010,7 @@ async fn handle_ai_classification(
                             }
 
                             if let Some(debug_id) = debug_clone {
-                                let reason_display = if !reason.is_empty() {
+                                let _reason_display = if !reason.is_empty() {
                                     format!("\n_{}_", reason)
                                 } else {
                                     String::new()
@@ -1018,7 +1018,7 @@ async fn handle_ai_classification(
                                 
                                 let _ = send_reply(
                                     &debug_id,
-                                    &format!("🔄 *UPDATED*: {}\n_{}_{}",  title, changes, reason_display)
+                                    &format!("🔄 *UPDATED*: {}\n_{}_",  title, changes)
                                 ).await;
                             }
                             
@@ -1079,7 +1079,7 @@ async fn handle_ai_classification(
                             }
                             
                             if let Some(debug_id) = debug_clone {
-                                let reason_display = if !reason.is_empty() {
+                                let _reason_display = if !reason.is_empty() {
                                     format!("\n_{}_", reason)
                                 } else {
                                     String::new()
@@ -1087,10 +1087,9 @@ async fn handle_ai_classification(
                                 
                                 let _ = send_reply(
                                     &debug_id,
-                                    &format!("🔄 *UPDATED*: {}\n_{}_{}",
+                                    &format!("🔄 *UPDATED*: {}\n_{}_",
                                         current_title, 
                                         changes,
-                                        reason_display
                                     )
                                 ).await;
                             }
