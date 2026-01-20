@@ -193,23 +193,20 @@ pub async fn handle_command(
                             )
                         )
                     } else {
-                        // STYLE HIERARKI (Mirip #todo)
-                        // Header
                         let mut body = String::new();
                         
-                        for (i, status) in statuses.iter().enumerate() {
-                            let no = i + 1;
+                        for status in statuses {
                             let matkul = sanitize_wa_md(&status.course_name);
 
                             match &status.parallel_code {
                                 Some(code) if !code.is_empty() => {
-                                    // Sudah diset: Pakai Centang Hijau ✅
-                                    body.push_str(&format!("✅ *[{}] {}*\n", no, matkul));
+                                  
+                                    body.push_str(&format!("✅ *{}*\n", matkul));
                                     body.push_str(&format!("└ Kelas: *{}*\n", code.to_uppercase()));
                                 }
                                 _ => {
-                                    // Belum diset: Pakai Segitiga Merah/Orange 🔻
-                                    body.push_str(&format!("❌ *[{}] {}*\n", no, matkul));
+            
+                                    body.push_str(&format!("❌ *{}*\n", matkul));
                                     body.push_str("└ Kelas: _(belum diset)_\n");
                                 }
                             }
