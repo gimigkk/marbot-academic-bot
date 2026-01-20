@@ -6,6 +6,7 @@ use crate::models::SendTextRequest;
 use chrono::{DateTime, Datelike, NaiveDate, Utc};
 use crate::tui::{JobLogger, state::LogEntry};
 use tokio::sync::mpsc;
+use tokio::time::sleep;
 
 pub async fn start_scheduler(
     pool: PgPool,
@@ -211,7 +212,6 @@ async fn check_personal_reminders(
                 };
 
                 if is_match {
-                    // FORMAT BARU: Disamakan dengan style Reminder Urgent / Harian
                     let message = format!(
                         "*[PENGINGAT PRIBADI H < 3 JAM]*\n\n\
                         📌 *{}*\n\
@@ -239,6 +239,9 @@ async fn check_personal_reminders(
                         .await;
                     
                     sent_count += 1;
+
+                    // === DELAY ===
+                    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
                 }
             }
             
