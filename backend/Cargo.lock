@@ -1323,6 +1323,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sqlx",
+ "strsim",
  "tokio",
  "tokio-cron-scheduler",
  "unicode-width 0.2.2",
