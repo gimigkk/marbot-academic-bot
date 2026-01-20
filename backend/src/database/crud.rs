@@ -1034,7 +1034,7 @@ pub async fn set_user_course_parallel(
         None => {
             Ok(format!(
                 "❌ Mata kuliah *{}* tidak ditemukan.\n\n\
-                💡 _Cek nama mata kuliah dengan #tugas atau #mykelas_",
+                💡 _Cek nama mata kuliah dengan #mykelas_",
                 course_name_query
             ))
         }
