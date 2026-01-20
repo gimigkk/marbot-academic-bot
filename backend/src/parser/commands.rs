@@ -537,15 +537,18 @@ pub async fn handle_command(
             logger.log(&format!("🗑️ Delete command received from {} in chat {}", user_phone, chat_id));
 
             let academic_channels = std::env::var("ACADEMIC_CHANNELS").unwrap_or_default();
+            let debug_group_id = std::env::var("DEBUG_GROUP_ID").ok();
+
             let is_authorized = academic_channels
                 .split(',')
                 .map(|s| s.trim())
-                .any(|allowed_id| allowed_id == chat_id);
+                .any(|allowed_id| allowed_id == chat_id)
+                || debug_group_id.as_deref() == Some(chat_id);
 
             if !is_authorized {
                 return CommandResponse::Text(
                     "⛔ *AKSES DITOLAK*\n\n\
-                    Fitur hapus hanya boleh dilakukan di Grup Official/Academic Channel oleh PJ Matkul.\n\
+                    Fitur hapus hanya boleh dilakukan di Grup Official oleh PJ Matkul/Admin.\n\
                     _Jangan iseng ya!_ 👮"
                         .to_string(),
                 );
