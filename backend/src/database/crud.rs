@@ -2,6 +2,7 @@ use sqlx::{PgPool, Result, Row};
 use uuid::Uuid;
 use chrono::{DateTime, Utc, FixedOffset, TimeZone, NaiveDateTime};
 use std::collections::HashMap;
+use strsim::jaro_winkler;
 use crate::tui::JobLogger;
 
 use crate::models::{Assignment, NewAssignment, Course, AssignmentWithCourse};
@@ -539,29 +540,86 @@ pub async fn get_course_by_name(
     Ok(course)
 }
 
-/// Find course by name or alias
+/// Get course by name or alias with fuzzy matching support
+#[allow(non_snake_case)]
 pub async fn get_course_by_name_or_alias(
     pool: &PgPool,
-    search_term: &str,
-) -> Result<Option<Course>> {
-    let search_lower = search_term.to_lowercase();
+    query: &str,
+) -> Result<Option<crate::models::Course>, sqlx::Error> {
+    let query_lower = query.to_lowercase();
     
-    let course = sqlx::query_as::<_, Course>(
+    // 1. Try exact match first (fastest path)
+    // Assuming aliases is a TEXT[] array field
+    let exact_match = sqlx::query_as::<_, crate::models::Course>(
         r#"
-        SELECT * FROM courses 
-        WHERE LOWER(name) = LOWER($1) 
-           OR EXISTS (
-               SELECT 1 FROM unnest(aliases) AS alias 
-               WHERE LOWER(alias) = LOWER($1)
-           )
+        SELECT id, name, aliases, created_at
+        FROM courses
+        WHERE LOWER(name) = $1 
+           OR $1 = ANY(SELECT LOWER(unnest(aliases)))
         LIMIT 1
         "#
     )
-    .bind(&search_lower)
+    .bind(&query_lower)
     .fetch_optional(pool)
     .await?;
-
-    Ok(course)
+    
+    if exact_match.is_some() {
+        return Ok(exact_match);
+    }
+    
+    // 2. No exact match - try fuzzy matching
+    // Fetch all courses with their aliases
+    let all_courses = sqlx::query_as::<_, (i32, String, Vec<String>)>(
+        r#"
+        SELECT id, name, COALESCE(aliases, ARRAY[]::TEXT[]) as aliases
+        FROM courses
+        "#
+    )
+    .fetch_all(pool)
+    .await?;
+    
+    // Find best fuzzy match
+    let mut best_match: Option<(i32, f64)> = None;
+    
+    for (course_id, course_name, aliases) in all_courses {
+        // Calculate similarity for course name
+        let name_similarity = jaro_winkler(&query_lower, &course_name.to_lowercase());
+        
+        // Calculate similarity for all aliases
+        let alias_similarity = aliases
+            .iter()
+            .map(|alias| jaro_winkler(&query_lower, &alias.to_lowercase()))
+            .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+            .unwrap_or(0.0);
+        
+        // Take the best similarity score
+        let similarity = name_similarity.max(alias_similarity);
+        
+        // Only consider matches above threshold
+        if similarity > 0.75 {  // 75% similarity threshold
+            match &best_match {
+                None => best_match = Some((course_id, similarity)),
+                Some((_, prev_sim)) if similarity > *prev_sim => {
+                    best_match = Some((course_id, similarity));
+                }
+                _ => {}
+            }
+        }
+    }
+    
+    // If we found a fuzzy match, fetch the full course
+    if let Some((course_id, _)) = best_match {
+        let course = sqlx::query_as::<_, crate::models::Course>(
+            "SELECT id, name, aliases, created_at FROM courses WHERE id = $1"
+        )
+        .bind(course_id)
+        .fetch_optional(pool)
+        .await?;
+        
+        return Ok(course);
+    }
+    
+    Ok(None)
 }
 
 /// Get all courses formatted with their aliases for AI prompt
@@ -844,7 +902,7 @@ pub fn parse_deadline(deadline_str: &str) -> Result<DateTime<Utc>, String> {
     Err(format!("Failed to parse deadline '{}'. Expected format: 'YYYY-MM-DD HH:MM' or 'YYYY-MM-DD'", deadline_str))
 }
 
-/// Set user preference for a specific course parallel
+/// Set user preference for a specific course parallel (with fuzzy matching)
 #[allow(non_snake_case)]
 pub async fn set_user_course_parallel(
     pool: &PgPool,
@@ -852,11 +910,30 @@ pub async fn set_user_course_parallel(
     course_name_query: &str,
     parallel_codes: &[String],
 ) -> Result<String, sqlx::Error> {
-    // 1. Cari Course dulu berdasarkan nama/alias
+    // Store original query for feedback
+    let original_query = course_name_query.to_string();
+    
+    // 1. Cari Course dulu berdasarkan nama/alias (with fuzzy matching)
     let course = get_course_by_name_or_alias(pool, course_name_query).await?;
     
     match course {
         Some(c) => {
+            // Check if fuzzy matching was used
+            let is_exact_name_match = c.name.to_lowercase() == original_query.to_lowercase();
+            
+            // Check if it matched via any alias
+            let matched_via_alias = if let Some(ref aliases) = c.aliases {
+                aliases.iter().any(|alias| alias.to_lowercase() == original_query.to_lowercase())
+            } else {
+                false
+            };
+            
+            let fuzzy_match_notice = if !is_exact_name_match && !matched_via_alias {
+                format!("💡 _Mungkin maksud kamu: {}?_\n\n", c.name)
+            } else {
+                String::new()
+            };
+            
             let course_name_lower = c.name.to_lowercase();
             
             // --- VALIDASI LOGIC KHUSUS (BIG 5 COURSES) ---
@@ -879,11 +956,13 @@ pub async fn set_user_course_parallel(
                 // Validasi 1: Harus ada 2 kode
                 if clean_codes.len() != 2 {
                     return Ok(format!(
-                        "⚠️ *Perhatian!*\n\
+                        "{}⚠️ *Perhatian!*\n\
                         Mata kuliah *{}* memiliki kelas Kuliah (K) dan Praktikum (P).\n\n\
                         Harap masukkan kedua kode kelas.\n\
                         *Contoh:* `#setkelas {} k1 p2`", 
-                        c.name, course_name_query
+                        fuzzy_match_notice,
+                        c.name, 
+                        original_query
                     ));
                 }
 
@@ -893,20 +972,36 @@ pub async fn set_user_course_parallel(
 
                 if !has_k || !has_p {
                     return Ok(format!(
-                        "❌ *Format Salah!*\n\
+                        "{}❌ *Format Salah!*\n\
                         Untuk *{}*, kamu harus memasukkan satu kode Kuliah (awalan K) dan satu Praktikum (awalan P).\n\
-                        Jangan masukkan dua-duanya K atau dua-duanya P.",
-                        c.name
+                        Jangan masukkan dua-duanya K atau dua-duanya P.\n\n\
+                        *Contoh:* `#setkelas {} k1 p2`",
+                        fuzzy_match_notice,
+                        c.name,
+                        original_query
                     ));
                 }
             } else {
                 // Mata kuliah biasa (Non-Praktikum/Opsional)
-                // Jika user iseng masukin 2 kode padahal bukan matkul praktikum, kita ambil kode pertama saja atau tolak.
                 if clean_codes.len() > 1 {
-                     return Ok(format!(
-                        "⚠️ Mata kuliah *{}* sepertinya tidak memerlukan kelas praktikum.\n\
-                        Harap masukkan satu kode kelas saja (misal: k1).",
-                        c.name
+                    return Ok(format!(
+                        "{}⚠️ Mata kuliah *{}* sepertinya tidak memerlukan kelas praktikum.\n\
+                        Harap masukkan satu kode kelas saja.\n\n\
+                        *Contoh:* `#setkelas {} k1`",
+                        fuzzy_match_notice,
+                        c.name,
+                        original_query
+                    ));
+                }
+                
+                // Validasi: Harus ada setidaknya 1 kode
+                if clean_codes.is_empty() {
+                    return Ok(format!(
+                        "{}❌ *Format Salah!*\n\
+                        Harap masukkan kode kelas.\n\n\
+                        *Contoh:* `#setkelas {} k1`",
+                        fuzzy_match_notice,
+                        original_query
                     ));
                 }
             }
@@ -925,13 +1020,24 @@ pub async fn set_user_course_parallel(
             )
             .bind(user_id)
             .bind(c.id)
-            .bind(&final_code_str)  // ← Use final_code_str, not clean_code
+            .bind(&final_code_str)
             .execute(pool)
             .await?;
             
-            Ok(format!("✅ Berhasil! Kelas untuk *{}* diatur ke *[{}]*.", c.name, final_code_str.to_uppercase()))
+            Ok(format!(
+                "{}✅ Berhasil! Kelas untuk *{}* diatur ke *[{}]*.", 
+                fuzzy_match_notice,
+                c.name, 
+                final_code_str.to_uppercase()
+            ))
         },
-        None => Ok(format!("❌ Mata kuliah *{}* tidak ditemukan.", course_name_query))
+        None => {
+            Ok(format!(
+                "❌ Mata kuliah *{}* tidak ditemukan.\n\n\
+                💡 _Cek nama mata kuliah dengan #tugas atau #mykelas_",
+                course_name_query
+            ))
+        }
     }
 }
 
