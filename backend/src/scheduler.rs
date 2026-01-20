@@ -305,7 +305,7 @@ async fn check_personal_reminders(
 
                 if is_match {
                     let message = format!(
-                        "🤖 *PERSONAL REMINDER*\n\n\
+                        "*[PERSONAL REMINDER]*\n\n\
                         Halo! Tugas *{}* ({})\n\
                         Akan tenggat dalam waktu kurang dari 3 jam (Pukul {} WIB).\n\n\
                         _Segera kumpulkan jika belum!_",
