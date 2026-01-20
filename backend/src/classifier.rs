@@ -46,19 +46,37 @@ fn parse_command(text: &str) -> Option<BotCommand> {
         // --- Set Kelas ---
         "setkelas" | "set" => {
             if parts.len() >= 3 {
-                let matkul = parts[1].to_string();
                 
-                // Contoh input: "#setkelas pemrog k1 p2"
-                // parts[0] = setkelas
-                // parts[1] = pemrog
-                // parts[2..] = ["k1", "p2"] -> Ini yang kita ambil
+                let mut split_idx = parts.len();
                 
-                let codes: Vec<String> = parts[2..]
+                // Cek dari token terakhir mundur sampai index 2
+                for i in (2..parts.len()).rev() {
+                    let token = parts[i];
+                    let is_code = token.eq_ignore_ascii_case("all") || token.len() <= 3;
+                    
+                    if is_code {
+                        split_idx = i;
+                    } else {
+                        // Ketemu token panjang (bagian dari nama matkul), berhenti scan
+                        break;
+                    }
+                }
+                
+                let matkul = parts[1..split_idx].join(" ");
+                let codes: Vec<String> = parts[split_idx..]
                     .iter()
                     .map(|s| s.to_string())
                     .collect();
 
-                Some(BotCommand::SetKelas(matkul, codes))
+                // Fallback: Jika logic di atas gagal menemukan kode (misal user typo atau kode panjang),
+                if codes.is_empty() && parts.len() >= 3 {
+                     let fallback_split = parts.len() - 1;
+                     let matkul = parts[1..fallback_split].join(" ");
+                     let codes = vec![parts[fallback_split].to_string()];
+                     Some(BotCommand::SetKelas(matkul, codes))
+                } else {
+                     Some(BotCommand::SetKelas(matkul, codes))
+                }
             } else {
                 Some(BotCommand::MissingArgument("setkelas".to_string()))
             }
