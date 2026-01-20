@@ -458,7 +458,7 @@ UNRECOGNIZED:
 Rules:
 - category="informal": No academic context whatsoever
 - category="academic_related": Has academic context but fails REQUIRED INFORMATION THRESHOLD
-- reason: MANDATORY for academic_related (state which required field is missing), null for informal
+- reason: MANDATORY for academic_related (state which required field is missing), null for informal. CONSICE IN ONE SENTENCE.
 
 MULTIPLE_ASSIGNMENTS:
 {{
@@ -654,7 +654,7 @@ Return JSON with reasoning:
 {{
   "assignment_id": "uuid"|null,
   "confidence": "high"|"medium"|"low",
-  "reason": "Step-by-step explanation of your decision"
+  "reason": "single line reason on why you think so"
 }}
 
 Rules:
@@ -899,14 +899,13 @@ Respond with valid JSON:
 {{
   "is_duplicate": boolean,
   "confidence": "high" | "medium" | "low",
-  "reasoning": "Explain your step-by-step analysis covering: course match, parallel overlap, semantic identity, sequential context, assignment type, and description analysis. Be thorough but concise.",
+  "reasoning": "Explain your analysis. ONLY IN A SINGLE SENTENCE.",
   "matched_assignment_id": "uuid of matched assignment or null"
 }}
 
 Critical rules:
 - Only set is_duplicate: true if confidence is "high"
 - When in doubt, mark as NOT duplicate (safer to create new entry)
-- Provide clear reasoning that shows your analytical process
 - Consider ALL principles, not just surface matching"#,
         course_name,
         title,
