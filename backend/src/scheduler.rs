@@ -140,6 +140,124 @@ pub async fn start_scheduler(
     Ok(())
 }
 
+
+
+async fn check_personal_reminders(
+    pool: PgPool,
+    logger: &JobLogger,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let now = Utc::now();
+    let three_hours_later = now + chrono::Duration::hours(3);
+
+    // 1. Cari tugas deadline <= 3 jam & personal_reminder_sent = FALSE
+    let tasks = sqlx::query_as::<_, crate::models::Assignment>(
+        r#"
+        SELECT *
+        FROM assignments 
+        WHERE deadline > $1 
+          AND deadline <= $2 
+          AND personal_reminder_sent = FALSE
+        "#
+    )
+    .bind(now)
+    .bind(three_hours_later)
+    .fetch_all(&pool)
+    .await?;
+
+    if tasks.is_empty() {
+        return Ok(());
+    }
+
+    logger.log(&format!("📨 Menemukan {} tugas untuk reminder personal", tasks.len()));
+
+    let client = reqwest::Client::new();
+    let waha_url = std::env::var("WAHA_URL").unwrap_or_else(|_| "http://waha:3000".to_string());
+    let api_key = std::env::var("WAHA_API_KEY").unwrap_or_else(|_| "devkey123".to_string());
+
+    for task in tasks {
+        // Ambil nama course
+        let course_name: String = sqlx::query_scalar("SELECT name FROM courses WHERE id = $1")
+            .bind(task.course_id)
+            .fetch_one(&pool)
+            .await?;
+
+        if let Some(cid) = task.course_id {
+            // Ambil user target
+            let interested_users = crud::get_users_for_course_reminder(&pool, cid).await?;
+            
+            let deadline_wib = task.deadline.unwrap()
+                .with_timezone(&chrono::FixedOffset::east_opt(7 * 3600).unwrap());
+            let time_str = deadline_wib.format("%H:%M").to_string();
+
+            // Format parallel display (misal: " [A, B]")
+            let parallel_display = if !task.parallel_codes.is_empty() {
+                format!(" {}", task.format_parallel_display())
+            } else {
+                String::new()
+            };
+
+            let mut sent_count = 0;
+
+            for (user_id, user_codes_str) in interested_users {
+                // Filter User
+                let user_codes: Vec<&str> = user_codes_str.split(',').collect();
+                
+                let is_match = if task.parallel_codes.is_empty() || task.parallel_codes.contains(&"all".to_string()) {
+                    true 
+                } else {
+                    task.parallel_codes.iter().any(|task_code| {
+                        user_codes.iter().any(|user_code| user_code.eq_ignore_ascii_case(task_code))
+                    })
+                };
+
+                if is_match {
+                    // FORMAT BARU: Disamakan dengan style Reminder Urgent / Harian
+                    let message = format!(
+                        "*[PENGINGAT PRIBADI H < 3 JAM]*\n\n\
+                        📌 *{}*\n\
+                        📚 {}{}\n\
+                        ⏰ Deadline: Pukul *{}* WIB\n\n\
+                        _Segera kumpulkan jika belum!_",
+                        sanitize_wa_md(&task.title),
+                        course_name,
+                        parallel_display,
+                        time_str
+                    );
+
+                    let payload = SendTextRequest {
+                        chat_id: user_id.clone(),
+                        text: message,
+                        session: "default".to_string(),
+                        reply_to: None,
+                    };
+
+                    let _ = client
+                        .post(format!("{}/api/sendText", waha_url))
+                        .header("X-Api-Key", &api_key)
+                        .json(&payload)
+                        .send()
+                        .await;
+                    
+                    sent_count += 1;
+                }
+            }
+            
+            if sent_count > 0 {
+                logger.log(&format!("   -> Mengirim PM ke {} mahasiswa untuk tugas '{}'", sent_count, task.title));
+            }
+        }
+
+        // 4. Update status 
+        sqlx::query("UPDATE assignments SET personal_reminder_sent = TRUE WHERE id = $1")
+            .bind(task.id)
+            .execute(&pool)
+            .await?;
+    }
+
+    Ok(())
+}
+
+
 // --- LOGIC REMINDER HARIAN ---
 async fn run_reminder_task(
     pool: PgPool,
@@ -242,110 +360,6 @@ async fn check_urgent_deadlines(
     Ok(())
 }
 
-async fn check_personal_reminders(
-    pool: PgPool,
-    logger: &JobLogger,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let now = Utc::now();
-    let three_hours_later = now + chrono::Duration::hours(3);
-
-    // 1. Cari tugas deadline <= 3 jam & personal_reminder_sent = FALSE
-    let tasks = sqlx::query_as::<_, crate::models::Assignment>(
-        r#"
-        SELECT *
-        FROM assignments 
-        WHERE deadline > $1 
-          AND deadline <= $2 
-          AND personal_reminder_sent = FALSE
-        "#
-    )
-    .bind(now)
-    .bind(three_hours_later)
-    .fetch_all(&pool)
-    .await?;
-
-    if tasks.is_empty() {
-        return Ok(());
-    }
-
-    logger.log(&format!("📨 Menemukan {} tugas untuk reminder personal", tasks.len()));
-
-    let client = reqwest::Client::new();
-    let waha_url = std::env::var("WAHA_URL").unwrap_or_else(|_| "http://waha:3000".to_string());
-    let api_key = std::env::var("WAHA_API_KEY").unwrap_or_else(|_| "devkey123".to_string());
-
-    for task in tasks {
-        // Ambil nama course
-        let course_name: String = sqlx::query_scalar("SELECT name FROM courses WHERE id = $1")
-            .bind(task.course_id)
-            .fetch_one(&pool)
-            .await?;
-
-        if let Some(cid) = task.course_id {
-            // Ambil user target
-            let interested_users = crud::get_users_for_course_reminder(&pool, cid).await?;
-            
-            let deadline_wib = task.deadline.unwrap()
-                .with_timezone(&chrono::FixedOffset::east_opt(7 * 3600).unwrap());
-            let time_str = deadline_wib.format("%H:%M").to_string();
-
-            let mut sent_count = 0;
-
-            for (user_id, user_codes_str) in interested_users {
-                // Filter User
-                let user_codes: Vec<&str> = user_codes_str.split(',').collect();
-                
-                let is_match = if task.parallel_codes.is_empty() || task.parallel_codes.contains(&"all".to_string()) {
-                    true 
-                } else {
-                    task.parallel_codes.iter().any(|task_code| {
-                        user_codes.iter().any(|user_code| user_code.eq_ignore_ascii_case(task_code))
-                    })
-                };
-
-                if is_match {
-                    let message = format!(
-                        "*[PERSONAL REMINDER]*\n\n\
-                        Halo! Tugas *{}* ({})\n\
-                        Akan tenggat dalam waktu kurang dari 3 jam (Pukul {} WIB).\n\n\
-                        _Segera kumpulkan jika belum!_",
-                        sanitize_wa_md(&task.title),
-                        course_name,
-                        time_str
-                    );
-
-                    let payload = SendTextRequest {
-                        chat_id: user_id.clone(),
-                        text: message,
-                        session: "default".to_string(),
-                        reply_to: None,
-                    };
-
-                    let _ = client
-                        .post(format!("{}/api/sendText", waha_url))
-                        .header("X-Api-Key", &api_key)
-                        .json(&payload)
-                        .send()
-                        .await;
-                    
-                    sent_count += 1;
-                }
-            }
-            
-            if sent_count > 0 {
-                logger.log(&format!("   -> Mengirim PM ke {} mahasiswa untuk tugas '{}'", sent_count, task.title));
-            }
-        }
-
-        // 4. Update status 
-        sqlx::query("UPDATE assignments SET personal_reminder_sent = TRUE WHERE id = $1")
-            .bind(task.id)
-            .execute(&pool)
-            .await?;
-    }
-
-    Ok(())
-}
 
 
 
