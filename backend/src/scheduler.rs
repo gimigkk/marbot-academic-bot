@@ -216,7 +216,7 @@ async fn check_urgent_deadlines(
         let time_str = deadline_wib.format("%H:%M").to_string();
         
         let message = format!(
-            "*[JANGAN LUPA KUMPULKAN!]*\n\n\
+            "*[JANGAN LUPA KUMPULKAN! H-1 JAM]*\n\n\
             📌 *{}*\n\
             📚 {}\n\
             ⏰ Deadline: Pukul *{}* WIB",
