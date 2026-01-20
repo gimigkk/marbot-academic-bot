@@ -569,7 +569,7 @@ pub async fn get_course_by_name_or_alias(
     
     // 2. No exact match - try fuzzy matching
     // Fetch all courses with their aliases
-    let all_courses = sqlx::query_as::<_, (i32, String, Vec<String>)>(
+    let all_courses = sqlx::query_as::<_, (uuid::Uuid, String, Vec<String>)>(
         r#"
         SELECT id, name, COALESCE(aliases, ARRAY[]::TEXT[]) as aliases
         FROM courses
@@ -579,7 +579,7 @@ pub async fn get_course_by_name_or_alias(
     .await?;
     
     // Find best fuzzy match
-    let mut best_match: Option<(i32, f64)> = None;
+    let mut best_match: Option<(uuid::Uuid, f64)> = None;
     
     for (course_id, course_name, aliases) in all_courses {
         // Calculate similarity for course name

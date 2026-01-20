@@ -559,10 +559,10 @@ pub fn build_matching_prompt(
             .map(|s| s.as_str())
             .unwrap_or("Unknown");
         
-        let age_days = now.signed_duration_since(a.created_at).num_days();
-        
-        format!("{}. {} | \"{}\" | Parallels: {} | Created: {} days ago | ID: {}", 
-            i + 1, course_name, a.title, parallel_str, age_days, a.id)
+        let age_hours = now.signed_duration_since(a.created_at).num_hours();
+
+        format!("{}. {} | \"{}\" | Parallels: {} | Created: {} hours ago | ID: {}", 
+            i + 1, course_name, a.title, parallel_str, age_hours, a.id)
     }).collect::<Vec<_>>().join("\n");
     
     let parallel_info = if parallel_codes.is_empty() {
@@ -590,7 +590,7 @@ Example 1: Generic title match
 Update: "tugas yang rpl deadline besok"
 Keywords: ["rpl"]
 Candidates:
-1. Rekayasa Perangkat Lunak | "Tugas RPL" | Parallels: [k1,k2] | 1 day ago
+1. Rekayasa Perangkat Lunak | "Tugas RPL" | Parallels: [k1,k2] | 5 hours ago
 → Match: #1 (only recent RPL assignment, generic title matches)
 
 Example 2: Specific identifier match
@@ -627,7 +627,7 @@ Think step-by-step:
    - Look for course name mentions in keywords
    - Consider course abbreviations (RPL = Rekayasa Perangkat Lunak)
 
-2. RECENCY: Prioritize assignments created within last 7 days
+2. RECENCY: Prioritize assignments created within last 48 hours (2 days)
    - Updates typically reference recent announcements
 
 3. TITLE SIMILARITY: Does the title match the update context?
