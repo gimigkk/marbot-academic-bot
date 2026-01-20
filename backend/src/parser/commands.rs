@@ -201,16 +201,16 @@ pub async fn handle_command(
                             match &status.parallel_code {
                                 Some(code) if !code.is_empty() => {
                                   
-                                    body.push_str(&format!("✅ *{}*\n", matkul));
+                                    body.push_str(&format!("✅ {}\n", matkul));
                                     body.push_str(&format!("└ Kelas: *{}*\n", code.to_uppercase()));
                                 }
                                 _ => {
             
-                                    body.push_str(&format!("❌ *{}*\n", matkul));
+                                    body.push_str(&format!("❌ {}\n", matkul));
                                     body.push_str("└ Kelas: _(belum diset)_\n");
                                 }
                             }
-                            // Tambah baris kosong antar item biar tidak sumpek
+            
                             body.push('\n');
                         }
 
