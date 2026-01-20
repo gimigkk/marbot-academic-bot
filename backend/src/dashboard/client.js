@@ -806,15 +806,20 @@
         if (currentView !== 'tasks') return;
         const jobItem = e.target.closest('.job-item');
         if (!jobItem || jobItem.classList.contains('grayed')) return;
+        
+        // Stop propagation to prevent document click handler from collapsing search
+        e.stopPropagation();
+        
         const id = jobItem.dataset.jobId;
         if (id && id !== selectedJobId) {
             selectedJobId = id;
             try { localStorage.setItem(STORAGE_KEY, id); } catch (e) {}
-            // Preserve search query and expanded state from input before re-rendering
+            
+            // Preserve search state - sync from input field
             if (searchInput.value) {
                 searchQuery = searchInput.value.toLowerCase();
-                searchExpanded = true;
             }
+            
             renderView(true);
         }
     });
