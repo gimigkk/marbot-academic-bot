@@ -810,6 +810,10 @@
         if (id && id !== selectedJobId) {
             selectedJobId = id;
             try { localStorage.setItem(STORAGE_KEY, id); } catch (e) {}
+            // Preserve search query from input before re-rendering
+            if (searchInput.value) {
+                searchQuery = searchInput.value.toLowerCase();
+            }
             renderView(true);
         }
     });
