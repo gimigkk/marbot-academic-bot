@@ -406,12 +406,37 @@ Format: YYYY-MM-DD HH:MM (always include time component)
 
 PARALLEL CODES:
 ═══════════════════════════════════════════════════════════════════
-CRITICAL "all" RULE (HIGHEST PRIORITY):
-   If "all"/"semua"/"everyone"/"semuanya" appears ANYWHERE:
-   → IMMEDIATELY return ["all"] and STOP processing other parallel codes
-   → IGNORE all other parallel mentions (k1, k2, etc.)
-   → ["all", "k2"] is ALWAYS WRONG 
-   → ["all"] is ALWAYS RIGHT 
+CORE PRINCIPLE: Extract what the user is COMMUNICATING, not what exists
+
+Valid codes: k1-k4, p1-p4, r1-r4, all
+Format: ARRAY (can contain multiple codes)
+
+DECISION FRAMEWORK:
+
+1. IDENTIFY MESSAGE INTENT
+   - NEW assignment → User announces target audience
+   - UPDATE → User specifies what should CHANGE
+
+2. EXTRACT FROM MESSAGE FIRST
+   - Parse parallel mentions in the actual message text
+   - Patterns: "K2 P2", "untuk k1", "parallel K3", "semua", "all"
+   - Context hints show current state; message shows desired state
+
+3. APPLY SPECIAL RULES
+   - "all"/"semua"/"everyone" = universal scope → ["all"] (overrides specific codes)
+   - No codes mentioned in UPDATE → no change requested (use existing)
+   - No codes mentioned in NEW + no context → [] (unknown)
+
+REASONING LOGIC:
+- Message says "parallel K2 P2" → User wants ["k2", "p2"]
+- Message says "semua kelas" → User wants ["all"] (regardless of context)
+- UPDATE with no parallel mention → User isn't changing parallels
+- Context hints are REFERENCE data, not extraction targets
+
+Common error: Confusing source priority
+  WRONG: Message says "K2 P2", context says ["all"] → return ["all"]
+  RIGHT: Message says "K2 P2" → return ["k2", "p2"] (message content)
+
 ═══════════════════════════════════════════════════════════════════
 
 Valid codes: k1-k4, p1-p4, r1-r4, all
