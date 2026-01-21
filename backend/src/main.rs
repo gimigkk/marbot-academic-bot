@@ -33,7 +33,7 @@ use crate::database::crud;
 use crate::parser::commands::CommandResponse;
 use crate::tui::TuiState;
 
-use models::{MessageType, AIClassification, WebhookPayload, SendTextRequest, NewAssignment, UnrecognizedCategory};
+use models::{MessageType, AIClassification, WebhookPayload, SendTextRequest, NewAssignment, UnrecognizedCategory, Assignment};
 use classifier::classify_message;
 use parser::commands::handle_command;
 use parser::ai_extractor::{extract_with_ai, check_duplicate_assignment}; 
@@ -564,16 +564,17 @@ async fn webhook(
                                     
                                     // Send notification to academic channels
                                     if let Ok(Some(full_assignment)) = crud::get_assignment_with_course_by_id(&state.pool, assignment_id).await {
-                                        // Send academic update notification
+                                        // FIX 2.1: Corrected argument order
                                         if new_deadline.is_some() {
                                             send_academic_update_notification(
                                                 chat_id,
                                                 &full_assignment.title,
                                                 &full_assignment.course_name,
-                                                new_deadline,
-                                                new_parallel_codes.as_deref(),
-                                                new_title.as_deref(),
-                                                new_description.as_deref(),
+                                                &full_assignment.parallel_codes,  // param 4: assignment's parallels
+                                                new_deadline,                      // param 5: deadline
+                                                new_parallel_codes.as_deref(),     // param 6: updated parallels
+                                                new_title.as_deref(),              // param 7: new title
+                                                new_description.as_deref(),        // param 8: new description
                                             ).await;
                                         }
                                         
@@ -806,16 +807,17 @@ async fn webhook(
                                     Some(&logger),
                                 ).await {
                                     Ok(_) => {
-                                        // Send notification to academic channels
+                                        // FIX 2.2: Corrected argument order
                                         if deadline_parsed.is_some() || !parallel_codes.is_empty() || new_title.is_some() || new_description.is_some() {
                                             send_academic_update_notification(
                                                 chat_id,
                                                 &target.title,
                                                 &target.course_name,
-                                                deadline_parsed,
-                                                Some(&parallel_codes),
-                                                new_title.as_deref(),
-                                                new_description.as_deref(),
+                                                &target.parallel_codes,        // param 4: assignment's parallels
+                                                deadline_parsed,               // param 5: deadline
+                                                Some(&parallel_codes),         // param 6: updated parallels
+                                                new_title.as_deref(),          // param 7: new title
+                                                new_description.as_deref(),    // param 8: new description
                                             ).await;
                                         }
                                         
@@ -1135,16 +1137,17 @@ async fn handle_ai_classification(
                                 Some(&logger_clone),
                             ).await {
                                 Ok(_) => {
-                                    // Only send notification if update succeeded
+                                    // FIX 2.3: Corrected argument order
                                     if deadline_parsed.is_some() || !parallel_codes.is_empty() {
                                         send_academic_update_notification(
                                             &source_chat_clone,
                                             title,
                                             cname,
-                                            deadline_parsed,
-                                            if parallel_codes.is_empty() { None } else { Some(&parallel_codes) },
-                                            None,
-                                            new_description.as_deref(),
+                                            &parallel_codes,                   // param 4: assignment's parallels
+                                            deadline_parsed,                   // param 5: deadline
+                                            if parallel_codes.is_empty() { None } else { Some(&parallel_codes) }, // param 6
+                                            None,                              // param 7: new title
+                                            new_description.as_deref(),        // param 8: new description
                                         ).await;
                                     }
 
@@ -1212,14 +1215,16 @@ async fn handle_ai_classification(
                                     course_name.unwrap_or_else(|| "General".to_string())
                                 };
                                 
+                                // FIX 2.4: Corrected argument order
                                 send_academic_update_notification(
                                     &source_chat_clone,
                                     &updated_assign.title,
                                     &course_name_for_alert,
-                                    deadline_parsed,
-                                    if parallel_codes.is_empty() { None } else { Some(&parallel_codes) },
-                                    new_title.as_deref(),
-                                    new_description.as_deref(),
+                                    &updated_assign.parallel_codes,    // param 4: assignment's parallels
+                                    deadline_parsed,                   // param 5: deadline
+                                    if parallel_codes.is_empty() { None } else { Some(&parallel_codes) }, // param 6
+                                    new_title.as_deref(),              // param 7: new title
+                                    new_description.as_deref(),        // param 8: new description
                                 ).await;
                             }
                             
@@ -1330,7 +1335,7 @@ async fn handle_single_assignment(
         crud::get_course_by_name(&pool, name).await.ok().flatten().map(|c| c.id)
     } else { None };
     
-    // DUPLICATE DETECTION
+    // DUPLICATE DETECTION - WITH STRICT PARALLEL MATCHING
     if let Some(_cid) = course_id {
         if let Some(cname) = &course_name {
             let course_map: HashMap<uuid::Uuid, String> = sqlx::query_as::<_, (uuid::Uuid, String)>(
@@ -1347,57 +1352,98 @@ async fn handle_single_assignment(
                 .unwrap_or_default();
             
             if !existing_assignments.is_empty() {
-                let match_result = check_duplicate_assignment(
-                    &title_clone,
-                    &desc_clone,
-                    cname,
-                    final_parallel_codes.as_slice(),
-                    &existing_assignments,
-                    &course_map,
-                    &logger, 
-                ).await;
+                // Save length BEFORE filtering
+                let total_count = existing_assignments.len();
                 
-                match &match_result {
-                    Ok(Some((id, reason))) => {  // NOW: destructure to get both id and reason
-                        logger.log(&format!("🔄 \x1b[33mUpdating\x1b[0m: \x1b[1m{}\x1b[0m", title_clone));
-                        
-                        let update_result = crud::update_assignment_fields(
-                            &pool, 
-                            *id, 
-                            deadline_parsed, 
-                            None,
-                            Some(desc_clone.clone()), 
-                            if final_parallel_codes.is_empty() { None } else { Some(final_parallel_codes.clone()) },
-                            Some(message_id.to_string()),
-                            Some(message_body.to_string()),
-                            Some(&logger),
-                        ).await;
-                        
-                        if update_result.is_ok() {
-                            if let Some(debug_id) = &debug_group_id {
-                                let prefix = if assignment_number > 0 {
-                                    format!("{}. ", assignment_number)
-                                } else {
-                                    String::new()
-                                };
-                                
-                                // Include reason in the message
-                                let reason_display = if !reason.is_empty() {
-                                    format!("\n_{}_", reason)
-                                } else {
-                                    String::new()
-                                };
-                                
-                                let _ = send_reply(
-                                    debug_id, 
-                                    &format!("{}🔄 *UPDATED*: {}{}", prefix, title_clone, reason_display)
-                                ).await;
-                            }
-                        }
-                        return;
+                // STRICT FILTERING: Only check duplicates if new parallels are superset or equal to existing
+                // This prevents treating parallel-specific variants as duplicates
+                let mut strict_candidates: Vec<Assignment> = Vec::new();
+                
+                for assignment in existing_assignments {
+                    // Must be same course
+                    let same_course = assignment.course_id
+                        .and_then(|id| course_map.get(&id))
+                        .map(|name| name.eq_ignore_ascii_case(cname))
+                        .unwrap_or(false);
+                    
+                    if !same_course {
+                        continue;
                     }
-                    Ok(None) => {}
-                    Err(_) => {}
+                    
+                    // Only consider duplicate if new parallels are superset or equal
+                    if is_parallel_superset_or_equal(&final_parallel_codes[..], &assignment.parallel_codes[..]) {
+                        strict_candidates.push(assignment);
+                    }
+                }
+                
+                if !strict_candidates.is_empty() {
+                    logger.log(&format!(
+                        "│ 🔍 Strict parallel filtering: {} → {} candidates",
+                        total_count,
+                        strict_candidates.len()
+                    ));
+                    
+                    let match_result = check_duplicate_assignment(
+                        &title_clone,
+                        &desc_clone,
+                        cname,
+                        final_parallel_codes.as_slice(),
+                        &strict_candidates,
+                        &course_map,
+                        &logger, 
+                    ).await;
+                    
+                    match &match_result {
+                        Ok(Some((id, reason))) => {
+                            logger.log(&format!("🔄 \x1b[33mUpdating\x1b[0m: \x1b[1m{}\x1b[0m", title_clone));
+                            
+                            let update_result = crud::update_assignment_fields(
+                                &pool, 
+                                *id, 
+                                deadline_parsed, 
+                                None,
+                                Some(desc_clone.clone()), 
+                                if final_parallel_codes.is_empty() { None } else { Some(final_parallel_codes.clone()) },
+                                Some(message_id.to_string()),
+                                Some(message_body.to_string()),
+                                Some(&logger),
+                            ).await;
+                            
+                            if update_result.is_ok() {
+                                if let Some(debug_id) = &debug_group_id {
+                                    let prefix = if assignment_number > 0 {
+                                        format!("{}. ", assignment_number)
+                                    } else {
+                                        String::new()
+                                    };
+                                    
+                                    // Include reason in the message
+                                    let reason_display = if !reason.is_empty() {
+                                        format!("\n_{}_", reason)
+                                    } else {
+                                        String::new()
+                                    };
+                                    
+                                    let _ = send_reply(
+                                        debug_id, 
+                                        &format!("{}🔄 *UPDATED*: {}{}", prefix, title_clone, reason_display)
+                                    ).await;
+                                }
+                            }
+                            return;
+                        }
+                        Ok(None) => {
+                            logger.log("│ ✅ Not a duplicate (passed strict filtering)");
+                        }
+                        Err(_) => {
+                            logger.log("│ ⚠️ Duplicate check failed, treating as new");
+                        }
+                    }
+                } else {
+                    logger.log(&format!(
+                        "│ ⏭️  Skipped duplicate check: No candidates after strict parallel filtering (found {} total)",
+                        total_count
+                    ));
                 }
             }
         }
@@ -1560,10 +1606,11 @@ async fn send_academic_update_notification(
     source_chat: &str,
     title: &str,
     _course_name: &str,
-    deadline: Option<chrono::DateTime<chrono::Utc>>,
-    parallel_codes: Option<&[String]>,
-    new_title: Option<&str>,
-    new_description: Option<&str>,
+    assignment_parallels: &[String],  // ← param 4: the assignment's actual parallels
+    deadline: Option<chrono::DateTime<chrono::Utc>>,  // ← param 5: deadline
+    parallel_codes: Option<&[String]>,  // ← param 6: updated parallels
+    new_title: Option<&str>,  // ← param 7: new title
+    new_description: Option<&str>,  // ← param 8: new description
 ) {
     let academic_env = std::env::var("ACADEMIC_CHANNELS").unwrap_or_default();
     let channels: Vec<&str> = academic_env.split(',').map(|s| s.trim()).collect();
@@ -1592,7 +1639,6 @@ async fn send_academic_update_notification(
     }
     
     if let Some(d) = new_description {
-        // Truncate long descriptions
         let desc_preview = if d.len() > 50 {
             format!("{}...", &d[..50])
         } else {
@@ -1608,15 +1654,26 @@ async fn send_academic_update_notification(
     
     let fields_text = updated_fields.join(", ");
     
+    // Format parallel codes for title
+    let parallel_display = if assignment_parallels.is_empty() {
+        String::new()
+    } else {
+        format!(" [{}]", assignment_parallels.iter()
+            .map(|c| c.to_uppercase())
+            .collect::<Vec<_>>()
+            .join(", "))
+    };
+    
     for channel_id in channels {
         if channel_id.is_empty() || channel_id == source_chat {
             continue;
         }
         
         let msg = format!(
-            "*[Update] {}*\n\
+            "*[Update] {}{}*\n\
             _{}_",
             title,
+            parallel_display,
             fields_text
         );
         
@@ -1628,6 +1685,35 @@ fn extract_parallel_code(title: &str) -> Option<String> {
     let u = title.to_uppercase();
     if u.contains("ALL") { return Some("all".into()); }
     ["K1", "K2", "K3", "P1", "P2", "P3"].iter().find(|&c| u.contains(c)).map(|c| c.to_lowercase())
+}
+
+/// Check if new_codes is a superset or equal to existing_codes
+/// This determines if we should check for duplicates
+fn is_parallel_superset_or_equal(new_codes: &[String], existing_codes: &[String]) -> bool {
+    // "all" always matches
+    if new_codes.iter().any(|c| c.eq_ignore_ascii_case("all")) {
+        return true;
+    }
+    if existing_codes.iter().any(|c| c.eq_ignore_ascii_case("all")) {
+        return true;
+    }
+    
+    // Both empty = match
+    if new_codes.is_empty() && existing_codes.is_empty() {
+        return true;
+    }
+    
+    // If either is empty but not both = no match
+    if new_codes.is_empty() || existing_codes.is_empty() {
+        return false;
+    }
+    
+    // New codes must contain ALL existing codes (superset or equal)
+    // Example: new=[k1,k2,k3] vs existing=[k1,k2] → true (superset)
+    // Example: new=[k2] vs existing=[k1,k2] → false (subset, not superset)
+    existing_codes.iter().all(|existing| 
+        new_codes.iter().any(|new| new.eq_ignore_ascii_case(existing))
+    )
 }
 
 async fn fetch_image_from_url(url: &str, api_key: &str, logger: &tui::JobLogger) -> Result<String, String> {
