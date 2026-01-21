@@ -691,8 +691,6 @@ async fn webhook(
                 }
                 // Handle AI processing request from commands
                 CommandResponse::ProcessWithAI { message, force_mode, target_assignment } => {
-                    logger.log("🤖 Command triggered AI processing...");
-                    
                     // Prepare AI context (same as NeedsAI flow)
                     let courses_list = crud::get_all_courses_formatted(&state.pool)
                         .await
@@ -791,8 +789,8 @@ async fn webhook(
                                         Pastikan pesan mencakup:\n\
                                         - Nama mata kuliah\n\
                                         - Judul/tipe tugas (LKP, Quiz, dll)\n\
-                                        - Deadline (opsional)\n\
-                                        - Parallel codes (opsional)"
+                                        - Deadline\n\
+                                        - Kode Parallel"
                                     }
                                 };
                                 

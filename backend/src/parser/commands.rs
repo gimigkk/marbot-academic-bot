@@ -177,8 +177,6 @@ pub async fn handle_command(
 
         // yang admin only
         BotCommand::Update(id, message) => {
-            logger.log(&format!("🔄 Admin Update command: #{} from {}", id, user_phone));
-            
             // Only debug group
             let debug_group_id = std::env::var("DEBUG_GROUP_ID").ok();
             
@@ -231,8 +229,6 @@ pub async fn handle_command(
         
         // #new <message> admin only
         BotCommand::NewAssignment(message) => {
-            logger.log(&format!("✨ Admin New command from {}", user_phone));
-            
             // AUTH CHECK: Only debug group
             let debug_group_id = std::env::var("DEBUG_GROUP_ID").ok();
             
