@@ -802,8 +802,8 @@ async fn webhook(
                                     new_title.clone(),
                                     new_description.clone(),
                                     if parallel_codes.is_empty() { None } else { Some(parallel_codes.clone()) },
-                                    None,
-                                    None,
+                                    Some(payload.payload.id.clone()),
+                                    Some(payload.payload.body.clone()),
                                     Some(&logger),
                                 ).await {
                                     Ok(_) => {
@@ -814,10 +814,10 @@ async fn webhook(
                                                 &target.title,
                                                 &target.course_name,
                                                 &target.parallel_codes,        // param 4: assignment's parallels
-                                                deadline_parsed,               // param 5: deadline
-                                                Some(&parallel_codes),         // param 6: updated parallels
-                                                new_title.as_deref(),          // param 7: new title
-                                                new_description.as_deref(),    // param 8: new description
+                                                deadline_parsed,                                    // param 5: deadline
+                                                Some(&parallel_codes),              // param 6: updated parallels
+                                                new_title.as_deref(),                               // param 7: new title
+                                                new_description.as_deref(),                         // param 8: new description
                                             ).await;
                                         }
                                         
