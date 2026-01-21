@@ -1096,35 +1096,6 @@ async fn handle_ai_classification(
                     .await
                     .unwrap_or_default();
                 
-                async fn send_academic_alert(
-                    title: &str, 
-                    _course: &str,
-                    deadline_utc: Option<chrono::DateTime<chrono::Utc>>,
-                    source_chat: &str,
-                    original_msg_id: Option<String>
-                ) {
-                    if let Some(deadline) = deadline_utc {
-                        let academic_env = std::env::var("ACADEMIC_CHANNELS").unwrap_or_default();
-                        let channels: Vec<&str> = academic_env.split(',').map(|s| s.trim()).collect();
-                        
-                        let wib = chrono::FixedOffset::east_opt(7 * 3600).unwrap();
-                        let deadline_wib = deadline.with_timezone(&wib);
-                        let deadline_str = deadline_wib.format("%d %b %Y, %H.%M WIB").to_string();
-
-                        for channel_id in channels {
-                            if channel_id.is_empty() { continue; }
-                            
-                            if source_chat != channel_id {
-                                let msg = format!(
-                                    "[Update] {}\nDeadline: {}",
-                                    title, deadline_str
-                                );
-                                
-                                let _ = send_reply_with_id(channel_id, &msg, original_msg_id.clone()).await;
-                            }
-                        }
-                    }
-                }
 
                 // LOGIC 1: RE-ANNOUNCEMENT CHECK
                 if let Some(ref title) = new_title {
@@ -1157,10 +1128,14 @@ async fn handle_ai_classification(
                                 Some(&logger_clone),
                             ).await;
                             
-                            if let Ok(updated_assign) = updated_res {
+                            if let Ok(_updated_assign) = updated_res {
                                 if deadline_parsed.is_some() {
-                                    let reply_target_id = updated_assign.message_ids.last().cloned();
-                                    send_academic_alert(title, cname, deadline_parsed, &source_chat_clone, reply_target_id).await;
+                                    send_academic_update_notification(
+                                        &source_chat_clone,
+                                        title,
+                                        cname,
+                                        deadline_parsed,
+                                    ).await;
                                 }
                             }
 
@@ -1223,13 +1198,11 @@ async fn handle_ai_classification(
                                     course_name.unwrap_or_else(|| "General".to_string())
                                 };
                                 
-                                let reply_target_id = updated_assign.message_ids.last().cloned();
-                                send_academic_alert(
-                                    &updated_assign.title, 
-                                    &course_name_for_alert, 
-                                    deadline_parsed, 
+                                send_academic_update_notification(
                                     &source_chat_clone,
-                                    reply_target_id
+                                    &updated_assign.title,
+                                    &course_name_for_alert,
+                                    deadline_parsed,
                                 ).await;
                             }
                             
@@ -1575,13 +1548,21 @@ async fn send_academic_update_notification(
     let academic_env = std::env::var("ACADEMIC_CHANNELS").unwrap_or_default();
     let channels: Vec<&str> = academic_env.split(',').map(|s| s.trim()).collect();
     
-    let deadline_str = if let Some(d) = deadline {
+    // Build list of updated fields
+    let mut updated_fields = Vec::new();
+    
+    if let Some(d) = deadline {
         let wib = chrono::FixedOffset::east_opt(7 * 3600).unwrap();
         let deadline_wib = d.with_timezone(&wib);
-        format!("⏰ *Deadline:* {}", deadline_wib.format("%d %b %Y, %H:%M WIB"))
-    } else {
-        String::new()
-    };
+        updated_fields.push(format!("Deadline: {}", deadline_wib.format("%d %b %Y, %H:%M WIB")));
+    }
+    
+    // If no fields were updated, don't send notification
+    if updated_fields.is_empty() {
+        return;
+    }
+    
+    let fields_text = updated_fields.join(", ");
     
     for channel_id in channels {
         if channel_id.is_empty() || channel_id == source_chat {
@@ -1589,13 +1570,10 @@ async fn send_academic_update_notification(
         }
         
         let msg = format!(
-            "🔄 *[UPDATE]*\n\
-            📚 {}\n\
-            📝 {}\n\
-            {}",
-            course_name,
+            "*[Update] {}*\n\
+            _{}_",
             title,
-            deadline_str
+            fields_text
         );
         
         let _ = send_reply(channel_id, &msg).await;
