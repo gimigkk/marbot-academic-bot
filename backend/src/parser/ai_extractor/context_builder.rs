@@ -37,7 +37,7 @@ pub struct QuotedAssignmentInfo {
 /// Minimal context needed for main AI prompt
 #[derive(Debug, Clone)]
 pub struct MessageContext {
-    pub parallel_codes: Vec<String>,
+    //pub parallel_codes: Vec<String>,   remove all global parallel references
     pub parallel_confidence: f32,
     pub parallel_source: String,
     pub deadline_hint: Option<String>,
@@ -177,7 +177,7 @@ pub async fn build_context(
     let quoted_assignment_id = quoted_assignment.as_ref().map(|a| a.assignment_id);
     
     Ok(MessageContext {
-        parallel_codes: ai_hints.parallel_codes,
+        //parallel_codes: ai_hints.parallel_codes,
         parallel_confidence: ai_hints.parallel_confidence,
         parallel_source: ai_hints.parallel_source,
         deadline_hint,
@@ -410,7 +410,7 @@ fn calculate_context_boost(
 /// AI hints response structure
 #[derive(Debug, Deserialize)]
 struct AIHints {
-    parallel_codes: Vec<String>,
+    //parallel_codes: Vec<String>, remove the global
     parallel_confidence: f32,
     parallel_source: String,
     course_hints: Vec<AICourseHint>,
@@ -504,10 +504,6 @@ async fn try_gemini_context(prompt: &str, logger: &JobLogger) -> Result<AIHints,
                 "responseSchema": {
                     "type": "object",
                     "properties": {
-                        "parallel_codes": {
-                            "type": "array",
-                            "items": {"type": "string"}
-                        },
                         "parallel_confidence": {
                             "type": "number"
                         },
@@ -828,8 +824,8 @@ MESSAGE: "{}"
 
 CONTEXT PRIORITY HIERARCHY:
 ═══════════════════════════════════════════════════════════════════
-1. QUOTED ASSIGNMENT (if present)    → HIGHEST PRIORITY - Use ALL parallels
-2. EXTRACTED PARALLEL CODES           → HIGH PRIORITY - Explicitly mentioned
+1. EXTRACTED PARALLEL CODES           → HIGHEST PRIORITY - Explicitly mentioned in MESSAGE
+2. QUOTED ASSIGNMENT (if present)     → Use for course/title context only
 3. SENDER HISTORY (top 3 by relevance) → FALLBACK ONLY - Use when ambiguous
 ═══════════════════════════════════════════════════════════════════
 {}{}
@@ -841,22 +837,39 @@ AVAILABLE COURSES:
 {}
 
 ═══════════════════════════════════════════════════════════════════
-CRITICAL INSTRUCTION: CONTEXT USAGE
+CRITICAL INSTRUCTION: PARALLEL CODE EXTRACTION FOR UPDATES
 ═══════════════════════════════════════════════════════════════════
 
-IF QUOTED ASSIGNMENT exists:
-  → YOU MUST extract ALL its parallel codes (not optional)
-  → This is database-verified information (100% reliable)
-  → Example: Quoted has [k1, k2, k3] → Return ALL THREE
+⚠️ SPECIAL CASE: UPDATE MESSAGES
+If the MESSAGE contains update keywords like:
+  - "paralel untuk K2 P2"
+  - "diubah menjadi k1, k2"
+  - "untuk parallel K3"
 
-IF EXTRACTED PARALLEL CODES exist:
+→ YOU MUST extract parallels from the UPDATE MESSAGE, NOT from quoted assignment
+→ The quoted assignment shows OLD parallels, MESSAGE shows NEW parallels
+→ Example: 
+   - Quoted shows "Parallels: [all]"
+   - Message says "paralel untuk K2 P2"
+   - CORRECT answer: ["k2", "p2"]  ← From MESSAGE
+   - WRONG answer: ["all"]  ← From quoted assignment
+
+═══════════════════════════════════════════════════════════════════
+STANDARD PRIORITY FOR NEW ASSIGNMENTS
+═══════════════════════════════════════════════════════════════════
+
+IF EXTRACTED PARALLEL CODES exist in MESSAGE:
   → Use these codes (explicitly mentioned in message)
   → Example: Message says "GRAFKOM K2" → Return ["k2"]
+  → Example: Message says "untuk k1, k2" → Return ["k1", "k2"]
+
+IF QUOTED ASSIGNMENT exists AND no explicit codes in MESSAGE:
+  → Use quoted assignment's parallel codes
+  → This is database-verified information (100% reliable)
 
 IF SENDER HISTORY exists AND no explicit codes:
   → Use Pattern #1 (highest relevance score) as fallback
   → History is PRE-FILTERED: only top 3 most relevant patterns shown
-  → DO NOT use history if message has explicit signals
 
 ═══════════════════════════════════════════════════════════════════
 TASK DEFINITION
@@ -872,42 +885,38 @@ IMPORTANT: This message may reference ONE OR MORE assignments. Each has:
 Extract EACH DISTINCT ASSIGNMENT separately.
 
 ASSIGNMENT IDENTIFICATION:
-• If QUOTED ASSIGNMENT exists → user likely updating that ONE assignment
-• Otherwise, check if message describes multiple assignments or one
-• Each assignment entry should have ONE course
+- If QUOTED ASSIGNMENT exists → user likely updating that ONE assignment
+- Otherwise, check if message describes multiple assignments or one
+- Each assignment entry should have ONE course
 
 COURSE IDENTIFICATION (per assignment):
-• Match against AVAILABLE COURSES list only
-• Use full course name, never alias (check [aka: ...])
-• Assignment/project titles are NOT courses
-• If QUOTED ASSIGNMENT present → use that course name EXACTLY
+- Match against AVAILABLE COURSES list only
+- Use full course name, never alias (check [aka: ...])
+- Assignment/project titles are NOT courses
+- If QUOTED ASSIGNMENT present → use that course name EXACTLY
 
 PARALLEL CLASS CODES (per assignment) - CRITICAL:
-• Valid codes: k1-k4, p1-p4, r1-r4, or "all"
-• Format: Array, can contain multiple codes
-• THESE ARE PER-ASSIGNMENT, NOT PER-COURSE
-
-MANDATORY PRIORITY ORDER:
-  1. QUOTED ASSIGNMENT parallels → USE ALL (highest priority)
-  2. EXTRACTED PARALLEL CODES → Use these (explicitly mentioned)
-  3. SENDER HISTORY → Fallback pattern (when ambiguous)
-  4. Empty array → If no information available
+- Valid codes: k1-k4, p1-p4, r1-r4, or "all"
+- Format: Array, can contain multiple codes
+- THESE ARE PER-ASSIGNMENT, NOT PER-COURSE
 
 Recognition patterns:
   - Course abbreviations: "GRAFKOM K2" → ["k2"]
   - Explicit lists: "untuk k1, k2" → ["k1", "k2"]
+  - Explicit lists: "paralel untuk K2 P2" → ["k2", "p2"]
+  - "untuk K2 dan P2" → ["k2", "p2"]
   - Keywords "semua kelas"/"all classes" → ["all"]
 
 DEADLINE TYPE CLASSIFICATION (per assignment):
-• "explicit" → Absolute dates (5 Januari, Jumat 10 Jan, tanggal 15)
-• "next_meeting" → Class references (sebelum pertemuan, saat kuliah, during class)
-• "relative" → Temporal references (besok, lusa, minggu depan, tomorrow)
-• "unknown" → Course mentioned without deadline info
+- "explicit" → Absolute dates (5 Januari, Jumat 10 Jan, tanggal 15)
+- "next_meeting" → Class references (sebelum pertemuan, saat kuliah, during class)
+- "relative" → Temporal references (besok, lusa, minggu depan, tomorrow)
+- "unknown" → Course mentioned without deadline info
 
 GLOBAL PARALLEL CODES:
-• Return parallels common to ALL courses
-• If courses have different parallels → empty array
-• Single course scenario → empty array (not global)
+- Return parallels common to ALL courses
+- If courses have different parallels → empty array
+- Single course scenario → empty array (not global)
 
 ═══════════════════════════════════════════════════════════════════
 OUTPUT FORMAT
@@ -915,22 +924,22 @@ OUTPUT FORMAT
 
 Return JSON only:
 {{
-  "parallel_codes": [string],  // Global parallels or []
   "parallel_confidence": float,  // 0.0-1.0
-  "parallel_source": "quoted_assignment" | "explicit" | "sender_history" | "unknown",
+  "parallel_source": "explicit" | "quoted_assignment" | "sender_history" | "unknown",
   "course_hints": [
     {{
       "course_name": string,
-      "parallel_codes": [string],  // THIS assignment's parallels
+      "parallel_codes": [string],  // PER-ASSIGNMENT parallels - extract from MESSAGE first
       "deadline_type": "explicit" | "next_meeting" | "relative" | "unknown"
     }}
   ]
 }}
 
 FINAL REMINDER: 
-- Use HIGHEST PRIORITY context available (quoted > explicit > history)
-- If QUOTED ASSIGNMENT exists → extract ALL its parallel codes
-- Sender history is FALLBACK ONLY (already filtered for relevance)"#,
+- For UPDATE messages: Extract parallels from MESSAGE text, not from quoted assignment
+- Use EXTRACTED codes from MESSAGE as HIGHEST PRIORITY
+- Quoted assignment is for context only (course name, title)
+- Example phrases to watch: "paralel untuk K2 P2", "untuk k1, k2", "diubah ke K3""#,
         message,
         quoted_section,
         parallel_hint,

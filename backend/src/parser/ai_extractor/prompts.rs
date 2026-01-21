@@ -79,22 +79,19 @@ pub fn build_classification_prompt(
     let context_hints = if let Some(ctx) = context {
         let mut hints = String::from("\n\nRESOLVED CONTEXT HINTS\n");
         hints.push_str("═══════════════════════════════════════════════════════════════════\n");
+
+        // Display overall confidence and source
+        hints.push_str(&format!(
+            "Detection Confidence: {:.0}% (source: {})\n\n",
+            ctx.parallel_confidence * 100.0,
+            ctx.parallel_source
+        ));
         
         // Quoted message context
         if let Some(ref quoted) = ctx.quoted_message_summary {
             hints.push_str("QUOTED MESSAGE REFERENCE:\n");
             hints.push_str(&format!("  {}\n", quoted));
             hints.push_str("  User is replying to/updating this assignment\n\n");
-        }
-        
-        // Global parallels
-        if !ctx.parallel_codes.is_empty() {
-            hints.push_str(&format!(
-                "Global Parallels: [{}] (confidence: {:.0}%, source: {})\n",
-                ctx.parallel_codes.join(", "), 
-                ctx.parallel_confidence * 100.0, 
-                ctx.parallel_source
-            ));
         }
         
         // Per-course schedule information
