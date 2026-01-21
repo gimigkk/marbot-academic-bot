@@ -147,6 +147,8 @@ pub enum BotCommand {
     MyKelas,
     UnknownCommand(String),
     MissingArgument(String),
+    Update(u32, String),      
+    NewAssignment(String),    
 }
 
 
@@ -356,7 +358,7 @@ pub struct NewAssignment {
     pub relating_messages: Vec<String>,
 }
 
-#[derive(Debug, FromRow, Serialize, Deserialize)]
+#[derive(Debug, Clone, FromRow, Serialize, Deserialize)]
 pub struct AssignmentWithCourse {
     pub id: uuid::Uuid,
     pub course_name: String,

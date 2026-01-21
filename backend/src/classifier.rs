@@ -43,6 +43,29 @@ fn parse_command(text: &str) -> Option<BotCommand> {
     match command.as_str() {
         "test" | "tes" | "ping" => Some(BotCommand::Ping),
         
+        // Admin only #update command
+        "update" => {
+            if parts.len() > 2 {
+                // parts[1] = id, parts[2..] = update message
+                let id = parts[1].parse().ok()?;
+                let message = parts[2..].join(" ");
+                Some(BotCommand::Update(id, message))
+            } else {
+                Some(BotCommand::MissingArgument("update".to_string()))
+            }
+        },
+        
+        // ^^^ #new command
+        "new" => {
+            if parts.len() > 1 {
+                // parts[1..] = assignment message
+                let message = parts[1..].join(" ");
+                Some(BotCommand::NewAssignment(message))
+            } else {
+                Some(BotCommand::MissingArgument("new".to_string()))
+            }
+        },
+
         // --- Set Kelas ---
         "setkelas" | "set" => {
             if parts.len() >= 3 {

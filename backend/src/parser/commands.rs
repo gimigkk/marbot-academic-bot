@@ -12,7 +12,7 @@ use crate::database::crud::{
     get_user_course_statuses,  // Ditambahkan untuk fitur #mykelas
 };
 
-use crate::models::BotCommand;
+use crate::models::{BotCommand, AssignmentWithCourse};
 use crate::tui::JobLogger;
 use chrono::{DateTime, Duration, FixedOffset, Datelike, NaiveDate, Utc};
 use sqlx::PgPool;
@@ -22,6 +22,18 @@ use std::time::Instant;
 pub enum CommandResponse {
     Text(String),
     ResendMessages { messages: Vec<String>, summary: String },
+    
+    // for the new admin commands
+    ProcessWithAI {
+        message: String,
+        force_mode: AIForceMode,
+        target_assignment: Option<AssignmentWithCourse>,
+    },
+}
+
+pub enum AIForceMode {
+    Update,    // Force interpretation as assignment_update
+    NewOnly,   // Force interpretation as assignment_info/multiple (never update)
 }
 
 /// Get current time in GMT+7 (Indonesian timezone)
@@ -161,6 +173,87 @@ pub async fn handle_command(
             );
             
             CommandResponse::Text(response_text)
+        }
+
+        // yang admin only
+        BotCommand::Update(id, message) => {
+            logger.log(&format!("🔄 Admin Update command: #{} from {}", id, user_phone));
+            
+            // Only debug group
+            let debug_group_id = std::env::var("DEBUG_GROUP_ID").ok();
+            
+            if debug_group_id.as_deref() != Some(chat_id) {
+                return CommandResponse::Text(
+                    "⛔ *AKSES DITOLAK*\n\n\
+                    Command #update hanya boleh digunakan di Debug Group.\n\
+                    _Admin only!_ 👮"
+                        .to_string(),
+                );
+            }
+            
+            // Get assignment by ID from #tugas
+            match get_active_assignments_sorted(pool, Some(logger)).await {
+                Ok(assignments) => {
+                    let idx = (id as usize).saturating_sub(1);
+                    
+                    if idx >= assignments.len() {
+                        return CommandResponse::Text(format!(
+                            "❌ Tugas nomor *{}* tidak ditemukan.\n\n\
+                            💡 _Gunakan #tugas untuk lihat daftar terbaru_",
+                            id
+                        ));
+                    }
+                    
+                    let target = assignments[idx].clone();
+                    
+                    logger.log(&format!(
+                        "   Target: {} - {}",
+                        target.course_name,
+                        target.title
+                    ));
+                    
+                    // Return special response to trigger AI processing
+                    CommandResponse::ProcessWithAI {
+                        message,
+                        force_mode: AIForceMode::Update,
+                        target_assignment: Some(target),
+                    }
+                }
+                Err(e) => {
+                    logger.log(&format!("❌ Failed to fetch assignments: {}", e));
+                    CommandResponse::Text(
+                        "❌ Gagal mengambil daftar tugas.\n_Coba lagi sebentar._"
+                            .to_string()
+                    )
+                }
+            }
+        }
+        
+        // #new <message> admin only
+        BotCommand::NewAssignment(message) => {
+            logger.log(&format!("✨ Admin New command from {}", user_phone));
+            
+            // AUTH CHECK: Only debug group
+            let debug_group_id = std::env::var("DEBUG_GROUP_ID").ok();
+            
+            if debug_group_id.as_deref() != Some(chat_id) {
+                return CommandResponse::Text(
+                    "⛔ *AKSES DITOLAK*\n\n\
+                    Command #new hanya boleh digunakan di Debug Group.\n\
+                    _Admin only!_ 👮"
+                        .to_string(),
+                );
+            }
+            
+            logger.log(&format!("   Message: {}", 
+                message.chars().take(60).collect::<String>()));
+            
+            // Return special response to trigger AI processing
+            CommandResponse::ProcessWithAI {
+                message,
+                force_mode: AIForceMode::NewOnly,
+                target_assignment: None,
+            }
         }
 
         BotCommand::Tugas => {
@@ -612,8 +705,10 @@ pub async fn handle_command(
                     *Perintah Pengaturan:*\n\
                     - #setkelas <matkul> <kode1> [kode2]... — atur kelas pararel untuk matkul\n\
                     - #mykelas — lihat setting kelas parallel kamu\n\n\
-                    *Perintah Admin (Grup Akademik):*\n\
-                    - #delete <id> — hapus tugas (id dari #tugas)\n\n\
+                    *Perintah Admin:*\n\
+                    - #delete <id> — hapus tugas (id dari #tugas)\n\
+                    - #update <id> <pesan> — update tugas dengan AI\n\
+                    - #new <pesan> — buat assignment baru dengan AI\n\n\
                     *Penting:* #<id> dan #done selalu pakai nomor dari *#todo*. _Info tugas akan otomatis tersimpan via grup info akademik, tidak dari chat lain._\n\n\
                     *Want to Contribute?*\n\
                     github.com/gimigkk/marbot-academic-bot"
@@ -659,6 +754,25 @@ pub async fn handle_command(
                     - #setkelas algorithm c3\n\
                     - #setkelas pemrog k1 p2\n\n\
                     💡 _Gunakan nama matkul yang benar (lihat di #tugas)_"
+                }
+                "update" => {
+                    "⚠️ *Cara pakai yang benar:*\n\n\
+                    #update <nomor> <pesan update>\n\n\
+                    *Contoh:*\n\
+                    - #update 3 deadline besok jam 14:00\n\
+                    - #update 1 diundur minggu depan\n\
+                    - #update 5 judul: Quiz Kalkulus 3\n\n\
+                    💡 _Gunakan #tugas untuk lihat nomor assignment_\n\
+                    ⚠️ _Command ini hanya untuk Debug Group_"
+                }
+                "new" => {
+                    "⚠️ *Cara pakai yang benar:*\n\n\
+                    #new <info assignment>\n\n\
+                    *Contoh:*\n\
+                    - #new Pemrograman LKP 15 deadline besok\n\
+                    - #new RPL Quiz 3 untuk K1 deadline Jumat jam 10\n\n\
+                    💡 _AI akan memproses sebagai assignment baru_\n\
+                    ⚠️ _Command ini hanya untuk Debug Group_"
                 }
                 _ => {
                     "⚠️ Command ini membutuhkan argumen.\n\n\

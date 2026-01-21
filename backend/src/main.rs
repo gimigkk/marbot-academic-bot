@@ -415,6 +415,8 @@ async fn webhook(
                 BotCommand::MyKelas => "mykelas",
                 BotCommand::MissingArgument(_) => "error",
                 BotCommand::UnknownCommand(_) => "unknown",
+                BotCommand::Update(_, _) => "ai",
+                BotCommand::NewAssignment(_) => "ai",
             };
             tags.push(format!("#{}", cmd_tag));
         }
@@ -685,6 +687,187 @@ async fn webhook(
                         logger.set_status(tui::state::JobStatus::Failed);
                     } else {
                         logger.set_status(tui::state::JobStatus::Completed);
+                    }
+                }
+                // Handle AI processing request from commands
+                CommandResponse::ProcessWithAI { message, force_mode, target_assignment } => {
+                    logger.log("🤖 Command triggered AI processing...");
+                    
+                    // Prepare AI context (same as NeedsAI flow)
+                    let courses_list = crud::get_all_courses_formatted(&state.pool)
+                        .await
+                        .unwrap_or_default();
+                    
+                    let assignments = crud::get_assignments_for_classification(&state.pool, Some(&logger))
+                        .await
+                        .unwrap_or_default();
+                    
+                    let course_map: HashMap<uuid::Uuid, String> = sqlx::query_as::<_, (uuid::Uuid, String)>(
+                        "SELECT id, name FROM courses"
+                    )
+                    .fetch_all(&state.pool)
+                    .await
+                    .map(|rows| rows.into_iter().collect())
+                    .unwrap_or_default();
+                    
+                    // Build AI message - EXPLICIT if-else approach
+                    let text: String;
+                    
+                    if matches!(force_mode, crate::parser::commands::AIForceMode::Update) {
+                        // UPDATE mode
+                        if let Some(ref target) = target_assignment {
+                            let parallel_display = if target.parallel_codes.is_empty() {
+                                String::from("N/A")
+                            } else {
+                                format!("[{}]", target.parallel_codes.join(", "))
+                            };
+                            
+                            let deadline_display = target.deadline
+                                .map(|d| d.format("%Y-%m-%d %H:%M").to_string())
+                                .unwrap_or_else(|| String::from("N/A"));
+                            
+                            text = format!(
+                                "UPDATE EXISTING ASSIGNMENT:\n\
+                                Course: {}\n\
+                                Title: {}\n\
+                                Current Deadline: {}\n\
+                                Parallels: {}\n\
+                                \n\
+                                CHANGES: {}",
+                                target.course_name,
+                                target.title,
+                                deadline_display,
+                                parallel_display,
+                                message
+                            );
+                        } else {
+                            text = message;
+                        }
+                    } else {
+                        // NEW mode
+                        text = format!(
+                            "NEW ASSIGNMENT (NOT AN UPDATE):\n\
+                            {}",
+                            message
+                        );
+                    }
+                    
+                    // Call AI extraction - include quoted message context
+                    match extract_with_ai(
+                        &text,
+                        &courses_list,
+                        &assignments,
+                        &course_map,
+                        None,  // No image for admin commands
+                        sender_phone,
+                        &state.pool,
+                        quoted_message_text.as_deref(),  // Pass quoted message
+                        quoted_message_id.as_deref(),    // Pass quoted message ID
+                        &logger,
+                    ).await {
+                        Ok(classification) => {
+                            // Validate classification matches expected type
+                            let is_valid = match (&force_mode, &classification) {
+                                (crate::parser::commands::AIForceMode::Update, AIClassification::AssignmentUpdate { .. }) => true,
+                                (crate::parser::commands::AIForceMode::NewOnly, AIClassification::AssignmentInfo { .. }) => true,
+                                (crate::parser::commands::AIForceMode::NewOnly, AIClassification::MultipleAssignments { .. }) => true,
+                                _ => false,
+                            };
+                            
+                            if !is_valid {
+                                logger.log(&format!("⚠️ AI returned unexpected type: {:?}", classification));
+                                
+                                let error_msg = match force_mode {
+                                    crate::parser::commands::AIForceMode::Update => {
+                                        "⚠️ *AI TIDAK MENGENALI SEBAGAI UPDATE*\n\n\
+                                        Coba gunakan kata kunci seperti:\n\
+                                        - 'deadline berubah menjadi...'\n\
+                                        - 'diundur ke...'\n\
+                                        - 'judul: ...'\n\
+                                        - 'untuk parallel: ...'"
+                                    }
+                                    crate::parser::commands::AIForceMode::NewOnly => {
+                                        "⚠️ *AI TIDAK MENGENALI SEBAGAI ASSIGNMENT BARU*\n\n\
+                                        Pastikan pesan mencakup:\n\
+                                        - Nama mata kuliah\n\
+                                        - Judul/tipe tugas (LKP, Quiz, dll)\n\
+                                        - Deadline (opsional)\n\
+                                        - Parallel codes (opsional)"
+                                    }
+                                };
+                                
+                                let _ = send_reply(chat_id, error_msg).await;
+                                logger.set_status(tui::state::JobStatus::Failed);
+                                return StatusCode::OK;
+                            }
+                            
+                            logger.log(&format!("✅ AI Classification: {:?}\n", classification));
+                            
+                            // For updates, we need to apply to the target assignment
+                            if let crate::parser::commands::AIForceMode::Update = force_mode {
+                                if let (Some(target), AIClassification::AssignmentUpdate { 
+                                    new_deadline, 
+                                    new_title, 
+                                    new_description, 
+                                    parallel_codes, 
+                                    changes,
+                                    .. 
+                                }) = (target_assignment, classification) {
+                                    let deadline_parsed = new_deadline.as_ref()
+                                        .and_then(|d| crud::parse_deadline(d).ok());
+                                    
+                                    match crud::update_assignment_fields(
+                                        &state.pool,
+                                        target.id,
+                                        deadline_parsed,
+                                        new_title.clone(),
+                                        new_description.clone(),
+                                        if parallel_codes.is_empty() { None } else { Some(parallel_codes.clone()) },
+                                        None,
+                                        None,
+                                        Some(&logger),
+                                    ).await {
+                                        Ok(_) => {
+                                            let success_msg = format!(
+                                                "✅ *UPDATE BERHASIL*\n\n\
+                                                📝 *{}*\n\
+                                                📚 {}\n\
+                                                \n\
+                                                🔄 Changes: {}",
+                                                target.title,
+                                                target.course_name,
+                                                changes
+                                            );
+                                            
+                                            let _ = send_reply(chat_id, &success_msg).await;
+                                            logger.set_status(tui::state::JobStatus::Completed);
+                                        }
+                                        Err(e) => {
+                                            logger.log(&format!("❌ Update failed: {}", e));
+                                            let _ = send_reply(chat_id, &format!("❌ Gagal update: {}", e)).await;
+                                            logger.set_status(tui::state::JobStatus::Failed);
+                                        }
+                                    }
+                                }
+                            } else {
+                                // For new assignments, use normal flow
+                                handle_ai_classification(
+                                    state.pool.clone(),
+                                    classification,
+                                    &format!("ADMIN_NEW_{}", payload.payload.id),
+                                    sender_phone,
+                                    &text,
+                                    chat_id,
+                                    debug_group_id.clone(),
+                                    logger.clone(),
+                                ).await;
+                            }
+                        }
+                        Err(e) => {
+                            logger.log(&format!("❌ AI extraction failed: {}", e));
+                            let _ = send_reply(chat_id, "❌ AI gagal memproses pesan. Coba lagi.").await;
+                            logger.set_status(tui::state::JobStatus::Failed);
+                        }
                     }
                 }
             }

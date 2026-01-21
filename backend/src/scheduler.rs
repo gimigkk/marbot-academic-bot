@@ -6,7 +6,7 @@ use crate::models::SendTextRequest;
 use chrono::{DateTime, Datelike, NaiveDate, Utc};
 use crate::tui::{JobLogger, state::LogEntry};
 use tokio::sync::mpsc;
-use tokio::time::sleep;
+//use tokio::time::sleep; <-- ini kenapa ga di pake btw -gilang
 
 pub async fn start_scheduler(
     pool: PgPool,
