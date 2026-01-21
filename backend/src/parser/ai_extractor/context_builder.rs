@@ -505,28 +505,42 @@ async fn try_gemini_context(prompt: &str, logger: &JobLogger) -> Result<AIHints,
                     "type": "object",
                     "properties": {
                         "parallel_confidence": {
-                            "type": "number"
+                            "type": "number",
+                            "description": "Confidence level between 0.0 and 1.0"
                         },
                         "parallel_source": {
-                            "type": "string"
+                            "type": "string",
+                            "enum": ["explicit", "quoted_assignment", "sender_history", "unknown"],
+                            "description": "Source of parallel code information"
                         },
                         "course_hints": {
                             "type": "array",
+                            "description": "List of course-specific hints",
                             "items": {
                                 "type": "object",
                                 "properties": {
-                                    "course_name": {"type": "string"},
+                                    "course_name": {
+                                        "type": "string",
+                                        "description": "Full course name"
+                                    },
                                     "parallel_codes": {
                                         "type": "array",
-                                        "items": {"type": "string"}
+                                        "description": "Parallel class codes for this course",
+                                        "items": {
+                                            "type": "string"
+                                        }
                                     },
-                                    "deadline_type": {"type": "string"}
+                                    "deadline_type": {
+                                        "type": "string",
+                                        "enum": ["explicit", "next_meeting", "relative", "unknown"],
+                                        "description": "Type of deadline mentioned"
+                                    }
                                 },
                                 "required": ["course_name", "parallel_codes", "deadline_type"]
                             }
                         }
                     },
-                    "required": ["parallel_codes", "parallel_confidence", "parallel_source", "course_hints"]
+                    "required": ["parallel_confidence", "parallel_source", "course_hints"]
                 }
             }
         });
@@ -561,6 +575,15 @@ async fn try_gemini_context(prompt: &str, logger: &JobLogger) -> Result<AIHints,
             
             let ai_text = extract_ai_text(&gemini_response)?;
             return parse_ai_hints(&ai_text);
+        }
+        
+        // Log the error details for debugging
+        if response.status() == reqwest::StatusCode::BAD_REQUEST {
+            let error_text = response.text().await.unwrap_or_default();
+            clear_trying_line(logger);
+            logger.log(&format!("│ \x1b[31m❌ FAILED\t: {} - 400 Bad Request\x1b[0m", model));
+            logger.log(&format!("│   Error: {}", error_text.chars().take(100).collect::<String>()));
+            continue;
         }
         
         clear_trying_line(logger);
