@@ -661,7 +661,8 @@ pub async fn handle_command(
         BotCommand::Help => {
             logger.log(&format!("❓ Help command received from {}", user_phone));
             CommandResponse::Text(
-                "*[MABOT — Academic Bot]*\n\n\
+                "*[Halow aku APIPI!👋]*\n\
+                    _Ilkomerz61's Academic & Personal Intelligent Processing Interface_\n\n\
                     *Perintah Umum:*\n\
                     - #ping — cek bot hidup & latency\n\
                     - #tugas — lihat semua tugas (global)\n\
