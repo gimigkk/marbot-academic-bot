@@ -55,16 +55,6 @@ fn parse_command(text: &str) -> Option<BotCommand> {
             }
         },
         
-        // ^^^ #new command
-        "new" => {
-            if parts.len() > 1 {
-                // parts[1..] = assignment message
-                let message = parts[1..].join(" ");
-                Some(BotCommand::NewAssignment(message))
-            } else {
-                Some(BotCommand::MissingArgument("new".to_string()))
-            }
-        },
 
         // --- Set Kelas ---
         "setkelas" | "set" => {

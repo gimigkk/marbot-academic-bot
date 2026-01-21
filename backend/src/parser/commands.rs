@@ -226,31 +226,6 @@ pub async fn handle_command(
                 }
             }
         }
-        
-        // #new <message> admin only
-        BotCommand::NewAssignment(message) => {
-            // AUTH CHECK: Only debug group
-            let debug_group_id = std::env::var("DEBUG_GROUP_ID").ok();
-            
-            if debug_group_id.as_deref() != Some(chat_id) {
-                return CommandResponse::Text(
-                    "⛔ *AKSES DITOLAK*\n\n\
-                    Command #new hanya boleh digunakan di Debug Group.\n\
-                    _Admin only!_ 👮"
-                        .to_string(),
-                );
-            }
-            
-            logger.log(&format!("   Message: {}", 
-                message.chars().take(60).collect::<String>()));
-            
-            // Return special response to trigger AI processing
-            CommandResponse::ProcessWithAI {
-                message,
-                force_mode: AIForceMode::NewOnly,
-                target_assignment: None,
-            }
-        }
 
         BotCommand::Tugas => {
             logger.log(&format!("📋 Tugas command received from {}", user_phone));
@@ -703,8 +678,7 @@ pub async fn handle_command(
                     - #mykelas — lihat setting kelas parallel kamu\n\n\
                     *Perintah Admin:*\n\
                     - #delete <id> — hapus tugas (id dari #tugas)\n\
-                    - #update <id> <pesan> — update tugas dengan AI\n\
-                    - #new <pesan> — buat assignment baru dengan AI\n\n\
+                    - #update <id> <pesan> — update tugas dengan AI\n\n\
                     *Penting:* #<id> dan #done selalu pakai nomor dari *#todo*. _Info tugas akan otomatis tersimpan via grup info akademik, tidak dari chat lain._\n\n\
                     *Want to Contribute?*\n\
                     github.com/gimigkk/marbot-academic-bot"
@@ -759,15 +733,6 @@ pub async fn handle_command(
                     - #update 1 diundur minggu depan\n\
                     - #update 5 judul: Quiz Kalkulus 3\n\n\
                     💡 _Gunakan #tugas untuk lihat nomor assignment_\n\
-                    ⚠️ _Command ini hanya untuk Debug Group_"
-                }
-                "new" => {
-                    "⚠️ *Cara pakai yang benar:*\n\n\
-                    #new <info assignment>\n\n\
-                    *Contoh:*\n\
-                    - #new Pemrograman LKP 15 deadline besok\n\
-                    - #new RPL Quiz 3 untuk K1 deadline Jumat jam 10\n\n\
-                    💡 _AI akan memproses sebagai assignment baru_\n\
                     ⚠️ _Command ini hanya untuk Debug Group_"
                 }
                 _ => {
