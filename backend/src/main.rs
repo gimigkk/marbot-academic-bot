@@ -794,6 +794,11 @@ async fn webhook(
                             }) = (target_assignment, classification) {
                                 let deadline_parsed = new_deadline.as_ref()
                                     .and_then(|d| crud::parse_deadline(d).ok());
+
+                                logger.log(&format!("🔍 DEBUG: Updating with message_id={}, body={}", 
+                                    payload.payload.id, 
+                                    payload.payload.body
+                                ));
                                 
                                 match crud::update_assignment_fields(
                                     &state.pool,
