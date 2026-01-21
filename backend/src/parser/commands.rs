@@ -671,12 +671,12 @@ pub async fn handle_command(
                     - #help — bantuan\n\n\
                     *Perintah Personal:*\n\
                     - #todo — lihat tugas pribadi kamu\n\
-                    - #<id> — lihat detail tugas dari #todo\n\
+                    - #<id> — lihat detail tugas dari #tugas\n\
                     - #done <id> — tandai selesai\n\
                     - #undo — batalkan #done terakhir\n\n\
                     *Perintah Pengaturan:*\n\
-                    - #setkelas <matkul> <kode1> [kode2]... — atur kelas pararel untuk matkul\n\
-                    - #mykelas — lihat setting kelas parallel kamu\n\n\
+                    - #setkelas <matkul> <kode1> <kode2> — atur kode pararel untuk matkul\n\
+                    - #mykelas — lihat settings kode parallel kamu\n\n\
                     *Perintah Admin:*\n\
                     - #delete <id> — hapus tugas (id dari #tugas)\n\
                     - #update <id> <pesan> — update tugas dengan AI\n\n\
