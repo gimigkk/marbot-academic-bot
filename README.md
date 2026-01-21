@@ -1,29 +1,26 @@
-# MARBOT
 
 <div align="center">
 
-```
-███╗   ███╗ █████╗ ██████╗ ██████╗  ██████╗ ████████╗
-████╗ ████║██╔══██╗██╔══██╗██╔══██╗██╔═══██╗╚══██╔══╝
-██╔████╔██║███████║██████╔╝██████╔╝██║   ██║   ██║   
-██║╚██╔╝██║██╔══██║██╔══██╗██╔══██╗██║   ██║   ██║   
-██║ ╚═╝ ██║██║  ██║██║  ██║██████╔╝╚██████╔╝   ██║   
-╚═╝     ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝  ╚═════╝    ╚═╝   
+<pre>
+  ███╗   ███╗ █████╗ ██████╗ ██████╗  ██████╗ ████████╗
+  ████╗ ████║██╔══██╗██╔══██╗██╔══██╗██╔═══██╗╚══██╔══╝
+  ██╔████╔██║███████║██████╔╝██████╔╝██║   ██║   ██║   
+  ██║╚██╔╝██║██╔══██║██╔══██╗██╔══██╗██║   ██║   ██║   
+  ██║ ╚═╝ ██║██║  ██║██║  ██║██████╔╝╚██████╔╝   ██║   
+  ╚═╝     ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝  ╚═════╝    ╚═╝   
+                                                     
+           WhatsApp Academic Assistant v1.0          
+</pre>
 
-Created by Gilang & Arya
-v1.0
-```
+[![Rust](https://img.shields.io/badge/rust-%23000000.svg?style=for-the-badge&logo=rust&logoColor=white)](https://www.rust-lang.org/)
+[![PostgreSQL](https://img.shields.io/badge/postgres-%23316192.svg?style=for-the-badge&logo=postgresql&logoColor=white)](https://www.postgresql.org/)
+[![Supabase](https://img.shields.io/badge/Supabase-3ECF8E?style=for-the-badge&logo=supabase&logoColor=white)](https://supabase.com/)
+[![Docker](https://img.shields.io/badge/docker-%230db7ed.svg?style=for-the-badge&logo=docker&logoColor=white)](https://www.docker.com/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)](https://opensource.org/licenses/MIT)
 
-**AI-powered WhatsApp bot that transforms academic announcements into an organized task management system**
+**Never miss a deadline again.** An intelligent WhatsApp bot that automatically extracts, organizes, and reminds you about academic assignments using cutting-edge AI.
 
-[![Rust](https://img.shields.io/badge/rust-1.92-CE422B?style=flat-square&logo=rust&logoColor=white)](https://www.rust-lang.org/)
-[![PostgreSQL](https://img.shields.io/badge/postgresql-16-336791?style=flat-square&logo=postgresql&logoColor=white)](https://www.postgresql.org/)
-[![Docker](https://img.shields.io/badge/docker-latest-2496ED?style=flat-square&logo=docker&logoColor=white)](https://www.docker.com/)
-[![License](https://img.shields.io/badge/license-MIT-green?style=flat-square)](LICENSE)
-
-[Features](#features) • [Installation](#installation) • [Commands](#commands) • [Architecture](#architecture) • [Deployment](#deployment)
-
----
+[Features](#-features) • [Installation](#-installation) • [Commands](#-commands) • [Architecture](#-architecture) • [Deployment](#-deployment)
 
 </div>
 
