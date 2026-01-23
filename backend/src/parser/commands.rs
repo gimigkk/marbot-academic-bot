@@ -714,7 +714,7 @@ pub async fn handle_command(
                     - #help — bantuan\n\n\
                     *Perintah Personal:*\n\
                     - #todo — lihat tugas pribadi kamu\n\
-                    - #<id> — lihat detail tugas dari #tugas\n\
+                    - #<id> — lihat detail tugas dari #todo\n\
                     - #done <id> — tandai selesai\n\
                     - #undo — batalkan #done terakhir\n\n\
                     *Perintah Pengaturan:*\n\
