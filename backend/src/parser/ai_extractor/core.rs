@@ -346,14 +346,44 @@ async fn try_gemini_models(prompt: &str, logger: &JobLogger) -> Result<AIClassif
         }
 
         if status.is_success() {
+            // Don't log success yet - parse first!
+            
+            // Try to parse response
+            let gemini_response: GeminiResponse = match response.json().await {
+                Ok(r) => r,
+                Err(e) => {
+                    all_rate_limited = false;
+                    clear_trying_line(logger);
+                    logger.log(&format!("│ \x1b[31m❌ PARSE FAILED\x1b[0m\t: {} - JSON deserialize error: {}", model, e));
+                    if index < GEMINI_MODELS.len() { continue; } else { return Err(format!("JSON parse error: {}", e)); }
+                }
+            };
+
+            // Try to extract text
+            let ai_text = match extract_ai_text(&gemini_response) {
+                Ok(text) => text,
+                Err(e) => {
+                    all_rate_limited = false;
+                    clear_trying_line(logger);
+                    logger.log(&format!("│ \x1b[31m❌ EXTRACT FAILED\x1b[0m\t: {} - {}", model, e));
+                    if index < GEMINI_MODELS.len() { continue; } else { return Err(e); }
+                }
+            };
+
+            // Try to parse classification
+            let classification = match parse_classification(ai_text) {
+                Ok(c) => c,
+                Err(e) => {
+                    all_rate_limited = false;
+                    clear_trying_line(logger);
+                    logger.log(&format!("│ \x1b[31m❌ CLASSIFY FAILED\x1b[0m\t: {} - {}", model, e));
+                    if index < GEMINI_MODELS.len() { continue; } else { return Err(e); }
+                }
+            };
+
+            // NOW we can log success - everything worked
             clear_trying_line(logger);
             logger.log(&format!("│ \x1b[32m✅ SUCCESS\x1b[0m\t: {} (Gemini {}/{})", model, index, GEMINI_MODELS.len()));
-
-            let gemini_response: GeminiResponse = response.json().await
-                .map_err(|e| format!("Failed to deserialize: {}", e))?;
-
-            let ai_text = extract_ai_text(&gemini_response)?;
-            let classification = parse_classification(ai_text)?;
 
             return Ok(classification);
         }
@@ -426,18 +456,46 @@ async fn try_groq_reasoning(prompt: &str, logger: &JobLogger) -> Result<AIClassi
 
         if status.is_success() {
             all_rate_limited = false;
-            clear_trying_line(logger);
-            logger.log(&format!("│ \x1b[32m✅ SUCCESS\x1b[0m\t: {} (Groq Reasoning {}/{})", model, index, GROQ_REASONING_MODELS.len()));
+            
+            // Parse response BEFORE logging success
+            let groq_response: GroqResponse = match response.json().await {
+                Ok(r) => r,
+                Err(e) => {
+                    clear_trying_line(logger);
+                    logger.log(&format!("│ \x1b[31m❌ PARSE FAILED\x1b[0m\t: {} - {}", model, e));
+                    if index < GROQ_REASONING_MODELS.len() { continue; } 
+                    else { return Err(format!("JSON parse: {}", e)); }
+                }
+            };
 
-            let groq_response: GroqResponse = response.json().await
-                .map_err(|e| format!("Failed to deserialize: {}", e))?;
+            let ai_text = match extract_groq_text(&groq_response) {
+                Ok(t) => t,
+                Err(e) => {
+                    clear_trying_line(logger);
+                    logger.log(&format!("│ \x1b[31m❌ EXTRACT FAILED\x1b[0m\t: {} - {}", model, e));
+                    if index < GROQ_REASONING_MODELS.len() { continue; } 
+                    else { return Err(e); }
+                }
+            };
 
-            let ai_text = extract_groq_text(&groq_response)?;
-            let classification = parse_classification(&ai_text)?;
+            let classification = match parse_classification(&ai_text) {
+                Ok(c) => c,
+                Err(e) => {
+                    clear_trying_line(logger);
+                    logger.log(&format!("│ \x1b[31m❌ CLASSIFY FAILED\x1b[0m\t: {} - {}", model, e));
+                    if index < GROQ_REASONING_MODELS.len() { continue; } 
+                    else { return Err(e); }
+                }
+            };
 
+            // Only continue to next model if unrecognized but text doesn't say "unrecognized"
             if matches!(classification, AIClassification::Unrecognized { .. }) && !ai_text.contains("unrecognized") {
                 if index < GROQ_REASONING_MODELS.len() - 1 { continue; }
             }
+
+            // SUCCESS - everything parsed correctly
+            clear_trying_line(logger);
+            logger.log(&format!("│ \x1b[32m✅ SUCCESS\x1b[0m\t: {} (Groq Reasoning {}/{})", model, index, GROQ_REASONING_MODELS.len()));
 
             return Ok(classification);
         }
@@ -459,6 +517,7 @@ async fn try_groq_reasoning(prompt: &str, logger: &JobLogger) -> Result<AIClassi
     logger.log("│");
     try_groq_standard_text(prompt, logger).await
 }
+
 
 // ===== GROQ STANDARD TEXT =====
 
@@ -495,7 +554,8 @@ async fn try_groq_standard_text(prompt: &str, logger: &JobLogger) -> Result<AICl
             Err(_) => {
                 clear_trying_line(logger);
                 logger.log(&format!("│ \x1b[31m❌ FAILED\x1b[0m\t: {} - Network error", model));
-                if index < GROQ_TEXT_MODELS.len() { continue; } else { return Err("All Groq standard models failed".to_string()); }
+                if index < GROQ_TEXT_MODELS.len() { continue; } 
+                else { return Err("All Groq standard models failed".to_string()); }
             }
         };
 
@@ -503,22 +563,49 @@ async fn try_groq_standard_text(prompt: &str, logger: &JobLogger) -> Result<AICl
 
         if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
             clear_trying_line(logger);
-            if index < GROQ_TEXT_MODELS.len() { continue; } else { return Err("rate limit".to_string()); }
+            if index < GROQ_TEXT_MODELS.len() { continue; } 
+            else { return Err("rate limit".to_string()); }
         }
 
         if status.is_success() {
-            clear_trying_line(logger);
-            logger.log(&format!("│ \x1b[32m✅ SUCCESS\x1b[0m\t: {} (Groq Standard {}/{})", model, index, GROQ_TEXT_MODELS.len()));
+            // Parse BEFORE logging success
+            let groq_response: GroqResponse = match response.json().await {
+                Ok(r) => r,
+                Err(e) => {
+                    clear_trying_line(logger);
+                    logger.log(&format!("│ \x1b[31m❌ PARSE FAILED\x1b[0m\t: {} - {}", model, e));
+                    if index < GROQ_TEXT_MODELS.len() { continue; } 
+                    else { return Err(format!("JSON parse: {}", e)); }
+                }
+            };
 
-            let groq_response: GroqResponse = response.json().await
-                .map_err(|e| format!("Failed to deserialize: {}", e))?;
+            let ai_text = match extract_groq_text(&groq_response) {
+                Ok(t) => t,
+                Err(e) => {
+                    clear_trying_line(logger);
+                    logger.log(&format!("│ \x1b[31m❌ EXTRACT FAILED\x1b[0m\t: {} - {}", model, e));
+                    if index < GROQ_TEXT_MODELS.len() { continue; } 
+                    else { return Err(e); }
+                }
+            };
 
-            let ai_text = extract_groq_text(&groq_response)?;
-            let classification = parse_classification(&ai_text)?;
+            let classification = match parse_classification(&ai_text) {
+                Ok(c) => c,
+                Err(e) => {
+                    clear_trying_line(logger);
+                    logger.log(&format!("│ \x1b[31m❌ CLASSIFY FAILED\x1b[0m\t: {} - {}", model, e));
+                    if index < GROQ_TEXT_MODELS.len() { continue; } 
+                    else { return Err(e); }
+                }
+            };
 
             if matches!(classification, AIClassification::Unrecognized { .. }) && !ai_text.contains("unrecognized") {
                 if index < GROQ_TEXT_MODELS.len() - 1 { continue; }
             }
+
+            // SUCCESS
+            clear_trying_line(logger);
+            logger.log(&format!("│ \x1b[32m✅ SUCCESS\x1b[0m\t: {} (Groq Standard {}/{})", model, index, GROQ_TEXT_MODELS.len()));
 
             return Ok(classification);
         }
@@ -530,6 +617,7 @@ async fn try_groq_standard_text(prompt: &str, logger: &JobLogger) -> Result<AICl
 
     Err("All Groq standard models failed".to_string())
 }
+
 
 // ===== GROQ VISION =====
 
@@ -577,7 +665,8 @@ async fn try_groq_vision(prompt: &str, image_base64: &str, logger: &JobLogger) -
             Err(_) => {
                 clear_trying_line(logger);
                 logger.log(&format!("│ \x1b[31m❌ FAILED\x1b[0m\t: {} - Network error", model));
-                if index < GROQ_VISION_MODELS.len() { continue; } else { return Err("All Groq vision models failed".to_string()); }
+                if index < GROQ_VISION_MODELS.len() { continue; } 
+                else { return Err("All Groq vision models failed".to_string()); }
             }
         };
 
@@ -585,22 +674,49 @@ async fn try_groq_vision(prompt: &str, image_base64: &str, logger: &JobLogger) -
 
         if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
             clear_trying_line(logger);
-            if index < GROQ_VISION_MODELS.len() { continue; } else { return Err("rate limit".to_string()); }
+            if index < GROQ_VISION_MODELS.len() { continue; } 
+            else { return Err("rate limit".to_string()); }
         }
 
         if status.is_success() {
-            clear_trying_line(logger);
-            logger.log(&format!("│ \x1b[32m✅ SUCCESS\x1b[0m\t: {} (Vision {}/{})", model, index, GROQ_VISION_MODELS.len()));
+            // Parse BEFORE logging success
+            let groq_response: GroqResponse = match response.json().await {
+                Ok(r) => r,
+                Err(e) => {
+                    clear_trying_line(logger);
+                    logger.log(&format!("│ \x1b[31m❌ PARSE FAILED\x1b[0m\t: {} - {}", model, e));
+                    if index < GROQ_VISION_MODELS.len() { continue; } 
+                    else { return Err(format!("JSON parse: {}", e)); }
+                }
+            };
 
-            let groq_response: GroqResponse = response.json().await
-                .map_err(|e| format!("Failed to deserialize: {}", e))?;
+            let ai_text = match extract_groq_text(&groq_response) {
+                Ok(t) => t,
+                Err(e) => {
+                    clear_trying_line(logger);
+                    logger.log(&format!("│ \x1b[31m❌ EXTRACT FAILED\x1b[0m\t: {} - {}", model, e));
+                    if index < GROQ_VISION_MODELS.len() { continue; } 
+                    else { return Err(e); }
+                }
+            };
 
-            let ai_text = extract_groq_text(&groq_response)?;
-            let classification = parse_classification(&ai_text)?;
+            let classification = match parse_classification(&ai_text) {
+                Ok(c) => c,
+                Err(e) => {
+                    clear_trying_line(logger);
+                    logger.log(&format!("│ \x1b[31m❌ CLASSIFY FAILED\x1b[0m\t: {} - {}", model, e));
+                    if index < GROQ_VISION_MODELS.len() { continue; } 
+                    else { return Err(e); }
+                }
+            };
 
             if matches!(classification, AIClassification::Unrecognized { .. }) && !ai_text.contains("unrecognized") {
                 if index < GROQ_VISION_MODELS.len() - 1 { continue; }
             }
+
+            // SUCCESS
+            clear_trying_line(logger);
+            logger.log(&format!("│ \x1b[32m✅ SUCCESS\x1b[0m\t: {} (Vision {}/{})", model, index, GROQ_VISION_MODELS.len()));
 
             return Ok(classification);
         }
