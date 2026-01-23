@@ -894,6 +894,7 @@ fn days_left(deadline_utc: &DateTime<Utc>) -> i64 {
     (due - now).num_days()
 }
 
+
 #[allow(non_snake_case)]
 fn humanize_deadline(deadline: &Option<DateTime<Utc>>) -> String {
     match deadline {
@@ -914,11 +915,23 @@ fn humanize_deadline(deadline: &Option<DateTime<Utc>>) -> String {
                     let hours_left = duration.num_hours();
                     
                     if hours_left > 0 {
-                        format!("{} jam lagi ({})", hours_left, time_str)
+                        let mins_left = duration.num_minutes() % 60; 
+                        
+                        if mins_left > 0 {
+                            format!("{} jam {} menit lagi ({})", hours_left, mins_left, time_str)
+                        } else {
+                            format!("{} jam lagi ({})", hours_left, time_str)
+                        }
+                        
                     } else if hours_left == 0 {
                         let mins_left = duration.num_minutes();
-                        format!("{} menit lagi ({})", mins_left, time_str)
+                        if mins_left > 0 {
+                             format!("{} menit lagi ({})", mins_left, time_str)
+                        } else {
+                             format!("Baru saja lewat ({})", time_str)
+                        }
                     } else {
+                        // Menangani yang sudah lewat (overdue) today
                         format!("Lewat {} jam ({})", hours_left.abs(), time_str)
                     }
                 },
