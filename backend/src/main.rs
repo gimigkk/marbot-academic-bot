@@ -861,20 +861,18 @@ async fn webhook(
         MessageType::NeedsAI(text) => {
             logger.log(">> Processing with AI...");
             
-            // Image handling (same as before)
+            // Image handling
             let image_base64 = if payload.payload.has_media.unwrap_or(false) {
                 if let Some(ref media) = payload.payload.media {
-                    if let Some(ref media_url) = media.url {
-                        if media.mimetype.as_ref().map(|m| m.starts_with("image/")).unwrap_or(false) {
-                            let api_key = std::env::var("WAHA_API_KEY").unwrap_or_else(|_| "devkey123".to_string());
-                            match fetch_image_from_url(media_url, &api_key, &logger).await {
-                                Ok(base64) => Some(base64),
-                                Err(e) => {
-                                    logger.log(&format!("❌ Failed to download image: {}", e));
-                                    None
-                                }
+                    if media.mimetype.as_ref().map(|m| m.starts_with("image/")).unwrap_or(false) {
+                        // Use message ID, not media URL!
+                        match fetch_image_from_url(&payload.payload.id, &logger).await {
+                            Ok(base64) => Some(base64),
+                            Err(e) => {
+                                logger.log(&format!("❌ Failed to download image: {}", e));
+                                None
                             }
-                        } else { None }
+                        }
                     } else { None }
                 } else { None }
             } else { None };
@@ -1721,14 +1719,36 @@ fn is_parallel_superset_or_equal(new_codes: &[String], existing_codes: &[String]
     )
 }
 
-async fn fetch_image_from_url(url: &str, api_key: &str, logger: &tui::JobLogger) -> Result<String, String> {
-    let waha_base = std::env::var("WAHA_URL").unwrap_or_else(|_| "http://marbot_waha:3001".to_string());
-    let url = url.replace("http://localhost:3001", &waha_base);
+async fn fetch_image_from_url(message_id: &str, logger: &tui::JobLogger) -> Result<String, String> {
+    let gows_base = std::env::var("WAHA_URL")  // Keep the same env var name for compatibility
+        .unwrap_or_else(|_| "http://marbot_waha:3001".to_string());
+    
+    // GOWS endpoint format: GET /message/{message_id}/download
+    let download_url = format!("{}/message/{}/download", gows_base, message_id);
+    
+    logger.log(&format!("   📥 Downloading from: {}", download_url));
+    
+    // Get Basic Auth credentials (GOWS uses Basic Auth, not API keys)
+    let auth_header = if let Ok(basic_auth) = std::env::var("BASIC_AUTH") {
+        // Format: "username:password"
+        use base64::{Engine as _, engine::general_purpose};
+        let encoded = general_purpose::STANDARD.encode(basic_auth.as_bytes());
+        format!("Basic {}", encoded)
+    } else {
+        // Default: admin:admin (common GOWS default)
+        "Basic YWRtaW46YWRtaW4=".to_string()  // base64("admin:admin")
+    };
+    
     let client = reqwest::Client::new();
-    let res = client.get(&url).header("X-Api-Key", api_key).send().await.map_err(|e| e.to_string())?;
+    let res = client
+        .get(&download_url)
+        .header("Authorization", auth_header)  // ← Basic Auth, not X-Api-Key!
+        .send()
+        .await
+        .map_err(|e| format!("Network error: {}", e))?;
     
     if !res.status().is_success() { 
-        return Err(format!("HTTP Error: {}", res.status())); 
+        return Err(format!("HTTP Error: {} - URL: {}", res.status(), download_url)); 
     }
     
     let bytes = res.bytes().await.map_err(|e| e.to_string())?;
@@ -1737,22 +1757,23 @@ async fn fetch_image_from_url(url: &str, api_key: &str, logger: &tui::JobLogger)
     use image::io::Reader as ImageReader;
     use std::io::Cursor;
 
+    // Compress if > 3.5MB
     if (bytes.len() as f64 / 1_000_000.0) > 3.5 {
-         logger.log("   🔄 Compressing image...");
-         
-         let img = ImageReader::new(Cursor::new(&bytes))
+        logger.log("   🔄 Compressing image...");
+        
+        let img = ImageReader::new(Cursor::new(&bytes))
             .with_guessed_format()
             .map_err(|e| format!("Format error: {}", e))?
             .decode()
             .map_err(|e| format!("Decode error: {}", e))?;
-         
-         let img = img.thumbnail(2048, 2048);
-         let mut buf = Vec::new();
-         img.write_to(&mut Cursor::new(&mut buf), image::ImageOutputFormat::Jpeg(80))
+        
+        let img = img.thumbnail(2048, 2048);
+        let mut buf = Vec::new();
+        img.write_to(&mut Cursor::new(&mut buf), image::ImageOutputFormat::Jpeg(80))
             .map_err(|e| format!("Compress error: {}", e))?;
             
-         Ok(general_purpose::STANDARD.encode(&buf))
+        Ok(general_purpose::STANDARD.encode(&buf))
     } else {
-         Ok(general_purpose::STANDARD.encode(&bytes))
+        Ok(general_purpose::STANDARD.encode(&bytes))
     }
 }
