@@ -1725,9 +1725,34 @@ fn is_parallel_superset_or_equal(new_codes: &[String], existing_codes: &[String]
 }
 
 
-// NEW FUNCTION: Download from the actual URL provided by WAHA
+// Download from the actual URL provided by WAHA
 async fn download_media_from_url(media_url: &str, logger: &tui::JobLogger) -> Result<String, String> {
-    logger.log(&format!("   📥 Downloading from: {}", media_url));
+    logger.log(&format!("   📥 Original URL: {}", media_url));
+    
+    // Fix localhost URLs - replace with actual Docker hostname
+    let fixed_url = if media_url.contains("localhost:3000") {
+        // Try multiple possible hostnames
+        let waha_hosts = vec![
+            std::env::var("WAHA_URL").ok(),
+            Some("http://waha:3000".to_string()),
+            Some("http://marbot_waha:3000".to_string()),
+        ];
+        
+        // Use the first available hostname, or fallback to waha:3000
+        let base_url = waha_hosts.into_iter()
+            .flatten()
+            .next()
+            .unwrap_or_else(|| "http://waha:3000".to_string());
+        
+        // Extract the path from original URL
+        // From: http://localhost:3000/api/files/default/XXX.jpeg
+        // To:   http://waha:3000/api/files/default/XXX.jpeg
+        media_url.replace("http://localhost:3000", &base_url)
+    } else {
+        media_url.to_string()
+    };
+    
+    logger.log(&format!("   📥 Downloading from: {}", fixed_url));
     
     // WAHA uses API Key authentication
     let api_key = std::env::var("WAHA_API_KEY")
@@ -1739,14 +1764,14 @@ async fn download_media_from_url(media_url: &str, logger: &tui::JobLogger) -> Re
         .map_err(|e| format!("Client error: {}", e))?;
     
     let res = client
-        .get(media_url)
-        .header("X-Api-Key", api_key)  // ✅ Correct auth for WAHA
+        .get(&fixed_url)  
+        .header("X-Api-Key", api_key)
         .send()
         .await
         .map_err(|e| format!("Network error: {}", e))?;
     
     if !res.status().is_success() {
-        return Err(format!("HTTP {}: {}", res.status(), media_url));
+        return Err(format!("HTTP {}: {}", res.status(), fixed_url));
     }
     
     logger.log("   ✅ Download successful");
