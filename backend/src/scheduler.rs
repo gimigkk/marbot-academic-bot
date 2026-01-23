@@ -6,7 +6,7 @@ use crate::models::SendTextRequest;
 use chrono::{DateTime, Datelike, NaiveDate, Utc};
 use crate::tui::{JobLogger, state::LogEntry};
 use tokio::sync::mpsc;
-//use tokio::time::sleep; <-- ini kenapa ga di pake btw -gilang
+use tokio::time::sleep;
 
 pub async fn start_scheduler(
     pool: PgPool,
@@ -302,68 +302,96 @@ async fn run_reminder_task(
     send_to_channels(message, logger).await
 }
 
-// REMINDER H-1 JAM  ---
+// REMINDER H-1 JAM  
 async fn check_urgent_deadlines(
     pool: PgPool,
     logger: &JobLogger,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    use sqlx::Row;
+
     let now = Utc::now();
     let one_hour_later = now + chrono::Duration::hours(1);
 
-    // Query urgent tasks (we already know there are some from pre-check)
-    let urgent_tasks = sqlx::query!(
+    struct UrgentTask {
+        id: uuid::Uuid,
+        title: String,
+        course_name: String,
+        deadline: Option<DateTime<Utc>>,
+        parallel_codes: Vec<String>,
+    }
+
+    let rows = sqlx::query(
         r#"
         SELECT 
-            a.id, a.title, COALESCE(c.aliases[1], c.name) as "course_name!", a.deadline
+            a.id, 
+            a.title, 
+            COALESCE(c.aliases[1], c.name) as course_name, 
+            a.deadline,
+            a.parallel_codes
         FROM assignments a
         JOIN courses c ON a.course_id = c.id
         WHERE a.deadline > $1 
           AND a.deadline <= $2 
           AND a.reminder_1h_sent = FALSE
-        "#,
-        now,
-        one_hour_later
+        "#
     )
+    .bind(now)
+    .bind(one_hour_later)
     .fetch_all(&pool)
     .await?;
 
+    if rows.is_empty() {
+        return Ok(());
+    }
+
+    let urgent_tasks: Vec<UrgentTask> = rows.iter().map(|row| {
+        UrgentTask {
+            id: row.get("id"),
+            title: row.get("title"),
+            course_name: row.get("course_name"),
+            deadline: row.get("deadline"),
+            parallel_codes: row.get("parallel_codes"),
+        }
+    }).collect();
+
     logger.log(&format!("🚨 Menemukan {} tugas deadline < 1 jam", urgent_tasks.len()));
 
-    for task in urgent_tasks {
-        let deadline_wib = task.deadline
-            .map(|d| d.with_timezone(&chrono::FixedOffset::east_opt(7 * 3600).unwrap()))
-            .unwrap(); 
-            
-        let time_str = deadline_wib.format("%H:%M").to_string();
-        
-        let message = format!(
-            "*[JANGAN LUPA KUMPULKAN! H-1 JAM]*\n\n\
-            📌 *{}*\n\
-            📚 {}\n\
-            ⏰ Deadline: Pukul *{}* WIB",
-            sanitize_wa_md(&task.title),
-            &task.course_name,
-            time_str
-        );
+    let mut message = String::new();
 
-        // Kirim Pesan
-        send_to_channels(message, logger).await?;
+    message.push_str("*[JANGAN LUPA KUMPULKAN! H-1 JAM]*\n\n");
 
-        // Tandai sudah dikirim
-        sqlx::query!(
-            "UPDATE assignments SET reminder_1h_sent = TRUE WHERE id = $1",
-            task.id
-        )
-        .execute(&pool)
-        .await?;
-        
-        logger.log(&format!("✅ Reminder urgent dikirim untuk: {}", task.title));
+    for (i, task) in urgent_tasks.iter().enumerate() {
+        let status = status_dot(&task.deadline);
+        let due_text = humanize_deadline(&task.deadline);
+        let course = sanitize_wa_md(&task.course_name);
+        let title = sanitize_wa_md(&task.title);
+
+        let parallel_display = if !task.parallel_codes.is_empty() {
+            format!(" [{}]", task.parallel_codes.join(", ").to_uppercase())
+        } else {
+            String::new()
+        };
+
+        message.push_str(&format!("{} *[{}]* *{}*\n", status, i + 1, title));
+        message.push_str(&format!("*├* {}\n", due_text));
+        message.push_str(&format!("*└* {}{}\n", course, parallel_display));
+        message.push('\n');
     }
+    
+    message.push_str("_Segera kumpulkan!_ 🔥");
+
+    send_to_channels(message, logger).await?;
+    for task in urgent_tasks {
+        sqlx::query("UPDATE assignments SET reminder_1h_sent = TRUE WHERE id = $1")
+            .bind(task.id)
+            .execute(&pool)
+            .await?;
+    }
+        
+    logger.log("✅ Reminder urgent gabungan berhasil dikirim.");
 
     Ok(())
 }
-
-
 
 
 // --- HELPER FUNCTIONS ---
@@ -438,19 +466,27 @@ fn humanize_deadline(deadline: &Option<DateTime<Utc>>) -> String {
             let date_str = format_date_id(due_wib);
             let time_str = deadline_wib.format("%H:%M").to_string();
 
+            let now_wib = Utc::now().with_timezone(&wib_offset);
+
             match delta {
                 0 => {
-                    // Calculate hours remaining for today's deadline
-                    let now_utc = Utc::now();
-                    let now_wib = now_utc.with_timezone(&wib_offset);
                     let duration = deadline_wib.signed_duration_since(now_wib);
                     let hours_left = duration.num_hours();
                     
                     if hours_left > 0 {
-                        format!("{} jam lagi ({})", hours_left, time_str)
+                        let mins_left = duration.num_minutes() % 60;
+                        if mins_left > 0 {
+                            format!("{} jam {} menit lagi ({})", hours_left, mins_left, time_str)
+                        } else {
+                            format!("{} jam lagi ({})", hours_left, time_str)
+                        }
                     } else if hours_left == 0 {
                         let mins_left = duration.num_minutes();
-                        format!("{} menit lagi ({})", mins_left, time_str)
+                        if mins_left > 0 {
+                            format!("{} menit lagi ({})", mins_left, time_str)
+                        } else {
+                            format!("Baru saja lewat ({})", time_str)
+                        }
                     } else {
                         format!("Lewat {} jam ({})", hours_left.abs(), time_str)
                     }
