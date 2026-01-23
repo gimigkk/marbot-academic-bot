@@ -318,7 +318,7 @@ pub async fn handle_command(
                 Ok((assignments, user_settings)) => {
                     let has_settings = !user_settings.is_empty();
                     
-                    // --- UPDATE LOGIC FILTERING ---
+                    // --- SHARED FILTERING LOGIC ---
                     let filtered_assignments: Vec<_> = assignments.into_iter().filter(|a| {
                         // 1. Kalau sudah selesai, skip 
                         if a.is_completed { return false; }
@@ -353,7 +353,6 @@ pub async fn handle_command(
                         true 
                     }).collect();
 
-                    // ... sisa kode display sama ...
                     let header = format!("*[To-Do]* _{}_", user_name);
                     let mut response = format_assignments_list(filtered_assignments, &header, false, true);
                     
@@ -462,22 +461,44 @@ pub async fn handle_command(
             }
 
             match get_active_assignments_for_user(pool, user_phone, Some(logger)).await {
-                Ok((assignments, _)) => {
-                    let incomplete: Vec<_> = assignments
-                        .into_iter()
-                        .filter(|a| !a.is_completed)
-                        .collect();
+                Ok((assignments, user_settings)) => {
+                    // Apply the SAME filtering as #todo
+                    let filtered_assignments: Vec<_> = assignments.into_iter().filter(|a| {
+                        // 1. Skip completed tasks
+                        if a.is_completed { return false; }
+                        
+                        // 2. General tasks (all) -> INCLUDE
+                        if a.parallel_codes.is_empty() || a.parallel_codes.contains(&"all".to_string()) {
+                            return true; 
+                        }
+                        
+                        // 3. Check user settings for this course
+                        if let Some(user_codes_str) = user_settings.get(&a.course_name) {
+                            let user_codes: Vec<&str> = user_codes_str.split(',').collect();
+                            
+                            for task_code in &a.parallel_codes {
+                                if user_codes.contains(&task_code.as_str()) {
+                                    return true;
+                                }
+                            }
+                            
+                            return false;
+                        }
+                        
+                        // 4. Default: If user hasn't set class, show all (safe default)
+                        true 
+                    }).collect();
 
                     let idx = (index as usize).saturating_sub(1);
 
-                    if idx >= incomplete.len() {
+                    if idx >= filtered_assignments.len() {
                         CommandResponse::Text(format!(
                             "❌ Tugas *#{}* tidak ditemukan di to-do list kamu.\n\n\
                             💡 _Tip: Ketik #todo untuk lihat daftar tugas._",
                             index
                         ))
                     } else {
-                        let assignment = &incomplete[idx];
+                        let assignment = &filtered_assignments[idx];
 
                         // Check if we have stored messages
                         if assignment.relating_messages.is_empty() {
@@ -535,15 +556,37 @@ pub async fn handle_command(
             logger.log(&format!("✅ Done command for assignment {} from {}", id, user_phone));
             
             match get_active_assignments_for_user(pool, user_phone, Some(logger)).await {
-                Ok((assignments, _)) => {
-                    let incomplete: Vec<_> = assignments
-                        .into_iter()
-                        .filter(|a| !a.is_completed)
-                        .collect();
+                Ok((assignments, user_settings)) => {
+                    // Apply the SAME filtering as #todo
+                    let filtered_assignments: Vec<_> = assignments.into_iter().filter(|a| {
+                        // 1. Skip completed tasks
+                        if a.is_completed { return false; }
+                        
+                        // 2. General tasks (all) -> INCLUDE
+                        if a.parallel_codes.is_empty() || a.parallel_codes.contains(&"all".to_string()) {
+                            return true; 
+                        }
+                        
+                        // 3. Check user settings for this course
+                        if let Some(user_codes_str) = user_settings.get(&a.course_name) {
+                            let user_codes: Vec<&str> = user_codes_str.split(',').collect();
+                            
+                            for task_code in &a.parallel_codes {
+                                if user_codes.contains(&task_code.as_str()) {
+                                    return true;
+                                }
+                            }
+                            
+                            return false;
+                        }
+                        
+                        // 4. Default: If user hasn't set class, show all (safe default)
+                        true 
+                    }).collect();
 
                     let idx = (id as usize).saturating_sub(1);
                     
-                    if idx >= incomplete.len() {
+                    if idx >= filtered_assignments.len() {
                         return CommandResponse::Text(format!(
                             "❌ Tugas nomor *{}* tidak ditemukan di to-do list kamu.\n\n\
                             💡 _Tip: Ketik #todo untuk lihat daftar tugas._",
@@ -551,7 +594,7 @@ pub async fn handle_command(
                         ));
                     }
                     
-                    let assignment = &incomplete[idx];
+                    let assignment = &filtered_assignments[idx];
                     
                     match mark_assignment_complete(pool, assignment.id, user_phone).await {
                         Ok(_) => CommandResponse::Text(format!(
