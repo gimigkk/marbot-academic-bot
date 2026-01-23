@@ -661,8 +661,8 @@ pub async fn handle_command(
         BotCommand::Help => {
             logger.log(&format!("❓ Help command received from {}", user_phone));
             CommandResponse::Text(
-                "*[Halow aku Marbot 👋]*\n\
-                    _Ilkomerz61's Main Academic Recollection BOT_\n\n\
+                "*[Halow aku Maarbot 👋]*\n\
+                    _Ilkomerz61's Memory Augmented Academic Recollection BOT_\n\n\
                     *Perintah Umum:*\n\
                     - #ping — cek bot hidup & latency\n\
                     - #tugas — lihat semua tugas (global)\n\
