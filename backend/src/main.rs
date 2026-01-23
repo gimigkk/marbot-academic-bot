@@ -861,17 +861,22 @@ async fn webhook(
         MessageType::NeedsAI(text) => {
             logger.log(">> Processing with AI...");
             
-            // Image handling
+            // Image handling  
             let image_base64 = if payload.payload.has_media.unwrap_or(false) {
                 if let Some(ref media) = payload.payload.media {
                     if media.mimetype.as_ref().map(|m| m.starts_with("image/")).unwrap_or(false) {
-                        // Use message ID, not media URL!
-                        match fetch_image_from_url(&payload.payload.id, &logger).await {
-                            Ok(base64) => Some(base64),
-                            Err(e) => {
-                                logger.log(&format!("❌ Failed to download image: {}", e));
-                                None
+                        // ✅ NEW WAY - use the URL WAHA already gave us!
+                        if let Some(ref url) = media.url {
+                            match download_media_from_url(url, &logger).await {
+                                Ok(base64) => Some(base64),
+                                Err(e) => {
+                                    logger.log(&format!("❌ Failed to download image: {}", e));
+                                    None
+                                }
                             }
+                        } else {
+                            logger.log("⚠️  No media URL provided by WAHA");
+                            None
                         }
                     } else { None }
                 } else { None }
@@ -1719,39 +1724,35 @@ fn is_parallel_superset_or_equal(new_codes: &[String], existing_codes: &[String]
     )
 }
 
-async fn fetch_image_from_url(message_id: &str, logger: &tui::JobLogger) -> Result<String, String> {
-    let gows_base = std::env::var("WAHA_URL")  // Keep the same env var name for compatibility
-        .unwrap_or_else(|_| "http://marbot_waha:3001".to_string());
+
+// NEW FUNCTION: Download from the actual URL provided by WAHA
+async fn download_media_from_url(media_url: &str, logger: &tui::JobLogger) -> Result<String, String> {
+    logger.log(&format!("   📥 Downloading from: {}", media_url));
     
-    // GOWS endpoint format: GET /message/{message_id}/download
-    let download_url = format!("{}/message/{}/download", gows_base, message_id);
+    // WAHA uses API Key authentication
+    let api_key = std::env::var("WAHA_API_KEY")
+        .unwrap_or_else(|_| "devkey123".to_string());
     
-    logger.log(&format!("   📥 Downloading from: {}", download_url));
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .map_err(|e| format!("Client error: {}", e))?;
     
-    // Get Basic Auth credentials (GOWS uses Basic Auth, not API keys)
-    let auth_header = if let Ok(basic_auth) = std::env::var("BASIC_AUTH") {
-        // Format: "username:password"
-        use base64::{Engine as _, engine::general_purpose};
-        let encoded = general_purpose::STANDARD.encode(basic_auth.as_bytes());
-        format!("Basic {}", encoded)
-    } else {
-        // Default: admin:admin (common GOWS default)
-        "Basic YWRtaW46YWRtaW4=".to_string()  // base64("admin:admin")
-    };
-    
-    let client = reqwest::Client::new();
     let res = client
-        .get(&download_url)
-        .header("Authorization", auth_header)  // ← Basic Auth, not X-Api-Key!
+        .get(media_url)
+        .header("X-Api-Key", api_key)  // ✅ Correct auth for WAHA
         .send()
         .await
         .map_err(|e| format!("Network error: {}", e))?;
     
-    if !res.status().is_success() { 
-        return Err(format!("HTTP Error: {} - URL: {}", res.status(), download_url)); 
+    if !res.status().is_success() {
+        return Err(format!("HTTP {}: {}", res.status(), media_url));
     }
     
+    logger.log("   ✅ Download successful");
+    
     let bytes = res.bytes().await.map_err(|e| e.to_string())?;
+    logger.log(&format!("   📦 Size: {:.2} MB", bytes.len() as f64 / 1_000_000.0));
     
     use base64::{Engine as _, engine::general_purpose};
     use image::io::Reader as ImageReader;
@@ -1772,8 +1773,9 @@ async fn fetch_image_from_url(message_id: &str, logger: &tui::JobLogger) -> Resu
         img.write_to(&mut Cursor::new(&mut buf), image::ImageOutputFormat::Jpeg(80))
             .map_err(|e| format!("Compress error: {}", e))?;
             
-        Ok(general_purpose::STANDARD.encode(&buf))
+        logger.log(&format!("   ✅ Compressed: {:.2} MB", buf.len() as f64 / 1_000_000.0));
+        return Ok(general_purpose::STANDARD.encode(&buf));
     } else {
-        Ok(general_purpose::STANDARD.encode(&bytes))
+        return Ok(general_purpose::STANDARD.encode(&bytes));
     }
 }
