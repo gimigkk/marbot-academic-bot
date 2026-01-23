@@ -7,7 +7,7 @@ use crate::tui::JobLogger;
 // ===== API RESPONSE STRUCTURES =====
 
 #[derive(Debug, Deserialize)]
-pub struct GroqResponse {  // ← Changed from pub(super) - from main
+pub struct GroqResponse {
     pub choices: Vec<GroqChoice>,
 }
 
@@ -22,18 +22,28 @@ pub struct GroqMessage {
 }
 
 #[derive(Debug, Deserialize)]
-pub struct GeminiResponse {  // ← Changed from pub(super) - from main
+pub struct GeminiResponse {
+    #[serde(default)]
     pub candidates: Vec<Candidate>,
+    #[serde(default)]
+    pub prompt_feedback: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct Candidate {
-    pub content: Content,
+    pub content: Option<Content>,
+    #[serde(default)]
+    pub finish_reason: Option<String>,
+    #[serde(default)]
+    pub safety_ratings: Option<Vec<serde_json::Value>>,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct Content {
-    pub parts: Vec<Part>,
+    #[serde(default)]
+    pub parts: Option<Vec<Part>>,
+    #[serde(default)]
+    pub role: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -55,7 +65,7 @@ pub(super) struct DuplicateCheckResult {
 
 // ===== RESPONSE EXTRACTORS =====
 
-pub fn extract_groq_text(groq_response: &GroqResponse) -> Result<String, String> {  // ← Changed from pub(super) - from main
+pub fn extract_groq_text(groq_response: &GroqResponse) -> Result<String, String> {
     groq_response
         .choices
         .first()
@@ -63,13 +73,35 @@ pub fn extract_groq_text(groq_response: &GroqResponse) -> Result<String, String>
         .ok_or_else(|| "Groq returned empty response".to_string())
 }
 
-pub fn extract_ai_text(gemini_response: &GeminiResponse) -> Result<&str, String> {  // ← Changed from pub(super) - from main
-    gemini_response
-        .candidates
+pub fn extract_ai_text(gemini_response: &GeminiResponse) -> Result<&str, String> {
+    // Check if response has any candidates
+    if gemini_response.candidates.is_empty() {
+        return Err("Gemini returned no candidates (possibly filtered by safety)".to_string());
+    }
+    
+    // Get first candidate
+    let candidate = &gemini_response.candidates[0];
+    
+    // Check finish reason for errors
+    if let Some(ref finish_reason) = candidate.finish_reason {
+        if finish_reason != "STOP" && finish_reason != "MAX_TOKENS" {
+            return Err(format!("Gemini stopped with reason: {}", finish_reason));
+        }
+    }
+    
+    // Extract content
+    let content = candidate.content.as_ref()
+        .ok_or_else(|| "Gemini candidate missing content field".to_string())?;
+    
+    // Extract parts
+    let parts = content.parts.as_ref()
+        .ok_or_else(|| "Gemini content missing parts field".to_string())?;
+    
+    // Get first part's text
+    parts
         .first()
-        .and_then(|candidate| candidate.content.parts.first())
         .map(|part| part.text.as_str())
-        .ok_or_else(|| "Gemini returned empty response".to_string())
+        .ok_or_else(|| "Gemini returned empty parts array".to_string())
 }
 
 // ===== PARSERS =====

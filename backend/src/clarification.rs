@@ -25,7 +25,7 @@ static PRINT_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 
 const MAX_RETRIES: u32 = 4;
 
-// ===== HELPER FUNCTIONS (unchanged) =====
+// ===== HELPER FUNCTIONS =====
 
 pub fn identify_missing_fields(assignment: &AssignmentWithCourse) -> Vec<String> {
     let mut missing = Vec::new();
@@ -154,21 +154,19 @@ pub fn generate_no_date_message() -> String {
 
 // ===== Unified logging helpers =====
 
-/// Helper wrapper: when `logger` is Some -> use JobLogger methods, otherwise fall back to stdout printing.
 fn logger_log(logger: Option<&JobLogger>, msg: &str) {
     if let Some(l) = logger {
         l.log(msg);
     } else {
         println!("{}", msg);
+        let _ = stdout().flush(); // Ensure colors are flushed
     }
 }
-
 
 fn logger_log_countdown(logger: Option<&JobLogger>, attempt: u32, remaining: u64) {
     if let Some(l) = logger {
         l.log_countdown(attempt, remaining);
     } else {
-        // stdout version will be handled by retry_with_countdown
         let _guard = PRINT_LOCK.lock().unwrap();
         print!("\x1b[1A\x1b[2K│ \x1b[33m⏳ RETRY #{}\x1b[0m - Waiting \x1b[36m{}\x1b[0m seconds...\n", attempt, remaining);
         let _ = stdout().flush();
@@ -179,7 +177,6 @@ async fn retry_with_countdown(attempt: u32, logger: Option<&JobLogger>) {
     let delay = 10 * attempt as u64;
 
     if logger.is_some() {
-        // TUI style
         logger_log(logger, "│");
         logger_log(logger, &format!("│ \x1b[33m⏳ RETRY #{}\x1b[0m - Waiting \x1b[36m{}\x1b[0m seconds...", attempt, delay));
 
@@ -190,9 +187,9 @@ async fn retry_with_countdown(attempt: u32, logger: Option<&JobLogger>) {
 
         logger_log(logger, "│");
     } else {
-        // stdout style with in-place update
         println!("│");
         println!("│ \x1b[33m⏳ RETRY #{}\x1b[0m - Waiting \x1b[36m{}\x1b[0m seconds...", attempt, delay);
+        let _ = stdout().flush();
 
         for remaining in (1..=delay).rev().skip(1) {
             tokio::time::sleep(std::time::Duration::from_secs(1)).await;
@@ -214,6 +211,7 @@ async fn retry_with_countdown(attempt: u32, logger: Option<&JobLogger>) {
         }
 
         println!("│");
+        let _ = stdout().flush();
     }
 }
 
@@ -233,14 +231,14 @@ fn print_trying_line_stdout(model: &str, index: usize, total: usize, last_trying
         println!("│ {}", formatted);
         *last_trying = true;
     }
-    stdout().flush().ok();
+    let _ = stdout().flush();
 }
 
 fn clear_previous_trying_stdout(last_trying: &mut bool) {
     if *last_trying {
         let _guard = PRINT_LOCK.lock().unwrap();
         print!("\x1b[1A\x1b[2K");
-        stdout().flush().ok();
+        let _ = stdout().flush();
         *last_trying = false;
     }
 }
@@ -297,20 +295,17 @@ async fn parse_clarification_response_internal(
     logger_log(logger, &format!("│ \x1b[36m📝 Message\x1b[0m\t: \x1b[37m\"{}\x1b[33m...\x1b[37m\"\x1b[0m", message_display));
     logger_log(logger, &format!("│ \x1b[33m🔍 Missing\x1b[0m\t: \x1b[31m{:?}\x1b[0m", missing_fields));
     
-    // Show deadline hint if available
     if let Some(hint) = next_meeting_hint {
         logger_log(logger, &format!("│ \x1b[35m📅 Schedule\x1b[0m\t: Next meeting at \x1b[32m{}\x1b[0m", hint.format("%Y-%m-%d %H:%M")));
     }
     
     logger_log(logger, "│");
 
-    // RETRY LOGIC
     for attempt in 0..MAX_RETRIES {
         if attempt > 0 {
             retry_with_countdown(attempt, logger).await;
         }
 
-        // Build prompt
         let now = Local::now();
         let current_date = now.format("%Y-%m-%d").to_string();
         let current_day = now.format("%A").to_string();
@@ -364,15 +359,9 @@ async fn parse_clarification_response_internal(
     }
 
     // Fallback to regex after all retries
-    if logger.is_some() {
-        logger_log(logger, &format!("│ \x1b[31m❌ CRITICAL\t: All AI models exhausted after {} retries\x1b[0m", MAX_RETRIES));
-        logger_log(logger, &format!("│ \x1b[33m🔄 Fallback\x1b[0m\t: Using \x1b[35mregex parser\x1b[0m..."));
-        logger_log(logger, &format!("\x1b[1;30m└──────────────────────────────────────────────\x1b[0m"));
-    } else {
-        eprintln!("│ \x1b[31m❌ CRITICAL\t: All AI models exhausted after {} retries\x1b[0m", MAX_RETRIES);
-        println!("│ \x1b[33m🔄 Fallback\x1b[0m\t: Using \x1b[35mregex parser\x1b[0m...");
-        println!("\x1b[1;30m└──────────────────────────────────────────────\x1b[0m");
-    }
+    logger_log(logger, &format!("│ \x1b[31m❌ CRITICAL\t: All AI models exhausted after {} retries\x1b[0m", MAX_RETRIES));
+    logger_log(logger, &format!("│ \x1b[33m🔄 Fallback\x1b[0m\t: Using \x1b[35mregex parser\x1b[0m..."));
+    logger_log(logger, &format!("\x1b[1;30m└──────────────────────────────────────────────\x1b[0m"));
     
     parse_natural_language_fallback(text, current_deadline, next_meeting_hint)
 }
@@ -443,12 +432,8 @@ async fn try_gemini_clarification(
             Ok(r) => r,
             Err(_) => {
                 all_rate_limited = false;
-                if let Some(_l) = logger {
-                    logger_log(logger, &format!("│ \x1b[31m❌ FAILED\t: {} - Network error\x1b[0m", model));
-                } else {
-                    clear_previous_trying_stdout(&mut last_trying);
-                    println!("│ \x1b[31m❌ FAILED\t: {} - Network error\x1b[0m", model);
-                }
+                if logger.is_none() { clear_previous_trying_stdout(&mut last_trying); }
+                logger_log(logger, &format!("│ \x1b[31m❌ FAILED\t: {} - Network error\x1b[0m", model));
                 continue;
             }
         };
@@ -771,7 +756,7 @@ fn parse_ai_response(
     Ok(updates)
 }
 
-// ===== FALLBACK REGEX PARSER (unchanged) =====
+// ===== FALLBACK REGEX PARSER =====
 
 pub fn parse_natural_language_fallback(
     text: &str,
@@ -937,7 +922,7 @@ fn detect_parallel_codes(text: &str) -> Vec<String> {
     let mut codes = Vec::new();
     if text.contains("semua") || text.contains("all") { return vec!["ALL".to_string()]; }
     
-    static RE_CODE: Lazy<Regex> = Lazy::new(|| Regex::new(r"\\b([KPR][1-4])\\b").unwrap());
+    static RE_CODE: Lazy<Regex> = Lazy::new(|| Regex::new(r"\b([KPR][1-4])\b").unwrap());
     for caps in RE_CODE.captures_iter(text) {
         codes.push(caps[1].to_uppercase());
     }
