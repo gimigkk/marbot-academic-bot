@@ -556,7 +556,7 @@ async fn try_gemini_context(prompt: &str, logger: &JobLogger) -> Result<AIHints,
             Ok(r) => r,
             Err(_) => {
                 clear_trying_line(logger);
-                logger.log(&format!("│ \x1b[31m❌ FAILED\t: {} - Network error\x1b[0m", model));
+                logger.log(&format!("│ \x1b[31m❌ FAILED\x1b[0m\t: {} - Network error", model));
                 continue;
             }
         };
@@ -567,27 +567,59 @@ async fn try_gemini_context(prompt: &str, logger: &JobLogger) -> Result<AIHints,
         }
         
         if response.status().is_success() {
+            // Don't log success yet - parse first!
+            
+            // Try to parse response
+            let gemini_response: GeminiResponse = match response.json().await {
+                Ok(r) => r,
+                Err(e) => {
+                    clear_trying_line(logger);
+                    logger.log(&format!("│ \x1b[31m❌ PARSE FAILED\x1b[0m\t: {} - JSON deserialize error: {}", model, e));
+                    if index < GEMINI_MODELS.len() { continue; } 
+                    else { return Err(format!("JSON parse error: {}", e)); }
+                }
+            };
+            
+            // Try to extract text
+            let ai_text = match extract_ai_text(&gemini_response) {
+                Ok(text) => text,
+                Err(e) => {
+                    clear_trying_line(logger);
+                    logger.log(&format!("│ \x1b[31m❌ EXTRACT FAILED\x1b[0m\t: {} - {}", model, e));
+                    if index < GEMINI_MODELS.len() { continue; } 
+                    else { return Err(e); }
+                }
+            };
+            
+            // Try to parse AI hints
+            let hints = match parse_ai_hints(&ai_text) {
+                Ok(h) => h,
+                Err(e) => {
+                    clear_trying_line(logger);
+                    logger.log(&format!("│ \x1b[31m❌ HINTS PARSE FAILED\x1b[0m\t: {} - {}", model, e));
+                    if index < GEMINI_MODELS.len() { continue; } 
+                    else { return Err(e); }
+                }
+            };
+            
+            // SUCCESS - everything worked
             clear_trying_line(logger);
-            logger.log(&format!("│ ✅ SUCCESS\t: {} (Gemini {}/{})", model, index, GEMINI_MODELS.len()));
+            logger.log(&format!("│ \x1b[32m✅ SUCCESS\x1b[0m\t: {} (Gemini {}/{})", model, index, GEMINI_MODELS.len()));
             
-            let gemini_response: GeminiResponse = response.json().await
-                .map_err(|e| format!("Parse error: {}", e))?;
-            
-            let ai_text = extract_ai_text(&gemini_response)?;
-            return parse_ai_hints(&ai_text);
+            return Ok(hints);
         }
         
         // Log the error details for debugging
         if response.status() == reqwest::StatusCode::BAD_REQUEST {
             let error_text = response.text().await.unwrap_or_default();
             clear_trying_line(logger);
-            logger.log(&format!("│ \x1b[31m❌ FAILED\t: {} - 400 Bad Request\x1b[0m", model));
+            logger.log(&format!("│ \x1b[31m❌ FAILED\x1b[0m\t: {} - 400 Bad Request", model));
             logger.log(&format!("│   Error: {}", error_text.chars().take(100).collect::<String>()));
             continue;
         }
         
         clear_trying_line(logger);
-        logger.log(&format!("│ \x1b[31m❌ FAILED\t: {} - HTTP {}\x1b[0m", model, response.status()));
+        logger.log(&format!("│ \x1b[31m❌ FAILED\x1b[0m\t: {} - HTTP {}", model, response.status()));
     }
     
     Err("All Gemini models failed".to_string())
