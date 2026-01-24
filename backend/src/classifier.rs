@@ -96,7 +96,7 @@ fn parse_command(text: &str) -> Option<BotCommand> {
         },
         // -----------------------------
 
-        "tugas" | "tygas" => {
+        "tugas" | "tygas" | "tgs" => {
             // Handle both "#tugas" alone and "#tugas 123"
             if parts.len() > 1 {
                 if let Ok(id) = parts[1].parse() {
@@ -105,13 +105,13 @@ fn parse_command(text: &str) -> Option<BotCommand> {
             }
             Some(BotCommand::Tugas)
         },
-        "mykelas" => Some(BotCommand::MyKelas),
-        "todo" => Some(BotCommand::Todo),  
-        "today" => Some(BotCommand::Today),
-        "week" => Some(BotCommand::Week),
-        "help" => Some(BotCommand::Help),
-        "undo" => Some(BotCommand::Undo),
-        "done" => {
+        "mykelas"      => Some(BotCommand::MyKelas),
+        "today"        => Some(BotCommand::Today),
+        "week"         => Some(BotCommand::Week),
+        "todo" | "td"  => Some(BotCommand::Todo),  
+        "help" | "hlp" => Some(BotCommand::Help),
+        "undo" | "und" => Some(BotCommand::Undo),
+        "done" | "dn"  => {
             if parts.len() > 1 {
                 let id = parts[1].parse().ok()?;
                 Some(BotCommand::Done(id))
