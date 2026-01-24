@@ -552,15 +552,15 @@ async fn webhook(
                                 &state.pool,
                                 assignment_id,
                                 new_deadline,
-                                new_title.clone(),           // Clone here
-                                new_description.clone(),     // Clone here
-                                new_parallel_codes.clone(),  // Clone here
+                                new_title.clone(),
+                                new_description.clone(),
+                                new_parallel_codes.clone(),
                                 Some(payload.payload.id.clone()),
                                 Some(payload.payload.body.clone()), 
                                 Some(&logger),
                             ).await {
                                 Ok(_) => {
-                                    // Update course_id jika ada perubahan
+                                    // Update course_id if changed
                                     if let Some(cid) = course_id {
                                         let _ = sqlx::query("UPDATE assignments SET course_id = $1 WHERE id = $2")
                                             .bind(cid)
@@ -571,7 +571,6 @@ async fn webhook(
                                     
                                     // Send notification to academic channels
                                     if let Ok(Some(full_assignment)) = crud::get_assignment_with_course_by_id(&state.pool, assignment_id).await {
-                                        // FIX 2.1: Corrected argument order
                                         if new_deadline.is_some() {
                                             send_academic_update_notification(
                                                 chat_id,
@@ -584,6 +583,7 @@ async fn webhook(
                                                 new_title.as_deref(),
                                                 new_description.as_deref(),
                                                 &state.pool,  
+                                                &logger,
                                             ).await;
                                         }
                                         
@@ -834,6 +834,7 @@ async fn webhook(
                                                 new_title.as_deref(),
                                                 new_description.as_deref(),
                                                 &state.pool,  
+                                                &logger,
                                             ).await;
                                         }
                                         
@@ -1168,6 +1169,7 @@ async fn handle_ai_classification(
                                             None,
                                             new_description.as_deref(),
                                             &pool_clone,  
+                                            &logger,
                                         ).await;
                                     }
 
@@ -1246,6 +1248,7 @@ async fn handle_ai_classification(
                                     new_title.as_deref(),
                                     new_description.as_deref(),
                                     &pool_clone,  
+                                    &logger,
                                 ).await;
                             }
                             
@@ -1634,6 +1637,7 @@ async fn send_academic_update_notification(
     new_title: Option<&str>,
     new_description: Option<&str>,
     pool: &PgPool,
+    logger: &tui::JobLogger,
 ) {
     let academic_env = std::env::var("ACADEMIC_CHANNELS").unwrap_or_default();
     let channels: Vec<&str> = academic_env.split(',').map(|s| s.trim()).collect();
@@ -1697,15 +1701,15 @@ async fn send_academic_update_notification(
     
     let (original_message_id, original_message_body) = match assignment_data {
         Ok(Some((message_ids, relating_messages))) => {
-            eprintln!("📤 Quote data: {} msg_ids, {} bodies", message_ids.len(), relating_messages.len());
+            logger.log(&format!("📤 Quote data: {} msg_ids, {} bodies", message_ids.len(), relating_messages.len()));
             (message_ids.first().cloned(), relating_messages.first().cloned())
         }
         Ok(None) => {
-            eprintln!("⚠️ Assignment {} not found", assignment_id);
+            logger.log(&format!("⚠️ Assignment {} not found", assignment_id));
             (None, None)
         }
         Err(e) => {
-            eprintln!("❌ Query failed: {}", e);
+            logger.log(&format!("❌ Query failed: {}", e));
             (None, None)
         }
     };
@@ -1725,10 +1729,10 @@ async fn send_academic_update_notification(
         
         if let Some(ref msg_id) = original_message_id {
             if send_reply_with_id(channel_id, &msg, Some(msg_id.clone())).await.is_ok() {
-                eprintln!("✅ Native reply sent");
+                logger.log("✅ Native reply sent");
                 continue;
             }
-            eprintln!("⚠️ Native reply failed, using manual quote");
+            logger.log("⚠️ Native reply failed, using manual quote");
         }
         
         let quoted_text = original_message_body
