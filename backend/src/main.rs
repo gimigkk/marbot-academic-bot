@@ -1647,7 +1647,7 @@ async fn send_academic_update_notification(
     if let Some(d) = deadline {
         let wib = chrono::FixedOffset::east_opt(7 * 3600).unwrap();
         let deadline_wib = d.with_timezone(&wib);
-        updated_fields.push(format!("Deadline: {}", deadline_wib.format("%d %b %Y, %H:%M WIB")));
+        updated_fields.push(format!("deadline diubah jadi {}", deadline_wib.format("%d %b %Y, %H:%M WIB")));
     }
     
     if let Some(codes) = parallel_codes {
@@ -1656,12 +1656,12 @@ async fn send_academic_update_notification(
                 .map(|c| c.to_uppercase())
                 .collect::<Vec<_>>()
                 .join(", ");
-            updated_fields.push(format!("Parallel: [{}]", codes_display));
+            updated_fields.push(format!("sekarang untuk [{}]", codes_display));
         }
     }
     
     if let Some(t) = new_title {
-        updated_fields.push(format!("Title: {}", t));
+        updated_fields.push(format!("judul diubah jadi \"{}\"", t));
     }
     
     if let Some(d) = new_description {
@@ -1670,7 +1670,7 @@ async fn send_academic_update_notification(
         } else {
             d.to_string()
         };
-        updated_fields.push(format!("Description: {}", desc_preview));
+        updated_fields.push(format!("deskripsi: {}", desc_preview));
     }
     
     // If no fields were updated, don't send notification
@@ -1678,7 +1678,15 @@ async fn send_academic_update_notification(
         return;
     }
     
-    let fields_text = updated_fields.join(", ");
+    let fields_text = if updated_fields.len() == 1 {
+        updated_fields[0].clone()
+    } else if updated_fields.len() == 2 {
+        format!("{} dan {}", updated_fields[0], updated_fields[1])
+    } else {
+        let last = updated_fields.last().unwrap();
+        let rest = &updated_fields[..updated_fields.len() - 1];
+        format!("{}, dan {}", rest.join(", "), last)
+    };
     
     // Format parallel codes for title
     let parallel_display = if assignment_parallels.is_empty() {
