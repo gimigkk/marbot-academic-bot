@@ -131,8 +131,8 @@ pub struct SendTextRequest {
     pub chat_id: String,
     pub text: String,
     pub session: String,
-    #[serde(rename = "replyTo", skip_serializing_if = "Option::is_none")]
-    pub reply_to: Option<String>,
+    #[serde(rename = "reply_to", skip_serializing_if = "Option::is_none")]
+    pub reply_to: Option<String>,  // Changed from "replyTo" to "reply_to" because of GOWS anjir
 }
 
 #[derive(Debug, Serialize)]

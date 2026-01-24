@@ -1695,14 +1695,19 @@ async fn send_academic_update_notification(
     .fetch_optional(pool)
     .await;
     
-    // Get original message ID (first in array) and original message body
     let (original_message_id, original_message_body) = match assignment_data {
         Ok(Some((message_ids, relating_messages))) => {
-            let msg_id = message_ids.first().cloned();
-            let msg_body = relating_messages.first().cloned();
-            (msg_id, msg_body)
+            eprintln!("📤 Quote data: {} msg_ids, {} bodies", message_ids.len(), relating_messages.len());
+            (message_ids.first().cloned(), relating_messages.first().cloned())
         }
-        _ => (None, None)
+        Ok(None) => {
+            eprintln!("⚠️ Assignment {} not found", assignment_id);
+            (None, None)
+        }
+        Err(e) => {
+            eprintln!("❌ Query failed: {}", e);
+            (None, None)
+        }
     };
     
     for channel_id in channels {
@@ -1710,41 +1715,29 @@ async fn send_academic_update_notification(
             continue;
         }
         
-        // Try to reply to original message first
-        if let Some(ref msg_id) = original_message_id {
-            let msg = format!(
-                "*[Update] {}{}*\n\
-                _{}_",
-                title,
-                parallel_display,
-                fields_text
-            );
-            
-            // Attempt to send with reply
-            if send_reply_with_id(channel_id, &msg, Some(msg_id.clone())).await.is_ok() {
-                continue; // Success, move to next channel
-            }
-        }
-        
-        // Fallback: Create manual quote
-        let quoted_text = if let Some(ref original_body) = original_message_body {
-            format_quote_fallback(original_body)
-        } else {
-            // Data integrity issue - no messages stored
-            "> Unable to quote!".to_string()
-        };
-        
         let msg = format!(
-            "{}\n\n\
-            *[Update] {}{}*\n\
+            "*[Update] {}{}*\n\
             _{}_",
-            quoted_text,
             title,
             parallel_display,
             fields_text
         );
         
-        let _ = send_reply(channel_id, &msg).await;
+        if let Some(ref msg_id) = original_message_id {
+            if send_reply_with_id(channel_id, &msg, Some(msg_id.clone())).await.is_ok() {
+                eprintln!("✅ Native reply sent");
+                continue;
+            }
+            eprintln!("⚠️ Native reply failed, using manual quote");
+        }
+        
+        let quoted_text = original_message_body
+            .as_ref()
+            .map(|body| format_quote_fallback(body))
+            .unwrap_or_else(|| "> ⚠️ Unable to quote (no message data)".to_string());
+        
+        let fallback_msg = format!("{}\n\n{}", quoted_text, msg);
+        let _ = send_reply(channel_id, &fallback_msg).await;
     }
 }
 
