@@ -74,8 +74,29 @@ impl MessagePayload {
 
 #[derive(Debug, Deserialize)]
 pub struct MessageData {
+    // For WEBJS/NOWEB
     #[serde(rename = "pushName")]
     pub push_name: Option<String>,
+
+    // For GOWS - nested structure
+    #[serde(rename = "Info")]
+    pub info: Option<MessageInfo>,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct MessageInfo {
+    #[serde(rename = "PushName")]
+    pub push_name: Option<String>,
+    
+    #[serde(rename = "Chat")]
+    pub chat: Option<String>,
+    
+    #[serde(rename = "Sender")]
+    pub sender: Option<String>,
+    
+    // GOWS sends other fields too, catch them if needed
+    #[serde(flatten)]
+    pub extra: serde_json::Value,
 }
 
 #[derive(Debug, Deserialize)]

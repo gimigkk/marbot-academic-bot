@@ -332,12 +332,19 @@ async fn webhook(
         chat_id
     };
     
-    // Extract WhatsApp display name
+    // Extract WhatsApp display name - Multi-engine compatible
     let sender_name = payload.payload.data
         .as_ref()
-        .and_then(|data| data.push_name.as_ref())
-        .map(|name| name.as_str())
+        .and_then(|data| {
+            // Try GOWS structure first: _data.Info.PushName
+            data.info.as_ref()
+                .and_then(|info| info.push_name.as_ref())
+                .map(|s| s.as_str())
+                // Fallback to WEBJS/NOWEB: _data.pushName
+                .or_else(|| data.push_name.as_ref().map(|s| s.as_str()))
+        })
         .unwrap_or_else(|| {
+            // Last resort: extract from phone number
             sender_phone.split('@').next().unwrap_or(sender_phone)
         });
 
