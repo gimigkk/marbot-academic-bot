@@ -19,10 +19,7 @@ macro_rules! log {
     };
 }
 
-// ========================================
 // CREATE OPERATIONS
-// ========================================
-
 /// Create a new assignment in the database
 #[allow(unused_variables)]
 #[allow(non_snake_case)]
@@ -61,7 +58,6 @@ pub async fn create_assignment(
         }
     };
     
-    // FIXED: NewAssignment already has Vec<String>, just normalize to lowercase
     let clean_parallel_codes: Vec<String> = new_assignment.parallel_codes
         .iter()
         .map(|p| p.to_lowercase())
@@ -100,10 +96,8 @@ pub async fn create_assignment(
         new_assignment.title, real_course_name, parallel_display))
 }
 
-// ========================================
-// COMPLETION OPERATIONS
-// ========================================
 
+// COMPLETION OPERATIONS
 /// Mark assignment as complete
 pub async fn mark_assignment_complete(
     pool: &PgPool,
@@ -145,10 +139,7 @@ pub async fn unmark_assignment_complete(
     Ok(result.rows_affected() > 0)
 }
 
-// ========================================
 // READ OPERATIONS
-// ========================================
-
 /// Get the most recently completed assignment for a user
 pub async fn get_last_completed_assignment(
     pool: &PgPool,
@@ -183,7 +174,7 @@ pub async fn get_last_completed_assignment(
     Ok(assignment)
 }
 
-/// Get recent assignments for duplicate detection (larger limit)
+/// Get recent assignments for duplicate detection (
 pub async fn get_recent_assignments_for_duplicate_check(
     pool: &PgPool,
     logger: Option<&JobLogger>,
@@ -217,7 +208,7 @@ pub async fn get_recent_assignments_for_duplicate_check(
     Ok(assignments)
 }
 
-/// Get recent assignments for update matching (larger limit)
+/// Get recent assignments for update matching 
 pub async fn get_recent_assignments_for_matching(
     pool: &PgPool,
     logger: Option<&JobLogger>,
@@ -251,7 +242,7 @@ pub async fn get_recent_assignments_for_matching(
     Ok(assignments)
 }
 
-/// Get assignments for classification context (standard limit of 20)
+/// Get assignments for classification context 
 pub async fn get_assignments_for_classification(
     pool: &PgPool,
     logger: Option<&JobLogger>,
@@ -296,7 +287,7 @@ pub async fn get_assignments_for_classification(
     result
 }
 
-// Update the original get_assignments to use LIMIT 20 as well
+// Update the original get_assignments 
 pub async fn get_assignments(
     pool: &PgPool,
     logger: Option<&JobLogger>,
@@ -471,7 +462,6 @@ pub async fn get_active_assignments_for_user(
 ) -> Result<(Vec<AssignmentWithCourse>, HashMap<String, String>), sqlx::Error> {
     let now = Utc::now();
     
-    // (Bagian fetch existing)
     let assignments = sqlx::query_as::<_, AssignmentWithCourse>(
         r#"
         SELECT 
@@ -504,7 +494,6 @@ pub async fn get_active_assignments_for_user(
     .fetch_all(pool)
     .await?;
     
-    // Ambil setting user
     let user_settings_rows = sqlx::query(
         "SELECT c.name, ucs.parallel_code 
         FROM user_course_settings ucs
@@ -547,9 +536,7 @@ pub async fn get_course_by_name_or_alias(
     query: &str,
 ) -> Result<Option<crate::models::Course>, sqlx::Error> {
     let query_lower = query.to_lowercase();
-    
-    // 1. Try exact match first (fastest path)
-    // Assuming aliases is a TEXT[] array field
+
     let exact_match = sqlx::query_as::<_, crate::models::Course>(
         r#"
         SELECT id, name, aliases, created_at
@@ -567,8 +554,6 @@ pub async fn get_course_by_name_or_alias(
         return Ok(exact_match);
     }
     
-    // 2. No exact match - try fuzzy matching
-    // Fetch all courses with their aliases
     let all_courses = sqlx::query_as::<_, (uuid::Uuid, String, Vec<String>)>(
         r#"
         SELECT id, name, COALESCE(aliases, ARRAY[]::TEXT[]) as aliases
@@ -578,25 +563,21 @@ pub async fn get_course_by_name_or_alias(
     .fetch_all(pool)
     .await?;
     
-    // Find best fuzzy match
     let mut best_match: Option<(uuid::Uuid, f64)> = None;
     
+    // FUZY MATCH LOGIC
     for (course_id, course_name, aliases) in all_courses {
-        // Calculate similarity for course name
         let name_similarity = jaro_winkler(&query_lower, &course_name.to_lowercase());
         
-        // Calculate similarity for all aliases
         let alias_similarity = aliases
             .iter()
             .map(|alias| jaro_winkler(&query_lower, &alias.to_lowercase()))
             .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
             .unwrap_or(0.0);
         
-        // Take the best similarity score
         let similarity = name_similarity.max(alias_similarity);
         
-        // Only consider matches above threshold
-        if similarity > 0.75 {  // 75% similarity threshold
+        if similarity > 0.75 { 
             match &best_match {
                 None => best_match = Some((course_id, similarity)),
                 Some((_, prev_sim)) if similarity > *prev_sim => {
@@ -607,7 +588,6 @@ pub async fn get_course_by_name_or_alias(
         }
     }
     
-    // If we found a fuzzy match, fetch the full course
     if let Some((course_id, _)) = best_match {
         let course = sqlx::query_as::<_, crate::models::Course>(
             "SELECT id, name, aliases, created_at FROM courses WHERE id = $1"
@@ -680,7 +660,7 @@ pub async fn get_assignment_with_course_by_id(
     Ok(assignment)
 }
 
-/// Find assignments by keywords (for update detection)
+/// Find assignments by keywords 
 pub async fn find_assignment_by_keywords(
     pool: &PgPool,
     keywords: &[String],
@@ -763,10 +743,7 @@ pub async fn find_assignment_by_keywords(
     Ok(assignments)
 }
 
-// ========================================
 // UPDATE OPERATIONS
-// ========================================
-
 /// Update specific fields of an assignment
 #[allow(non_snake_case)]
 pub async fn update_assignment_fields(
@@ -782,7 +759,6 @@ pub async fn update_assignment_fields(
 ) -> Result<Assignment> {
     let mut tx = pool.begin().await?;
     
-    // Fetch current assignment
     let current = sqlx::query_as::<_, Assignment>(
         r#"SELECT 
             id, created_at, course_id, title, description, deadline,
@@ -793,19 +769,16 @@ pub async fn update_assignment_fields(
     .fetch_one(&mut *tx)
     .await?;
     
-    // Use new values if provided, otherwise keep current
     let final_deadline = new_deadline.or(current.deadline);
     let final_title = new_title.unwrap_or(current.title);
     let final_description = new_description.unwrap_or(current.description);
     
-    // Handle parallel_codes properly
     let final_parallel_codes: Vec<String> = if let Some(codes) = new_parallel_codes {
         codes.iter().map(|c| c.to_lowercase()).collect()
     } else {
         current.parallel_codes
     };
     
-    // ✅ FIX: Build the new arrays in Rust, not in SQL
     let final_message_ids = if let Some(new_msg_id) = incoming_message_id {
         let mut ids = current.message_ids.clone();
         ids.push(new_msg_id);
@@ -822,7 +795,6 @@ pub async fn update_assignment_fields(
         current.relating_messages
     };
     
-    // ✅ FIX: Simple UPDATE with direct array binding
     let assignment = sqlx::query_as::<_, Assignment>(
         r#"
         UPDATE assignments
@@ -855,10 +827,7 @@ pub async fn update_assignment_fields(
     Ok(assignment)
 }
 
-// ========================================
 // DELETE OPERATIONS
-// ========================================
-
 /// Delete assignment by ID
 pub async fn delete_assignment(
     pool: &PgPool,
@@ -936,7 +905,6 @@ pub async fn set_user_course_parallel(
             
             let course_name_lower = c.name.to_lowercase();
             
-            // --- VALIDASI LOGIC KHUSUS (BIG 5 COURSES) ---
             let special_courses = vec![
                 "pemrograman", 
                 "struktur data", 
@@ -1006,7 +974,6 @@ pub async fn set_user_course_parallel(
                 }
             }
 
-            // Simpan ke DB sebagai string comma-separated (misal: "k1,p2" atau "k1")
             let final_code_str = clean_codes.join(",");
             
             // 2. Upsert
@@ -1085,10 +1052,7 @@ pub async fn get_users_for_course_reminder(
 
     Ok(rows.into_iter().map(|r| (r.user_id, r.parallel_code)).collect())
 }
-
-// ========================================
 // ADDITIONAL HELPER IF NEEDED
-// ========================================
 
 /// Helper to normalize parallel codes
 pub fn normalize_parallel_codes(codes: Vec<String>) -> Vec<String> {
