@@ -284,7 +284,8 @@ async fn parse_clarification_response_internal(
     let current_deadline = assignment.deadline.map(|d| d.naive_utc());
     let next_meeting_hint = resolve_next_meeting(assignment);
 
-    logger_log(logger, &format!("\n\x1b[1;30m┌── \x1b[36m🤖 CLARIFICATION PARSING\x1b[1;30m ──────────────────\x1b[0m"));
+    // Simpler header without complex ANSI codes
+    logger_log(logger, "┌──[CLARIFICATION PARSING]──────────────────");
     
     let message_display = text
         .replace('\n', "\\n")
@@ -292,11 +293,11 @@ async fn parse_clarification_response_internal(
         .take(60)
         .collect::<String>();
     
-    logger_log(logger, &format!("│ \x1b[36m📝 Message\x1b[0m\t: \x1b[37m\"{}\x1b[33m...\x1b[37m\"\x1b[0m", message_display));
-    logger_log(logger, &format!("│ \x1b[33m🔍 Missing\x1b[0m\t: \x1b[31m{:?}\x1b[0m", missing_fields));
+    logger_log(logger, &format!("│ 📝 Message\t: \"{}...\"", message_display));
+    logger_log(logger, &format!("│ 🔍 Missing\t: {:?}", missing_fields));
     
     if let Some(hint) = next_meeting_hint {
-        logger_log(logger, &format!("│ \x1b[35m📅 Schedule\x1b[0m\t: Next meeting at \x1b[32m{}\x1b[0m", hint.format("%Y-%m-%d %H:%M")));
+        logger_log(logger, &format!("│ 📅 Schedule\t: Next at {}", hint.format("%Y-%m-%d %H:%M")));
     }
     
     logger_log(logger, "│");
@@ -324,11 +325,11 @@ async fn parse_clarification_response_internal(
         // TIER 1: Try Gemini
         match try_gemini_clarification(&prompt, current_deadline, logger).await {
             Ok(result) => {
-                logger_log(logger, &format!("\x1b[1;30m└──────────────────────────────────────────────\x1b[0m"));
+                logger_log(logger, "└────────────────────────────────────────────");
                 return Ok(result);
             }
             Err(e) if e == "rate limit" => {
-                logger_log(logger, &format!("│ \x1b[33m🔄 Fallback\x1b[0m\t: Switching to \x1b[35mGroq\x1b[0m..."));
+                logger_log(logger, "│ 🔄 Fallback\t: Switching to Groq...");
                 logger_log(logger, "│");
             }
             Err(_) => {}
@@ -337,7 +338,7 @@ async fn parse_clarification_response_internal(
         // TIER 2: Try Groq reasoning
         match try_groq_reasoning_clarification(&prompt, current_deadline, logger).await {
             Ok(result) => {
-                logger_log(logger, &format!("\x1b[1;30m└──────────────────────────────────────────────\x1b[0m"));
+                logger_log(logger, "└────────────────────────────────────────────");
                 return Ok(result);
             }
             Err(_) => {}
@@ -346,12 +347,12 @@ async fn parse_clarification_response_internal(
         // TIER 3: Try Groq standard
         match try_groq_standard_clarification(&prompt, current_deadline, logger).await {
             Ok(result) => {
-                logger_log(logger, &format!("\x1b[1;30m└──────────────────────────────────────────────\x1b[0m"));
+                logger_log(logger, "└────────────────────────────────────────────");
                 return Ok(result);
             }
             Err(_) => {
                 if attempt < MAX_RETRIES - 1 {
-                    logger_log(logger, &format!("│ \x1b[33m⚠️  Attempt {}/{}\t: All models failed, retrying...\x1b[0m", 
+                    logger_log(logger, &format!("│ ⚠️ Attempt {}/{}\t: All models failed, retrying...", 
                              attempt + 1, MAX_RETRIES - 1));
                 }
             }
@@ -359,9 +360,9 @@ async fn parse_clarification_response_internal(
     }
 
     // Fallback to regex after all retries
-    logger_log(logger, &format!("│ \x1b[31m❌ CRITICAL\t: All AI models exhausted after {} retries\x1b[0m", MAX_RETRIES));
-    logger_log(logger, &format!("│ \x1b[33m🔄 Fallback\x1b[0m\t: Using \x1b[35mregex parser\x1b[0m..."));
-    logger_log(logger, &format!("\x1b[1;30m└──────────────────────────────────────────────\x1b[0m"));
+    logger_log(logger, &format!("│ ❌ CRITICAL\t: All AI models exhausted after {} retries", MAX_RETRIES));
+    logger_log(logger, "│ 🔄 Fallback\t: Using regex parser...");
+    logger_log(logger, "└────────────────────────────────────────────");
     
     parse_natural_language_fallback(text, current_deadline, next_meeting_hint)
 }
@@ -433,7 +434,7 @@ async fn try_gemini_clarification(
             Err(_) => {
                 all_rate_limited = false;
                 if logger.is_none() { clear_previous_trying_stdout(&mut last_trying); }
-                logger_log(logger, &format!("│ \x1b[31m❌ FAILED\t: {} - Network error\x1b[0m", model));
+                logger_log(logger, &format!("│ \x1b[31m❌ FAILED\x1b[0m\t: {} - Network error", model));
                 continue;
             }
         };
@@ -442,24 +443,51 @@ async fn try_gemini_clarification(
         
         if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
             if logger.is_none() { clear_previous_trying_stdout(&mut last_trying); }
-            logger_log(logger, &format!("│ \x1b[33m⏳ RATE LIMIT\t: {} - Trying next model...\x1b[0m", model));
             continue;
         }
         
         if status.is_success() {
+            // PARSE FIRST, BEFORE LOGGING SUCCESS
+            let gemini_response: GeminiResponse = match response.json().await {
+                Ok(r) => r,
+                Err(e) => {
+                    all_rate_limited = false;
+                    if logger.is_none() { clear_previous_trying_stdout(&mut last_trying); }
+                    logger_log(logger, &format!("│ \x1b[31m❌ PARSE FAILED\x1b[0m\t: {} - {}", model, e));
+                    continue;
+                }
+            };
+            
+            let ai_text = match extract_ai_text(&gemini_response) {
+                Ok(t) => t,
+                Err(e) => {
+                    all_rate_limited = false;
+                    if logger.is_none() { clear_previous_trying_stdout(&mut last_trying); }
+                    logger_log(logger, &format!("│ \x1b[31m❌ EXTRACT FAILED\x1b[0m\t: {} - {}", model, e));
+                    continue;
+                }
+            };
+
+            let result = match parse_ai_response(&ai_text, current_deadline) {
+                Ok(r) => r,
+                Err(e) => {
+                    all_rate_limited = false;
+                    if logger.is_none() { clear_previous_trying_stdout(&mut last_trying); }
+                    logger_log(logger, &format!("│ \x1b[31m❌ PARSE FAILED\x1b[0m\t: {} - {}", model, e));
+                    continue;
+                }
+            };
+
+            // log success - only after everything worked
             if logger.is_none() { clear_previous_trying_stdout(&mut last_trying); }
-            logger_log(logger, &format!("│ \x1b[32m✅ SUCCESS\x1b[0m\t: \x1b[35m{}\x1b[0m (Gemini \x1b[36m{}\x1b[0m/\x1b[36m{}\x1b[0m)", model, index, GEMINI_MODELS.len()));
+            logger_log(logger, &format!("│ \x1b[32m✅ SUCCESS\x1b[0m\t: {} (Gemini {}/{})", model, index, GEMINI_MODELS.len()));
             
-            let gemini_response: GeminiResponse = response.json().await
-                .map_err(|e| format!("Failed to deserialize: {}", e))?;
-            
-            let ai_text = extract_ai_text(&gemini_response)?;
-            return parse_ai_response(&ai_text, current_deadline);
+            return Ok(result);
         }
         
         all_rate_limited = false;
         if logger.is_none() { clear_previous_trying_stdout(&mut last_trying); }
-        logger_log(logger, &format!("│ \x1b[31m❌ FAILED\t: {} - HTTP {}\x1b[0m", model, status));
+        logger_log(logger, &format!("│ \x1b[31m❌ FAILED\x1b[0m\t: {} - HTTP {}", model, status));
     }
     
     if all_rate_limited {
@@ -468,6 +496,7 @@ async fn try_gemini_clarification(
     
     Err("All Gemini models failed".to_string())
 }
+
 
 // ===== GROQ REASONING CLARIFICATION =====
 
@@ -512,7 +541,7 @@ async fn try_groq_reasoning_clarification(
             Ok(r) => r,
             Err(_) => {
                 if logger.is_none() { clear_previous_trying_stdout(&mut last_trying); }
-                logger_log(logger, &format!("│ \x1b[31m❌ FAILED\t: {} - Network error\x1b[0m", model));
+                logger_log(logger, &format!("│ \x1b[31m❌ FAILED\x1b[0m\t: {} - Network error", model));
                 continue;
             }
         };
@@ -521,27 +550,52 @@ async fn try_groq_reasoning_clarification(
         
         if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
             if logger.is_none() { clear_previous_trying_stdout(&mut last_trying); }
-            logger_log(logger, &format!("│ \x1b[33m⏳ RATE LIMIT\t: {} - Trying next model...\x1b[0m", model));
-            continue;
+            continue;  // Silent continue for rate limits
         }
         
         if status.is_success() {
+            // PARSE EVERYTHING FIRST
+            let groq_response: GroqResponse = match response.json().await {
+                Ok(r) => r,
+                Err(e) => {
+                    if logger.is_none() { clear_previous_trying_stdout(&mut last_trying); }
+                    logger_log(logger, &format!("│ \x1b[31m❌ PARSE FAILED\x1b[0m\t: {} - {}", model, e));
+                    continue;
+                }
+            };
+            
+            let ai_text = match extract_groq_text(&groq_response) {
+                Ok(t) => t,
+                Err(e) => {
+                    if logger.is_none() { clear_previous_trying_stdout(&mut last_trying); }
+                    logger_log(logger, &format!("│ \x1b[31m❌ EXTRACT FAILED\x1b[0m\t: {} - {}", model, e));
+                    continue;
+                }
+            };
+
+            let result = match parse_ai_response(&ai_text, current_deadline) {
+                Ok(r) => r,
+                Err(e) => {
+                    if logger.is_none() { clear_previous_trying_stdout(&mut last_trying); }
+                    logger_log(logger, &format!("│ \x1b[31m❌ PARSE FAILED\x1b[0m\t: {} - {}", model, e));
+                    continue;
+                }
+            };
+
+            // SUCCESS only after full parsing
             if logger.is_none() { clear_previous_trying_stdout(&mut last_trying); }
-            logger_log(logger, &format!("│ \x1b[32m✅ SUCCESS\x1b[0m\t: \x1b[35m{}\x1b[0m (Groq Reasoning \x1b[36m{}\x1b[0m/\x1b[36m{}\x1b[0m)", model, index, GROQ_REASONING_MODELS.len()));
+            logger_log(logger, &format!("│ \x1b[32m✅ SUCCESS\x1b[0m\t: {} (Groq Reasoning {}/{})", model, index, GROQ_REASONING_MODELS.len()));
             
-            let groq_response: GroqResponse = response.json().await
-                .map_err(|e| format!("Failed to deserialize: {}", e))?;
-            
-            let ai_text = extract_groq_text(&groq_response)?;
-            return parse_ai_response(&ai_text, current_deadline);
+            return Ok(result);
         }
         
         if logger.is_none() { clear_previous_trying_stdout(&mut last_trying); }
-        logger_log(logger, &format!("│ \x1b[31m❌ FAILED\t: {} - HTTP {}\x1b[0m", model, status));
+        logger_log(logger, &format!("│ \x1b[31m❌ FAILED\x1b[0m\t: {} - HTTP {}", model, status));
     }
     
     Err("All Groq reasoning models failed".to_string())
 }
+
 
 // ===== GROQ STANDARD CLARIFICATION =====
 
