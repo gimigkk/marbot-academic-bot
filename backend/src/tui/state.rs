@@ -1,7 +1,7 @@
 // src/tui/state.rs
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
-use std::time::{Instant, SystemTime};  // Add SystemTime here
+use std::time::{Duration, Instant, SystemTime};
 use tokio::sync::{mpsc, RwLock};
 
 // ===== JOB STATUS =====
@@ -52,7 +52,7 @@ pub struct JobEntry {
     pub sender: String,
     pub status: JobStatus,
     pub logs: Vec<String>,
-    pub started_at: SystemTime,  // Changed from Instant to SystemTime
+    pub started_at: SystemTime,
     pub completed_at: Option<Instant>,
     pub current_countdown: Option<CountdownState>,
     pub current_trying: Option<String>,
@@ -85,8 +85,8 @@ impl JobEntry {
             sender,
             status: JobStatus::Active,
             logs: Vec::new(),
-            started_at: SystemTime::now(),  // SystemTime for timestamps
-            started_at_instant: Instant::now(),  // Instant for duration
+            started_at: SystemTime::now(),
+            started_at_instant: Instant::now(),
             completed_at: None,
             current_countdown: None,
             current_trying: None,
@@ -97,7 +97,7 @@ impl JobEntry {
     }
     
     #[allow(non_snake_case)]
-    pub fn duration(&self) -> std::time::Duration {
+    pub fn duration(&self) -> Duration {
         match self.completed_at {
             Some(end) => end.duration_since(self.started_at_instant),
             None => Instant::now().duration_since(self.started_at_instant),
@@ -105,8 +105,9 @@ impl JobEntry {
     }
 
     pub fn add_log(&mut self, message: String) {
-        if self.logs.len() > 5000 {
-            self.logs.drain(0..1000);
+        // Keep only last 3000 lines per job to prevent memory bloat
+        if self.logs.len() >= 3000 {
+            self.logs.drain(0..500);
         }
         self.logs.push(message);
     }
@@ -154,6 +155,7 @@ pub struct TuiState {
     log_rx: Arc<RwLock<mpsc::UnboundedReceiver<LogEntry>>>,
     max_completed: usize,
     max_general_log: usize,
+    max_active_age: Duration,
 }
 
 impl TuiState {
@@ -162,13 +164,25 @@ impl TuiState {
             jobs: Arc::new(RwLock::new(HashMap::new())),
             general_log: Arc::new(RwLock::new(VecDeque::new())),
             log_rx: Arc::new(RwLock::new(log_rx)),
-            max_completed: 20,
-            max_general_log: 2000,
+            max_completed: 50,              // Keep last 50 completed jobs
+            max_general_log: 1000,           // Keep last 1000 general log lines
+            max_active_age: Duration::from_secs(24 * 3600), // 24 hours for stuck jobs
         }
     }
 
+    /// Start periodic cleanup task
+    pub fn start_periodic_cleanup(self: Arc<Self>) {
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(Duration::from_secs(300)); // Every 5 minutes
+            loop {
+                interval.tick().await;
+                self.cleanup_old_jobs().await;
+                self.cleanup_general_log().await;
+            }
+        });
+    }
+
     pub async fn process_logs(&self) {
-        // Take ownership of receiver while we drain
         let mut rx = self.log_rx.write().await;
         let mut processed = 0usize;
         const MAX_BATCH: usize = 200;
@@ -183,6 +197,7 @@ impl TuiState {
             }
         }
 
+        // Run cleanup after processing batch
         if processed > 0 {
             self.cleanup_old_jobs().await;
             self.cleanup_general_log().await;
@@ -241,13 +256,26 @@ impl TuiState {
 
     async fn cleanup_old_jobs(&self) {
         let mut jobs = self.jobs.write().await;
+        let now = SystemTime::now();
 
+        // Remove stuck active jobs older than max_active_age (24 hours)
+        jobs.retain(|_, job| {
+            if job.status == JobStatus::Active {
+                if let Ok(age) = now.duration_since(job.started_at) {
+                    return age < self.max_active_age;
+                }
+            }
+            true
+        });
+
+        // Collect completed/failed jobs sorted by completion time
         let mut completed: Vec<_> = jobs
             .iter()
             .filter(|(_, job)| matches!(job.status, JobStatus::Completed | JobStatus::Failed))
             .filter_map(|(id, job)| job.completed_at.map(|t| (id.clone(), t)))
             .collect();
 
+        // Keep only the most recent completed jobs
         if completed.len() > self.max_completed {
             completed.sort_by_key(|(_, time)| *time);
             let to_remove = completed.len() - self.max_completed;
@@ -260,6 +288,7 @@ impl TuiState {
     async fn cleanup_general_log(&self) {
         let mut log = self.general_log.write().await;
 
+        // Trim general log to max size
         if log.len() > self.max_general_log {
             let drain_count = log.len() - self.max_general_log;
             for _ in 0..drain_count {
@@ -268,11 +297,9 @@ impl TuiState {
         }
     }
 
-    /// Add a tag to an existing job
     pub async fn add_job_tag(&self, job_id: String, tag: String) {
         let mut jobs = self.jobs.write().await;
         if let Some(job) = jobs.get_mut(&job_id) {
-            // Only add if not already present
             if !job.tags.contains(&tag) {
                 job.tags.push(tag);
             }

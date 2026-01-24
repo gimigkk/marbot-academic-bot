@@ -129,7 +129,7 @@ pub async fn start_scheduler(
             let job_id = crate::tui::generate_job_id();
             let logger = JobLogger::new(job_id, log_tx);
             
-            logger.log("🕵️ Mengecek Personal Reminder (H-3 Jam)...");
+            //logger.log("🕵️ Mengecek Personal Reminder (H-3 Jam)..."); <-- menuh"in logger gw cok
             if let Err(e) = check_personal_reminders(pool, &logger).await {
                 logger.log(&format!("❌ Error personal reminder: {}", e));
                 logger.set_status(crate::tui::state::JobStatus::Failed);

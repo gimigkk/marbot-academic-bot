@@ -24,7 +24,7 @@
     let showBars = true;
     let analyticsChart = null;
     let lastJobCount = 0;
-    let lastJobStates = new Map(); // Track job states for change detection
+    let lastJobStates = new Map();
 
     const jobDetailHtmlCache = {};
     const jobDetailSig = {};
@@ -91,7 +91,6 @@
             }
             analyticsPanel.classList.add('open');
             analyticsBtn.classList.add('active');
-            // Chart will be initialized on first data fetch
         }
 
         const savedShowBars = localStorage.getItem(SHOW_BARS_KEY);
@@ -101,15 +100,13 @@
         }
     } catch (e) {}
 
-    // Update search width based on current sidebar width
     function updateSearchWidth() {
         if (!searchExpanded) return;
         const sidebarWidth = sidebar.offsetWidth;
-        const maxWidth = sidebarWidth - 112; // Account for collapse (32) + gap (8) + analytics (32) + gap (8) + margins (32)
+        const maxWidth = sidebarWidth - 112;
         searchContainer.style.width = maxWidth + 'px';
     }
 
-    // Search toggle functionality
     searchToggle.addEventListener('click', (e) => {
         e.stopPropagation();
         e.preventDefault();
@@ -200,7 +197,6 @@
         });
     }
 
-    // Analytics toggle
     analyticsBtn.addEventListener('click', () => {
         analyticsOpen = !analyticsOpen;
         
@@ -212,7 +208,6 @@
             analyticsPanel.classList.add('open');
             analyticsBtn.classList.add('active');
             initializeChart();
-            // Trigger first update when opening
             setTimeout(() => updateChart(), 100);
         } else {
             analyticsPanel.style.width = '0px';
@@ -237,7 +232,6 @@
         } catch (e) {}
     });
 
-    // Analytics resize
     analyticsResizeHandle.addEventListener('mousedown', (e) => {
         isAnalyticsResizing = true;
         analyticsResizeStartX = e.clientX;
@@ -273,7 +267,6 @@
         }
     });
 
-    // Show bars toggle
     showBarsToggle.addEventListener('change', (e) => {
         showBars = e.target.checked;
         try {
@@ -282,7 +275,6 @@
         updateChart();
     });
 
-    // Collapse button - close analytics when collapsing sidebar
     collapseBtn.addEventListener('click', () => {
         const wasCollapsed = sidebar.classList.contains('collapsed');
         
@@ -299,7 +291,6 @@
             analyticsBtn.classList.add('hidden');
             collapseBtn.classList.add('collapsed');
             
-            // Close analytics when collapsing sidebar
             if (analyticsOpen) {
                 analyticsOpen = false;
                 analyticsPanel.style.width = '0px';
@@ -329,7 +320,6 @@
         } catch (e) {}
     });
 
-    // Sidebar resize
     resizeHandle.addEventListener('mousedown', (e) => {
         isResizing = true;
         resizeStartX = e.clientX;
@@ -365,50 +355,30 @@
         }
     });
 
-    // Analytics functions
     function categorizeJob(job) {
         const tags = (job.tags || []).map(t => t.toLowerCase().replace(/^#/, ''));
         
-        // Bot commands - based on actual BotCommand enum variants from main.rs
         const botCommandTags = [
-            'ping',      // BotCommand::Ping
-            'tugas',     // BotCommand::Tugas
-            'todo',      // BotCommand::Todo
-            'today',     // BotCommand::Today
-            'week',      // BotCommand::Week
-            'help',      // BotCommand::Help
-            'undo',      // BotCommand::Undo
-            'done',      // BotCommand::Done
-            'delete',    // BotCommand::Delete
-            'expand',    // BotCommand::Expand
-            'setkelas',  // BotCommand::SetKelas
-            'mykelas',   // BotCommand::MyKelas
-            'error',     // BotCommand::MissingArgument
-            'unknown'    // BotCommand::UnknownCommand
+            'ping', 'tugas', 'todo', 'today', 'week', 'help', 
+            'undo', 'done', 'delete', 'expand', 'setkelas', 
+            'mykelas', 'error', 'unknown'
         ];
         
         if (tags.some(tag => botCommandTags.includes(tag))) {
             return 'bot';
         }
         
-        // AI processing - based on AIClassification enum variants from main.rs
         const aiTags = [
-            'ai',                // MessageType::NeedsAI (initial tag)
-            'assignment',        // AIClassification::AssignmentInfo
-            'update',            // AIClassification::AssignmentUpdate
-            'batch',             // AIClassification::MultipleAssignments
-            'informal',          // AIClassification::Unrecognized (Informal)
-            'academic-related'   // AIClassification::Unrecognized (AcademicRelated)
+            'ai', 'assignment', 'update', 'batch', 
+            'informal', 'academic-related'
         ];
         
         if (tags.some(tag => aiTags.includes(tag))) {
             return 'ai';
         }
         
-        // Unrecognized - shouldn't happen with proper tagging
         return 'unrecognized';
     }
-
 
     function getTimeBuckets(jobs) {
         if (jobs.length === 0) return [];
@@ -421,8 +391,6 @@
         const spanMs = maxTime - minTime;
         const spanHours = spanMs / (1000 * 60 * 60);
 
-        // If span is less than 24 hours, use 12-hour buckets
-        // Otherwise use daily buckets
         const bucketMs = spanHours < 24 ? 12 * 60 * 60 * 1000 : 24 * 60 * 60 * 1000;
 
         const buckets = [];
@@ -511,7 +479,6 @@
             return;
         }
 
-        // Initialize tracking state
         lastJobCount = allJobs.length;
         lastJobStates.clear();
         allJobs.forEach(job => {
@@ -581,7 +548,7 @@
                         }
                     },
                     y: {
-                        grace: '15%',  // Add 15% headroom to top
+                        grace: '15%',
                         grid: {
                             color: '#2a2a2a',
                             drawBorder: false
@@ -607,7 +574,6 @@
 
         const data = processAnalyticsData(allJobs);
         
-        // Preserve hidden state of existing datasets
         const hiddenStates = {};
         if (analyticsChart.data.datasets) {
             analyticsChart.data.datasets.forEach((dataset, index) => {
@@ -617,7 +583,6 @@
         
         const datasets = [];
 
-        // Stacked bars (if enabled)
         if (showBars) {
             datasets.push({
                 label: 'Success',
@@ -640,7 +605,6 @@
             });
         }
 
-        // Line charts
         datasets.push({
             label: 'Total Jobs',
             data: data.totalJobs,
@@ -696,7 +660,6 @@
         analyticsChart.data.labels = data.labels;
         analyticsChart.data.datasets = datasets;
         
-        // Restore hidden state for datasets that existed before
         datasets.forEach((dataset, index) => {
             if (hiddenStates[dataset.label] !== undefined) {
                 analyticsChart.getDatasetMeta(index).hidden = hiddenStates[dataset.label];
@@ -807,7 +770,6 @@
         const jobItem = e.target.closest('.job-item');
         if (!jobItem || jobItem.classList.contains('grayed')) return;
         
-        // Stop propagation to prevent document click handler from collapsing search
         e.stopPropagation();
         
         const id = jobItem.dataset.jobId;
@@ -815,7 +777,6 @@
             selectedJobId = id;
             try { localStorage.setItem(STORAGE_KEY, id); } catch (e) {}
             
-            // Preserve search state - sync from input field
             if (searchInput.value) {
                 searchQuery = searchInput.value.toLowerCase();
             }
@@ -837,52 +798,45 @@
     function ansiToHtml(text) {
         if (!text) return '';
         
-        // Escape HTML first
         let escaped = String(text)
             .replace(/&/g, '&amp;')
             .replace(/</g, '&lt;')
             .replace(/>/g, '&gt;');
         
-        // Handle 24-bit RGB colors: \x1b[38;2;R;G;Bm
         escaped = escaped.replace(/\x1b\[38;2;(\d+);(\d+);(\d+)m/g, (m, r, g, b) => 
             `<span style="color: rgb(${r},${g},${b})">`
         );
         
-        // Handle standard ANSI color codes
         const colorMap = {
-            '0': '</span>',      // Reset
+            '0': '</span>',
             '1': '<span style="font-weight: bold">',
-            '30': '<span style="color: #1a1a1a">',  // Black (dark gray for visibility)
-            '31': '<span style="color: #f87171">',  // Red
-            '32': '<span style="color: #4ade80">',  // Green
-            '33': '<span style="color: #fbbf24">',  // Yellow
-            '34': '<span style="color: #60a5fa">',  // Blue
-            '35': '<span style="color: #e879f9">',  // Magenta
-            '36': '<span style="color: #38bdf8">',  // Cyan
-            '37': '<span style="color: #e0e0e0">',  // White
-            '90': '<span style="color: #999">',     // Bright black (gray)
-            '91': '<span style="color: #fca5a5">',  // Bright red
-            '92': '<span style="color: #86efac">',  // Bright green
-            '93': '<span style="color: #fde047">',  // Bright yellow
-            '94': '<span style="color: #93c5fd">',  // Bright blue
-            '95': '<span style="color: #f0abfc">',  // Bright magenta
-            '96': '<span style="color: #7dd3fc">',  // Bright cyan
-            '97': '<span style="color: #f5f5f5">',  // Bright white
+            '30': '<span style="color: #1a1a1a">',
+            '31': '<span style="color: #f87171">',
+            '32': '<span style="color: #4ade80">',
+            '33': '<span style="color: #fbbf24">',
+            '34': '<span style="color: #60a5fa">',
+            '35': '<span style="color: #e879f9">',
+            '36': '<span style="color: #38bdf8">',
+            '37': '<span style="color: #e0e0e0">',
+            '90': '<span style="color: #999">',
+            '91': '<span style="color: #fca5a5">',
+            '92': '<span style="color: #86efac">',
+            '93': '<span style="color: #fde047">',
+            '94': '<span style="color: #93c5fd">',
+            '95': '<span style="color: #f0abfc">',
+            '96': '<span style="color: #7dd3fc">',
+            '97': '<span style="color: #f5f5f5">',
         };
         
-        // Replace ANSI codes with HTML spans
         escaped = escaped.replace(/\x1b\[(\d+)m/g, (match, code) => {
             return colorMap[code] || '';
         });
         
-        // Convert newlines to <br>
         escaped = escaped.replace(/\n/g, '<br>');
         
-        // Clean up any nested or unclosed spans at the end
         const openSpans = (escaped.match(/<span/g) || []).length;
         const closeSpans = (escaped.match(/<\/span>/g) || []).length;
         
-        // Add missing closing tags
         for (let i = 0; i < openSpans - closeSpans; i++) {
             escaped += '</span>';
         }
@@ -1194,17 +1148,35 @@
         allJobs = data.jobs;
         generalLog = data.general_log;
 
-        // Detect if we need to update analytics chart
+        // ===== MEMORY CLEANUP: Remove cached data for jobs that no longer exist =====
+        const currentJobIds = new Set(allJobs.map(j => j.id));
+        
+        // Clean up job detail caches
+        for (const cachedId of Object.keys(jobDetailHtmlCache)) {
+            if (!currentJobIds.has(cachedId)) {
+                delete jobDetailHtmlCache[cachedId];
+                delete jobDetailSig[cachedId];
+                delete jobStartTimes[cachedId];
+                delete clientSideCountdowns[cachedId];
+            }
+        }
+        
+        // Clean up analytics tracking
+        for (const id of lastJobStates.keys()) {
+            if (!currentJobIds.has(id)) {
+                lastJobStates.delete(id);
+            }
+        }
+        // ===== END MEMORY CLEANUP =====
+
         let analyticsNeedsUpdate = false;
         
         if (analyticsOpen && analyticsChart) {
-            // Check if job count changed
             if (allJobs.length !== lastJobCount) {
                 analyticsNeedsUpdate = true;
                 lastJobCount = allJobs.length;
             }
             
-            // Check if any job status or tags changed
             if (!analyticsNeedsUpdate) {
                 for (const job of allJobs) {
                     const prevState = lastJobStates.get(job.id);
@@ -1217,7 +1189,6 @@
                 }
             }
             
-            // Update state map for new jobs
             if (analyticsNeedsUpdate) {
                 allJobs.forEach(job => {
                     lastJobStates.set(job.id, `${job.status}:${(job.tags || []).join(',')}`);
@@ -1262,7 +1233,6 @@
             }
         });
 
-        // Update analytics chart only if data changed
         if (analyticsNeedsUpdate) {
             updateChart();
         }
@@ -1279,7 +1249,6 @@
             }
             processFetchedData(data);
             
-            // Initialize chart on first fetch if analytics is open
             if (analyticsOpen && !analyticsChart) {
                 initializeChart();
                 updateChart();

@@ -227,6 +227,9 @@ async fn main() {
     
     tui::spawn_log_collector(tui_state.clone());
 
+    // Periodic cleanup for dashboard.
+    tui_state.clone().start_periodic_cleanup();
+
     // 5. Run Scheduler
     let pool_for_scheduler = pool.clone();
     let log_tx_for_scheduler = log_tx.clone();
