@@ -294,7 +294,7 @@ async fn run_reminder_task(
 
         message.push_str(&format!("{} *[{}]* *{}*\n", status, i + 1, title));
         message.push_str(&format!("*├─* {}\n", due_text));
-        message.push_str(&format!("*└─* {}{}\n", course, parallel_display));
+        message.push_str(&format!("*└─* `#{}{}`\n", course, parallel_display));
         message.push('\n');
     }
 
