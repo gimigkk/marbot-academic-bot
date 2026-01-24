@@ -1728,17 +1728,19 @@ async fn send_academic_update_notification(
         );
         
         if let Some(ref msg_id) = original_message_id {
-            if send_reply_with_id(channel_id, &msg, Some(msg_id.clone())).await.is_ok() {
-                logger.log("✅ Native reply sent");
-                continue;
+            if check_message_exists(channel_id, msg_id).await {
+                if send_reply_with_id(channel_id, &msg, Some(msg_id.clone())).await.is_ok() {
+                    logger.log("✅ Native reply sent");
+                    continue;
+                }
             }
-            logger.log("⚠️ Native reply failed, using manual quote");
+            logger.log("⚠️ Original message not found, using manual quote");
         }
         
         let quoted_text = original_message_body
             .as_ref()
             .map(|body| format_quote_fallback(body))
-            .unwrap_or_else(|| "> ⚠️ Unable to quote (no message data)".to_string());
+            .unwrap_or_else(|| "> Unable to quote!".to_string());
         
         let fallback_msg = format!("{}\n\n{}", quoted_text, msg);
         let _ = send_reply(channel_id, &fallback_msg).await;
@@ -1765,6 +1767,28 @@ fn format_quote_fallback(message: &str) -> String {
     
     // Format as quote
     format!("> {}", truncated)
+}
+
+async fn check_message_exists(chat_id: &str, message_id: &str) -> bool {
+    let waha_url = std::env::var("WAHA_URL").unwrap_or_else(|_| "http://waha:3000".to_string());
+    let api_key = std::env::var("WAHA_API_KEY").unwrap_or_else(|_| "devkey123".to_string());
+    
+    let url = format!(
+        "{}/api/default/chats/{}/messages/{}",
+        waha_url,
+        chat_id,
+        message_id
+    );
+    
+    let client = reqwest::Client::new();
+    match client.get(&url)
+        .header("X-Api-Key", api_key)
+        .send()
+        .await
+    {
+        Ok(response) => response.status().is_success(),
+        Err(_) => false
+    }
 }
 
 fn extract_parallel_code(title: &str) -> Option<String> {
