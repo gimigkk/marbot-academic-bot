@@ -261,14 +261,24 @@ VALIDATION for UPDATE:
 EXTRACTION RULES
 ═══════════════════════════════════════════════════════════════════
 
-TITLE (2-40 chars, SPECIFIC):
+TITLE (2-3 words minimum, max 40 chars, MUST BE SPECIFIC):
+Single-word titles are prohibited. Every title must have a distinguishing element.
+
 Priority order:
 1. Use identifier: "LKP 15", "Quiz 3", "Problem Set 5"
 2. Use descriptive type: "Tugas Berpasangan", "Laporan Praktikum"
-3. Never just "Tugas" alone - add context: "Tugas Besar", "Mini Project"
+3. Add topic if mentioned: "Quiz Chapter 5", "Tugas Modul 2"
+4. Add course as minimum context: "Quiz Grafkom", "Tugas RPL"
 
-BAD: "Tugas", "Assignment" (too generic)
-GOOD: "LKP 15", "Quiz 3", "Tugas Kelompok"
+PROHIBITED: Do not output single-word titles
+- NOT "Quiz" → USE "Quiz [Course/Topic]"
+- NOT "Tugas" → USE "Tugas [Type/Topic/Course]"
+- NOT "Kuis" → USE "Kuis [Course/Topic]"
+
+Examples:
+- Message: "quiz grafkom besok" → "Quiz Grafkom" (not "Quiz")
+- Message: "tugas chapter 5" → "Tugas Chapter 5" (not "Tugas")
+- Message: "kuis kalkulus" → "Kuis Kalkulus" (not "Kuis")
 
 DEADLINE (format: YYYY-MM-DD HH:MM):
 Priority order:
