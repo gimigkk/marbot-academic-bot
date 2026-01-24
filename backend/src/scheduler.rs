@@ -6,7 +6,7 @@ use crate::models::SendTextRequest;
 use chrono::{DateTime, Datelike, NaiveDate, Utc};
 use crate::tui::{JobLogger, state::LogEntry};
 use tokio::sync::mpsc;
-use tokio::time::sleep;
+//use tokio::time::sleep;
 
 pub async fn start_scheduler(
     pool: PgPool,
@@ -293,8 +293,8 @@ async fn run_reminder_task(
         };
 
         message.push_str(&format!("{} *[{}]* *{}*\n", status, i + 1, title));
-        message.push_str(&format!("*├* {}\n", due_text));
-        message.push_str(&format!("*└* {}{}\n", course, parallel_display));
+        message.push_str(&format!("*├─* {}\n", due_text));
+        message.push_str(&format!("*└─* {}{}\n", course, parallel_display));
         message.push('\n');
     }
 
