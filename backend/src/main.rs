@@ -571,21 +571,19 @@ async fn webhook(
                                     
                                     // Send notification to academic channels
                                     if let Ok(Some(full_assignment)) = crud::get_assignment_with_course_by_id(&state.pool, assignment_id).await {
-                                        if new_deadline.is_some() {
-                                            send_academic_update_notification(
-                                                chat_id,
-                                                assignment_id,  
-                                                &full_assignment.title,
-                                                &full_assignment.course_name,
-                                                &full_assignment.parallel_codes,
-                                                new_deadline,
-                                                new_parallel_codes.as_deref(),
-                                                new_title.as_deref(),
-                                                new_description.as_deref(),
-                                                &state.pool,  
-                                                &logger,
-                                            ).await;
-                                        }
+                                        send_academic_update_notification(
+                                            chat_id,
+                                            assignment_id,  
+                                            &full_assignment.title,
+                                            &full_assignment.course_name,
+                                            &full_assignment.parallel_codes,
+                                            new_deadline,
+                                            new_parallel_codes.as_deref(),
+                                            new_title.as_deref(),
+                                            new_description.as_deref(),
+                                            &state.pool,  
+                                            &logger,
+                                        ).await;
                                         
                                         let deadline_display = full_assignment.deadline
                                             .map(|d| {
@@ -1625,6 +1623,7 @@ async fn send_reply(chat_id: &str, text: &str) -> Result<(), String> {
 }
 // END FITUR
 
+#[allow(non_snake_case)]
 /// Send update notification to all academic channels with quoted reply to original message
 async fn send_academic_update_notification(
     source_chat: &str,
