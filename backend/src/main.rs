@@ -219,6 +219,26 @@ async fn main() {
     let cache = Arc::new(Mutex::new(HashSet::new()));
     let spam_tracker = Arc::new(Mutex::new(HashMap::new())); 
 
+    // Cleanup for spam tracker, avoids memory leak
+    let spam_tracker_clone = spam_tracker.clone();
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(300));
+        loop {
+            interval.tick().await;
+            
+            let mut tracker = spam_tracker_clone.lock().await;
+            let now = Instant::now();
+            
+            // Remove expired entries
+            tracker.retain(|_, (_, reset_time)| now < *reset_time);
+            
+            // Safety limit
+            if tracker.len() > 1000 {
+                tracker.clear();
+            }
+        }
+    });
+
     // 4. Initialize TUI System
     let (tui_state, log_tx) = tui::init();
     
