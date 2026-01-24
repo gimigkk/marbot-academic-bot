@@ -314,6 +314,18 @@ pub async fn handle_command(
         BotCommand::Todo => {
             logger.log(&format!("✅ Todo command received from {} ({})", user_name, user_phone));
 
+            let academic_channels = std::env::var("ACADEMIC_CHANNELS").unwrap_or_default();
+            let is_academic_channel = academic_channels
+                .split(',')
+                .any(|channel| channel.trim() == chat_id);
+
+            if is_academic_channel {
+                return CommandResponse::Text(
+                    "⚠️ _Command ini tidak boleh dijalankan di grup akademik. Ketik command ini di chat pribadi atau grup lain ya!_"
+                        .to_string(),
+                );
+            }
+
             match get_active_assignments_for_user(pool, user_phone, Some(logger)).await {
                 Ok((assignments, user_settings)) => {
                     let has_settings = !user_settings.is_empty();
@@ -453,9 +465,7 @@ pub async fn handle_command(
 
             if is_academic_channel {
                 return CommandResponse::Text(
-                    "⚠️ _Command ini tidak boleh dijalankan di grup akademik._\n\
-                    Ketik command ini di chat pribadi ya.\n\n\
-                    💡 _Gunakan #todo untuk lihat daftar tugas pribadi kamu._"
+                    "⚠️ _Command ini tidak boleh dijalankan di grup akademik. Ketik command ini di chat pribadi atau grup lain ya!_"
                         .to_string(),
                 );
             }
@@ -555,6 +565,18 @@ pub async fn handle_command(
         BotCommand::Done(id) => {
             logger.log(&format!("✅ Done command for assignment {} from {}", id, user_phone));
             
+            let academic_channels = std::env::var("ACADEMIC_CHANNELS").unwrap_or_default();
+            let is_academic_channel = academic_channels
+                .split(',')
+                .any(|channel| channel.trim() == chat_id);
+
+            if is_academic_channel {
+                return CommandResponse::Text(
+                    "⚠️ _Command ini tidak boleh dijalankan di grup akademik. Ketik command ini di chat pribadi atau grup lain ya!_"
+                        .to_string(),
+                );
+            }
+
             match get_active_assignments_for_user(pool, user_phone, Some(logger)).await {
                 Ok((assignments, user_settings)) => {
                     // Apply the SAME filtering as #todo
