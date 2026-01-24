@@ -100,7 +100,7 @@ pub fn extract_parallel_codes_from_text(text: &str) -> Vec<String> {
     codes
 }
 
-/// Build context by querying DB + lightweight AI with tiered priority system
+// BUILD CONTENT LOGIC
 pub async fn build_context(
     message: &str,
     sender_id: &str,
@@ -391,7 +391,7 @@ fn calculate_context_boost(
     message_parallels: &[String],
 ) -> f32 {
     if message_parallels.is_empty() {
-        return 1.0; // No context to match
+        return 1.0;
     }
     
     // Check for overlap between pattern and message parallels
@@ -399,9 +399,9 @@ fn calculate_context_boost(
         .any(|pc| message_parallels.contains(pc));
     
     if has_overlap {
-        3.0 // Strong boost for context match
+        3.0
     } else {
-        1.0 // No boost
+        1.0 
     }
 }
 
@@ -424,7 +424,7 @@ struct AICourseHint {
     deadline_type: String,
 }
 
-/// Call lightweight AI for context resolution with curated, relevant context only
+/// Call lightweight AI for context resolution
 async fn call_context_resolver_ai(
     message: &str,
     sender_history: &SenderHistory,
@@ -447,7 +447,7 @@ async fn call_context_resolver_ai(
         courses_list,
     );
     
-    // TIER 1: Try Gemini models first (PRIORITY)
+    // TIER 1: Try Gemini models first 
     match try_gemini_context(&prompt, logger).await {
         Ok(hints) => return Ok(hints),
         Err(e) if e == "rate limit" => {
@@ -567,7 +567,6 @@ async fn try_gemini_context(prompt: &str, logger: &JobLogger) -> Result<AIHints,
         }
         
         if response.status().is_success() {
-            // Don't log success yet - parse first!
             
             // Try to parse response
             let gemini_response: GeminiResponse = match response.json().await {
@@ -602,14 +601,13 @@ async fn try_gemini_context(prompt: &str, logger: &JobLogger) -> Result<AIHints,
                 }
             };
             
-            // SUCCESS - everything worked
             clear_trying_line(logger);
             logger.log(&format!("│ \x1b[32m✅ SUCCESS\x1b[0m\t: {} (Gemini {}/{})", model, index, GEMINI_MODELS.len()));
             
             return Ok(hints);
         }
         
-        // Log the error details for debugging
+        // Log the error 
         if response.status() == reqwest::StatusCode::BAD_REQUEST {
             let error_text = response.text().await.unwrap_or_default();
             clear_trying_line(logger);
@@ -772,7 +770,6 @@ async fn try_groq_standard_context(prompt: &str, logger: &JobLogger) -> Result<A
 // ===== TRYING LINE HELPERS =====
 
 fn print_trying_line(model: &str, index: usize, total: usize, logger: &JobLogger) {
-    // Console: overwrite with \r
     use std::io::Write;
     print!("\r│ 🔄 TRYING : {} ({}/{})                    ", model, index, total);
     let _ = std::io::stdout().flush();
@@ -1005,7 +1002,6 @@ FINAL REMINDER:
 
 
 fn extract_retry_after(error_text: &str) -> Option<String> {
-    // Parse "Please try again in 17m58.271999999s"
     if let Some(start) = error_text.find("try again in ") {
         let rest = &error_text[start + 13..];
         if let Some(end) = rest.find('.') {

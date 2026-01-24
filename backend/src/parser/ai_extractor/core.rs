@@ -20,7 +20,7 @@ pub static SCHEDULE_ORACLE: Lazy<ScheduleOracle> = Lazy::new(|| {
         .expect("Failed to load schedule.json")
 });
 
-// Retry configuration
+
 const MAX_RETRIES: u32 = 4;
 
 // ===== MAIN AI EXTRACTION FUNCTION =====
@@ -267,13 +267,11 @@ async fn retry_with_countdown(attempt: u32, logger: &JobLogger) {
         logger.log_countdown(attempt, remaining);
     }
 
-    // Clear countdown line after completion
     logger.log_countdown_clear();
     logger.log("│");
 }
 
 // ===== TRYING-LINE HELPERS =====
-// CLEANED UP: Always log to both console and dashboard
 
 fn print_trying_line(model: &str, index: usize, total: usize, logger: &JobLogger) {
     // Console: overwrite with \r for animation
@@ -346,9 +344,6 @@ async fn try_gemini_models(prompt: &str, logger: &JobLogger) -> Result<AIClassif
         }
 
         if status.is_success() {
-            // Don't log success yet - parse first!
-            
-            // Try to parse response
             let gemini_response: GeminiResponse = match response.json().await {
                 Ok(r) => r,
                 Err(e) => {
@@ -381,7 +376,6 @@ async fn try_gemini_models(prompt: &str, logger: &JobLogger) -> Result<AIClassif
                 }
             };
 
-            // NOW we can log success - everything worked
             clear_trying_line(logger);
             logger.log(&format!("│ \x1b[32m✅ SUCCESS\x1b[0m\t: {} (Gemini {}/{})", model, index, GEMINI_MODELS.len()));
 
