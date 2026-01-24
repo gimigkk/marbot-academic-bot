@@ -575,13 +575,15 @@ async fn webhook(
                                         if new_deadline.is_some() {
                                             send_academic_update_notification(
                                                 chat_id,
+                                                assignment_id,  
                                                 &full_assignment.title,
                                                 &full_assignment.course_name,
-                                                &full_assignment.parallel_codes,  // param 4: assignment's parallels
-                                                new_deadline,                      // param 5: deadline
-                                                new_parallel_codes.as_deref(),     // param 6: updated parallels
-                                                new_title.as_deref(),              // param 7: new title
-                                                new_description.as_deref(),        // param 8: new description
+                                                &full_assignment.parallel_codes,
+                                                new_deadline,
+                                                new_parallel_codes.as_deref(),
+                                                new_title.as_deref(),
+                                                new_description.as_deref(),
+                                                &state.pool,  
                                             ).await;
                                         }
                                         
@@ -823,13 +825,15 @@ async fn webhook(
                                         if deadline_parsed.is_some() || !parallel_codes.is_empty() || new_title.is_some() || new_description.is_some() {
                                             send_academic_update_notification(
                                                 chat_id,
+                                                target.id,  
                                                 &target.title,
                                                 &target.course_name,
-                                                &target.parallel_codes,        // param 4: assignment's parallels
-                                                deadline_parsed,                                    // param 5: deadline
-                                                Some(&parallel_codes),              // param 6: updated parallels
-                                                new_title.as_deref(),                               // param 7: new title
-                                                new_description.as_deref(),                         // param 8: new description
+                                                &target.parallel_codes,
+                                                deadline_parsed,
+                                                Some(&parallel_codes),
+                                                new_title.as_deref(),
+                                                new_description.as_deref(),
+                                                &state.pool,  
                                             ).await;
                                         }
                                         
@@ -1152,17 +1156,18 @@ async fn handle_ai_classification(
                                 Some(&logger_clone),
                             ).await {
                                 Ok(_) => {
-                                    // FIX 2.3: Corrected argument order
                                     if deadline_parsed.is_some() || !parallel_codes.is_empty() {
                                         send_academic_update_notification(
                                             &source_chat_clone,
+                                            id,  
                                             title,
                                             cname,
-                                            &parallel_codes,                   // param 4: assignment's parallels
-                                            deadline_parsed,                   // param 5: deadline
-                                            if parallel_codes.is_empty() { None } else { Some(&parallel_codes) }, // param 6
-                                            None,                              // param 7: new title
-                                            new_description.as_deref(),        // param 8: new description
+                                            &parallel_codes,
+                                            deadline_parsed,
+                                            if parallel_codes.is_empty() { None } else { Some(&parallel_codes) },
+                                            None,
+                                            new_description.as_deref(),
+                                            &pool_clone,  
                                         ).await;
                                     }
 
@@ -1230,16 +1235,17 @@ async fn handle_ai_classification(
                                     course_name.unwrap_or_else(|| "General".to_string())
                                 };
                                 
-                                // FIX 2.4: Corrected argument order
                                 send_academic_update_notification(
                                     &source_chat_clone,
+                                    assignment_id,  
                                     &updated_assign.title,
                                     &course_name_for_alert,
-                                    &updated_assign.parallel_codes,    // param 4: assignment's parallels
-                                    deadline_parsed,                   // param 5: deadline
-                                    if parallel_codes.is_empty() { None } else { Some(&parallel_codes) }, // param 6
-                                    new_title.as_deref(),              // param 7: new title
-                                    new_description.as_deref(),        // param 8: new description
+                                    &updated_assign.parallel_codes,
+                                    deadline_parsed,
+                                    if parallel_codes.is_empty() { None } else { Some(&parallel_codes) },
+                                    new_title.as_deref(),
+                                    new_description.as_deref(),
+                                    &pool_clone,  
                                 ).await;
                             }
                             
@@ -1616,16 +1622,18 @@ async fn send_reply(chat_id: &str, text: &str) -> Result<(), String> {
 }
 // END FITUR
 
-/// Send update notification to all academic channels
+/// Send update notification to all academic channels with quoted reply to original message
 async fn send_academic_update_notification(
     source_chat: &str,
+    assignment_id: uuid::Uuid,
     title: &str,
     _course_name: &str,
-    assignment_parallels: &[String],  // ← param 4: the assignment's actual parallels
-    deadline: Option<chrono::DateTime<chrono::Utc>>,  // ← param 5: deadline
-    parallel_codes: Option<&[String]>,  // ← param 6: updated parallels
-    new_title: Option<&str>,  // ← param 7: new title
-    new_description: Option<&str>,  // ← param 8: new description
+    assignment_parallels: &[String],
+    deadline: Option<chrono::DateTime<chrono::Utc>>,
+    parallel_codes: Option<&[String]>,
+    new_title: Option<&str>,
+    new_description: Option<&str>,
+    pool: &PgPool,
 ) {
     let academic_env = std::env::var("ACADEMIC_CHANNELS").unwrap_or_default();
     let channels: Vec<&str> = academic_env.split(',').map(|s| s.trim()).collect();
@@ -1679,14 +1687,58 @@ async fn send_academic_update_notification(
             .join(", "))
     };
     
+    // Query assignment to get message_ids and relating_messages
+    let assignment_data = sqlx::query_as::<_, (Vec<String>, Vec<String>)>(
+        "SELECT message_ids, relating_messages FROM assignments WHERE id = $1"
+    )
+    .bind(assignment_id)
+    .fetch_optional(pool)
+    .await;
+    
+    // Get original message ID (first in array) and original message body
+    let (original_message_id, original_message_body) = match assignment_data {
+        Ok(Some((message_ids, relating_messages))) => {
+            let msg_id = message_ids.first().cloned();
+            let msg_body = relating_messages.first().cloned();
+            (msg_id, msg_body)
+        }
+        _ => (None, None)
+    };
+    
     for channel_id in channels {
         if channel_id.is_empty() || channel_id == source_chat {
             continue;
         }
         
+        // Try to reply to original message first
+        if let Some(ref msg_id) = original_message_id {
+            let msg = format!(
+                "*[Update] {}{}*\n\
+                _{}_",
+                title,
+                parallel_display,
+                fields_text
+            );
+            
+            // Attempt to send with reply
+            if send_reply_with_id(channel_id, &msg, Some(msg_id.clone())).await.is_ok() {
+                continue; // Success, move to next channel
+            }
+        }
+        
+        // Fallback: Create manual quote
+        let quoted_text = if let Some(ref original_body) = original_message_body {
+            format_quote_fallback(original_body)
+        } else {
+            // Data integrity issue - no messages stored
+            "> Unable to quote!".to_string()
+        };
+        
         let msg = format!(
-            "*[Update] {}{}*\n\
+            "{}\n\n\
+            *[Update] {}{}*\n\
             _{}_",
+            quoted_text,
             title,
             parallel_display,
             fields_text
@@ -1694,6 +1746,28 @@ async fn send_academic_update_notification(
         
         let _ = send_reply(channel_id, &msg).await;
     }
+}
+
+/// Format a message for manual quote fallback
+/// Truncates to 100 chars and removes newlines to prevent breaking WhatsApp markdown
+fn format_quote_fallback(message: &str) -> String {
+    // Remove all newlines and excessive whitespace
+    let cleaned = message
+        .lines()
+        .map(|line| line.trim())
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ");
+    
+    // Truncate to 100 characters
+    let truncated = if cleaned.len() > 100 {
+        format!("{}...", &cleaned[..100])
+    } else {
+        cleaned
+    };
+    
+    // Format as quote
+    format!("> {}", truncated)
 }
 
 fn extract_parallel_code(title: &str) -> Option<String> {
