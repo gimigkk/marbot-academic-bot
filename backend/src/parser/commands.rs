@@ -844,6 +844,7 @@ fn format_assignments_list(
         let course_alias = format!("{}", &a.first_alias);
         let title_fmt = sanitize_wa_md(&a.title);
         let due_text = humanize_deadline(&a.deadline);
+        
 
         // Format parallel codes
         let parallel_display = if !a.parallel_codes.is_empty() {
@@ -853,8 +854,8 @@ fn format_assignments_list(
         };
 
         response.push_str(&format!("{} *[{}]* *{}*\n", status_emoji, i + 1, title_fmt));
-        response.push_str(&format!("*├* {}\n", due_text));
-        response.push_str(&format!("*└* {}{}\n", course_alias, parallel_display));
+        response.push_str(&format!("*├─* {}\n", due_text));
+        response.push_str(&format!("*└─* `#{}{}`\n", course_alias, parallel_display));
         response.push('\n');
     }
 
