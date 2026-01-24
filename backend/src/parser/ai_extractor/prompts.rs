@@ -256,6 +256,11 @@ IF no quoted message:
 
 # EXTRACTION RULES
 
+## Platform references:
+- "di class"/"on class" → usually refers to class.ipb.ac.id LMS, not physical classroom
+- "upload ke class" → submission to online platform
+- Context: "class" as location often means the learning management system, while "kelas" means a physical classroom at a lecture.
+
 ## TITLE (2-3 words minimum, max 40 chars, MUST BE SPECIFIC)
 
 Single-word titles are prohibited. Every title must have a distinguishing element.
