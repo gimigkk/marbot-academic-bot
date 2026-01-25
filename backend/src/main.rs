@@ -324,11 +324,9 @@ async fn webhook(
 
     {
         let mut cache = state.cache.lock().await;
-        if cache.contains(&dedup_key) {
+        if !cache.insert(dedup_key.clone()) { 
             return StatusCode::OK;
         }
-
-        cache.insert(dedup_key);
 
         if cache.len() > 100 {
             cache.clear();
