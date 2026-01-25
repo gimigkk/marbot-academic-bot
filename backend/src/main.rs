@@ -1861,22 +1861,17 @@ async fn download_media_from_url(media_url: &str, logger: &tui::JobLogger) -> Re
     
     // Fix localhost URLs - replace with actual Docker hostname
     let fixed_url = if media_url.contains("localhost:3000") {
-        // Try multiple possible hostnames
         let waha_hosts = vec![
             std::env::var("WAHA_URL").ok(),
             Some("http://waha:3000".to_string()),
             Some("http://marbot_waha:3000".to_string()),
         ];
         
-        // Use the first available hostname, or fallback to waha:3000
         let base_url = waha_hosts.into_iter()
             .flatten()
             .next()
             .unwrap_or_else(|| "http://waha:3000".to_string());
         
-        // Extract the path from original URL
-        // From: http://localhost:3000/api/files/default/XXX.jpeg
-        // To:   http://waha:3000/api/files/default/XXX.jpeg
         media_url.replace("http://localhost:3000", &base_url)
     } else {
         media_url.to_string()
@@ -1884,7 +1879,6 @@ async fn download_media_from_url(media_url: &str, logger: &tui::JobLogger) -> Re
     
     logger.log(&format!("   📥 Downloading from: {}", fixed_url));
     
-    // WAHA uses API Key authentication
     let api_key = std::env::var("WAHA_API_KEY")
         .unwrap_or_else(|_| "devkey123".to_string());
     
@@ -1893,9 +1887,34 @@ async fn download_media_from_url(media_url: &str, logger: &tui::JobLogger) -> Re
         .build()
         .map_err(|e| format!("Client error: {}", e))?;
     
+    // Get headers first without downloading body =====
+    let head_res = client
+        .head(&fixed_url)  // HEAD request - only gets headers
+        .header("X-Api-Key", &api_key)
+        .send()
+        .await
+        .map_err(|e| format!("HEAD request failed: {}", e))?;
+    
+    // Check Content-Length BEFORE downloading
+    if let Some(content_length) = head_res.content_length() {
+        const MAX_SIZE: u64 = 10_000_000; // 10MB limit
+        
+        if content_length > MAX_SIZE {
+            return Err(format!(
+                "Image too large: {:.2}MB (max: 10MB)", 
+                content_length as f64 / 1_000_000.0
+            ));
+        }
+        
+        logger.log(&format!("   📦 Size check: {:.2}MB (OK)", content_length as f64 / 1_000_000.0));
+    } else {
+        logger.log("   ⚠️  No Content-Length header - proceeding with caution");
+    }
+    
+    // Now actually download the image
     let res = client
-        .get(&fixed_url)  
-        .header("X-Api-Key", api_key)
+        .get(&fixed_url)
+        .header("X-Api-Key", &api_key)
         .send()
         .await
         .map_err(|e| format!("Network error: {}", e))?;
@@ -1906,31 +1925,59 @@ async fn download_media_from_url(media_url: &str, logger: &tui::JobLogger) -> Re
     
     logger.log("   ✅ Download successful");
     
-    let bytes = res.bytes().await.map_err(|e| e.to_string())?;
-    logger.log(&format!("   📦 Size: {:.2} MB", bytes.len() as f64 / 1_000_000.0));
+    // Add streaming download with size limit =====
+    use futures::StreamExt;
+    
+    const MAX_DOWNLOAD: usize = 10_000_000; // 10MB hard limit
+    let mut downloaded: usize = 0;
+    let mut buffer = Vec::new();
+    
+    let mut stream = res.bytes_stream();
+    
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|e| format!("Download failed: {}", e))?;
+        
+        downloaded += chunk.len();
+        
+        // Safety check: abort if exceeds limit (in case Content-Length lied)
+        if downloaded > MAX_DOWNLOAD {
+            return Err(format!(
+                "Download aborted: exceeded 10MB limit (downloaded {:.2}MB)",
+                downloaded as f64 / 1_000_000.0
+            ));
+        }
+        
+        buffer.extend_from_slice(&chunk);
+    }
+    
+    logger.log(&format!("   📦 Downloaded: {:.2}MB", downloaded as f64 / 1_000_000.0));
     
     use base64::{Engine as _, engine::general_purpose};
     use image::io::Reader as ImageReader;
     use std::io::Cursor;
 
     // Compress if > 3.5MB
-    if (bytes.len() as f64 / 1_000_000.0) > 3.5 {
+    if (downloaded as f64 / 1_000_000.0) > 3.5 {
         logger.log("   🔄 Compressing image...");
         
-        let img = ImageReader::new(Cursor::new(&bytes))
+        let img = ImageReader::new(Cursor::new(&buffer))
             .with_guessed_format()
             .map_err(|e| format!("Format error: {}", e))?
             .decode()
             .map_err(|e| format!("Decode error: {}", e))?;
         
         let img = img.thumbnail(2048, 2048);
-        let mut buf = Vec::new();
-        img.write_to(&mut Cursor::new(&mut buf), image::ImageOutputFormat::Jpeg(80))
+        let mut compressed_buf = Vec::new();
+        img.write_to(&mut Cursor::new(&mut compressed_buf), image::ImageOutputFormat::Jpeg(80))
             .map_err(|e| format!("Compress error: {}", e))?;
             
-        logger.log(&format!("   ✅ Compressed: {:.2} MB", buf.len() as f64 / 1_000_000.0));
-        return Ok(general_purpose::STANDARD.encode(&buf));
-    } else {
-        return Ok(general_purpose::STANDARD.encode(&bytes));
+        logger.log(&format!("   ✅ Compressed: {:.2}MB → {:.2}MB", 
+            downloaded as f64 / 1_000_000.0,
+            compressed_buf.len() as f64 / 1_000_000.0
+        ));
+        
+        return Ok(general_purpose::STANDARD.encode(&compressed_buf));
     }
+    
+    Ok(general_purpose::STANDARD.encode(&buffer))
 }
