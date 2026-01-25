@@ -150,7 +150,7 @@ async fn check_personal_reminders(
     let now = Utc::now();
     let three_hours_later = now + chrono::Duration::hours(3);
 
-    // 1. Cari tugas deadline <= 3 jam & personal_reminder_sent = FALSE
+    // 1. Find tasks with deadline <= 3 hours & personal_reminder_sent = FALSE
     let tasks = sqlx::query_as::<_, crate::models::Assignment>(
         r#"
         SELECT *
@@ -171,36 +171,40 @@ async fn check_personal_reminders(
 
     logger.log(&format!("📨 Menemukan {} tugas untuk reminder personal", tasks.len()));
 
+    // Import for concurrent processing
+    use futures::stream::{self, StreamExt};
+
     let client = reqwest::Client::new();
     let waha_url = std::env::var("WAHA_URL").unwrap_or_else(|_| "http://waha:3000".to_string());
     let api_key = std::env::var("WAHA_API_KEY").unwrap_or_else(|_| "devkey123".to_string());
 
     for task in tasks {
-        // Ambil nama course
+        // Get course name
         let course_name: String = sqlx::query_scalar("SELECT name FROM courses WHERE id = $1")
             .bind(task.course_id)
             .fetch_one(&pool)
             .await?;
 
         if let Some(cid) = task.course_id {
-            // Ambil user target
+            // Get target users
             let interested_users = crud::get_users_for_course_reminder(&pool, cid).await?;
             
             let deadline_wib = task.deadline.unwrap()
                 .with_timezone(&chrono::FixedOffset::east_opt(7 * 3600).unwrap());
             let time_str = deadline_wib.format("%H:%M").to_string();
 
-            // Format parallel display (misal: " [A, B]")
+            // Format parallel display
             let parallel_display = if !task.parallel_codes.is_empty() {
                 format!(" {}", task.format_parallel_display())
             } else {
                 String::new()
             };
 
-            let mut sent_count = 0;
-
+            // Concurrent processing with rate limiting
+            let mut recipients = Vec::new();
+            
+            // Filter users first
             for (user_id, user_codes_str) in interested_users {
-                // Filter User
                 let user_codes: Vec<&str> = user_codes_str.split(',').collect();
                 
                 let is_match = if task.parallel_codes.is_empty() || task.parallel_codes.contains(&"all".to_string()) {
@@ -212,42 +216,56 @@ async fn check_personal_reminders(
                 };
 
                 if is_match {
-                    let message = format!(
-                        "*[PENGINGAT PRIBADI H < 3 JAM]*\n\n\
-                        📌 *{}*\n\
-                        📚 {}{}\n\
-                        ⏰ Deadline: Pukul *{}* WIB\n\n\
-                        _Segera kumpulkan jika belum!_",
-                        sanitize_wa_md(&task.title),
-                        course_name,
-                        parallel_display,
-                        time_str
-                    );
+                    recipients.push(user_id);
+                }
+            }
 
+            if recipients.is_empty() {
+                continue;
+            }
+
+            logger.log(&format!("   -> Mengirim PM ke {} mahasiswa untuk tugas '{}'", recipients.len(), task.title));
+
+            // Build message once
+            let message = format!(
+                "*[PENGINGAT PRIBADI H < 3 JAM]*\n\n\
+                📌 *{}*\n\
+                📚 {}{}\n\
+                ⏰ Deadline: Pukul *{}* WIB\n\n\
+                _Segera kumpulkan jika belum!_",
+                sanitize_wa_md(&task.title),
+                course_name,
+                parallel_display,
+                time_str
+            );
+
+            // Process in batches of 10 concurrent requests
+            let client_ref = &client;
+            let waha_url_ref = &waha_url;
+            let api_key_ref = &api_key;
+            let message_ref = &message;
+
+            stream::iter(recipients)
+                .for_each_concurrent(10, |user_id| async move {
                     let payload = SendTextRequest {
-                        chat_id: user_id.clone(),
-                        text: message,
+                        chat_id: user_id,
+                        text: message_ref.clone(),
                         session: "default".to_string(),
                         reply_to: None,
                     };
 
-                    let _ = client
-                        .post(format!("{}/api/sendText", waha_url))
-                        .header("X-Api-Key", &api_key)
+                    let _ = client_ref
+                        .post(format!("{}/api/sendText", waha_url_ref))
+                        .header("X-Api-Key", api_key_ref)
                         .json(&payload)
                         .send()
                         .await;
                     
-                    sent_count += 1;
-
-                    // === DELAY ===
-                    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-                }
-            }
-            
-            if sent_count > 0 {
-                logger.log(&format!("   -> Mengirim PM ke {} mahasiswa untuk tugas '{}'", sent_count, task.title));
-            }
+                    // Rate limit: 300ms between messages (instead of 2s)
+                    // 10 concurrent × 300ms = ~33 messages/second max
+                    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+                })
+                .await;
         }
 
         // 4. Update status 
