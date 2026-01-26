@@ -1,6 +1,5 @@
 use std::collections::HashSet;
 
-/// Whitelist configuration for academic channels/groups
 pub struct Whitelist {
     academic_channels: HashSet<String>,
 }
@@ -8,8 +7,7 @@ pub struct Whitelist {
 impl Whitelist {
     pub fn new() -> Self {
         let mut academic_channels = HashSet::new();
-        
-        // Load from environment or config file
+     
         if let Ok(channels) = std::env::var("ACADEMIC_CHANNELS") {
             for channel in channels.split(',') {
                 let trimmed = channel.trim();
@@ -19,8 +17,7 @@ impl Whitelist {
                 }
             }
         }
-        
-        // Default fallback if no env var is set
+    
         if academic_channels.is_empty() {
             println!("⚠️  No ACADEMIC_CHANNELS configured. Add to .env file:");
             println!("   ACADEMIC_CHANNELS=120363423034679598@newsletter");
@@ -28,8 +25,7 @@ impl Whitelist {
         
         Self { academic_channels }
     }
-    
-    /// Check if a chat is whitelisted for academic info
+   
     pub fn is_academic_channel(&self, chat_id: &str) -> bool {
         self.academic_channels.contains(chat_id)
     }
@@ -47,8 +43,7 @@ impl Whitelist {
             (false, "not_whitelisted")
         }
     }
-    
-    /// Add a channel to whitelist 
+   
     #[allow(dead_code)]
     pub fn add_channel(&mut self, chat_id: String) {
         self.academic_channels.insert(chat_id);
