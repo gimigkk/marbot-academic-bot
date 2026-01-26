@@ -94,7 +94,6 @@ pub struct MessageInfo {
     #[serde(rename = "Sender")]
     pub sender: Option<String>,
     
-    // GOWS sends other fields too, catch them if needed
     #[serde(flatten)]
     pub extra: serde_json::Value,
 }
@@ -202,7 +201,7 @@ pub enum AIClassification {
         original_message: Option<String>,
     },
     
-    /// NEW: Multiple assignments in one message
+    /// Multiple assignments in one message
     MultipleAssignments {
         assignments: Vec<AssignmentData>,
         #[serde(default)]
@@ -312,8 +311,8 @@ impl AIClassification {
 #[serde(rename_all = "snake_case")]
 pub enum UnrecognizedCategory {
     #[default]
-    Informal,          // Completely unrelated to academics
-    AcademicRelated,   // Seems academic but not an assignment
+    Informal,          
+    AcademicRelated,   
 }
 
 /// Individual assignment data for batch processing
@@ -433,7 +432,7 @@ impl Assignment {
             return false;
         }
         
-        // "all" targets everyone
+        // "all"
         if self.parallel_codes.contains(&"all".to_string()) {
             return true;
         }

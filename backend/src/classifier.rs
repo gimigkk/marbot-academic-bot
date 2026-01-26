@@ -10,8 +10,7 @@ pub fn classify_message(text: &str) -> MessageType {
         // Try to parse as known command
         match parse_command(trimmed) {
             Some(cmd) => MessageType::Command(cmd),
-            // If starts with # but not recognized, still treat as command attempt
-            // This prevents unrecognized commands from being sent to AI
+    
             None => {
                 // Extract the attempted command
                 let cmd_word = trimmed.split_whitespace()
@@ -22,7 +21,6 @@ pub fn classify_message(text: &str) -> MessageType {
             }
         }
     } else {
-        // No #, so it's a regular message that needs AI processing
         MessageType::NeedsAI(text.to_string())
     }
 }
@@ -46,7 +44,7 @@ fn parse_command(text: &str) -> Option<BotCommand> {
         // Admin only #update command
         "update" => {
             if parts.len() > 2 {
-                // parts[1] = id, parts[2..] = update message
+
                 let id = parts[1].parse().ok()?;
                 let message = parts[2..].join(" ");
                 Some(BotCommand::Update(id, message))
@@ -70,7 +68,7 @@ fn parse_command(text: &str) -> Option<BotCommand> {
                     if is_code {
                         split_idx = i;
                     } else {
-                        // Ketemu token panjang (bagian dari nama matkul), berhenti scan
+        
                         break;
                     }
                 }
@@ -81,7 +79,7 @@ fn parse_command(text: &str) -> Option<BotCommand> {
                     .map(|s| s.to_string())
                     .collect();
 
-                // Fallback: Jika logic di atas gagal menemukan kode (misal user typo atau kode panjang),
+        
                 if codes.is_empty() && parts.len() >= 3 {
                      let fallback_split = parts.len() - 1;
                      let matkul = parts[1..fallback_split].join(" ");
@@ -94,10 +92,10 @@ fn parse_command(text: &str) -> Option<BotCommand> {
                 Some(BotCommand::MissingArgument("setkelas".to_string()))
             }
         },
-        // -----------------------------
+       
 
         "tugas" | "tygas" | "tgs" => {
-            // Handle both "#tugas" alone and "#tugas 123"
+
             if parts.len() > 1 {
                 if let Ok(id) = parts[1].parse() {
                     return Some(BotCommand::Expand(id));
