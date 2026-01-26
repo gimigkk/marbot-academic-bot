@@ -14,18 +14,14 @@ use crate::tui::JobLogger;
 
 // ===== CONSTANTS & STATICS =====
 
-/// Compile regex once at startup for performance
 static PARALLEL_CODE_REGEX: Lazy<Regex> = Lazy::new(|| {
-    // Match k1-k4, p1-p4, r1-r4 (case-insensitive, word boundaries)
     Regex::new(r"(?i)\b([kprs][1-4])\b").unwrap()
 });
 
-/// Maximum number of sender history patterns to include
 const MAX_HISTORY_PATTERNS: usize = 3;
 
 // ===== PUBLIC TYPES =====
 
-/// Information about a quoted assignment from database
 #[derive(Debug, Clone)]
 pub struct QuotedAssignmentInfo {
     pub assignment_id: uuid::Uuid,
@@ -34,7 +30,6 @@ pub struct QuotedAssignmentInfo {
     pub parallel_codes: Vec<String>,
 }
 
-/// Minimal context needed for main AI prompt
 #[derive(Debug, Clone)]
 pub struct MessageContext {
     //pub parallel_codes: Vec<String>,   remove all global parallel references
@@ -339,20 +334,19 @@ async fn get_sender_history(
     .fetch_all(pool)
     .await?;
     
-    // Calculate relevance scores for each pattern
+   
     let mut patterns: Vec<ParallelPattern> = records
         .into_iter()
         .filter_map(|record| {
             record.parallel_codes.map(|parallel_codes| {
                 let count = record.count.unwrap_or(0) as i32;
                 let recency_weight = record.recency_weight as f32;
-                // SQLx returns DateTime<Utc>, but we store NaiveDateTime
+             
                 let last_used = record.last_used.unwrap().naive_utc();
-                
-                // BASE SCORE: frequency × recency
+              
                 let base_score = (count as f32) * recency_weight;
                 
-                // CONTEXT BOOST: If parallels match message context, boost significantly
+               
                 let context_boost = calculate_context_boost(
                     &parallel_codes, 
                     text_extracted_parallels

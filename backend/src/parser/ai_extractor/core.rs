@@ -673,7 +673,7 @@ async fn try_groq_vision(prompt: &str, image_base64: &str, logger: &JobLogger) -
         }
 
         if status.is_success() {
-            // Parse BEFORE logging success
+       
             let groq_response: GroqResponse = match response.json().await {
                 Ok(r) => r,
                 Err(e) => {
@@ -708,7 +708,7 @@ async fn try_groq_vision(prompt: &str, image_base64: &str, logger: &JobLogger) -
                 if index < GROQ_VISION_MODELS.len() - 1 { continue; }
             }
 
-            // SUCCESS
+         
             clear_trying_line(logger);
             logger.log(&format!("│ \x1b[32m✅ SUCCESS\x1b[0m\t: {} (Vision {}/{})", model, index, GROQ_VISION_MODELS.len()));
 

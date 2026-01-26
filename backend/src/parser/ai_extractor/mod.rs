@@ -40,7 +40,6 @@ pub use core::{extract_with_ai, match_update_to_assignment, check_duplicate_assi
 pub use schedule_oracle::ScheduleOracle;
 pub use context_builder::build_context;
 
-// Re-export parsing utilities for use by clarification.rs and other modules
 pub use parsing::{
     extract_numbers,
     GeminiResponse,
