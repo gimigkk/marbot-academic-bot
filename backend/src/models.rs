@@ -43,25 +43,24 @@ pub struct MessagePayload {
     #[serde(rename = "_data")]
     pub data: Option<MessageData>,
 
-    // This is for backwards compatibility if quotedMsg exists
     #[serde(rename = "quotedMsg")]
     pub quoted_msg: Option<QuotedMessage>,
 }
 
 impl MessagePayload {
-    /// Get quoted message from either quotedMsg field or extra.replyTo
+   
     pub fn get_quoted_message(&self) -> Option<QuotedMessage> {
-        // First try the quotedMsg field
+     
         if let Some(ref quoted) = self.quoted_msg {
             return Some(quoted.clone());
         }
         
-        // If not found, try extra.replyTo
+       
         if let Some(reply_to) = self.extra.get("replyTo") {
-            // Extract the body text from replyTo
+
             if let Some(body_str) = reply_to.get("body").and_then(|v| v.as_str()) {
                 return Some(QuotedMessage {
-                    id: String::new(), // replyTo doesn't have ID
+                    id: String::new(), 
                     text: body_str.to_string(),
                     from: None,
                 });
@@ -229,7 +228,7 @@ pub enum AIClassification {
 }
 
 impl AIClassification {
-    /// Clean up parallel codes - if "all" is present, remove all other codes
+  
     pub fn clean_parallel_codes(self) -> Self {
         match self {
             AIClassification::AssignmentInfo { 
@@ -289,7 +288,7 @@ impl AIClassification {
                 }
             }
             
-            // Unrecognized doesn't have parallel codes
+        
             other => other,
         }
     }
@@ -311,7 +310,6 @@ pub enum UnrecognizedCategory {
     AcademicRelated,   
 }
 
-/// Individual assignment data for batch processing
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct AssignmentData {
     pub course_name: String,
@@ -393,11 +391,10 @@ impl AssignmentWithCourse {
     pub fn deadline_is_missing(&self) -> bool {
         self.deadline.is_none()
     }
-    
-    /// Format parallel codes for display
+    // FORMAT PARALLEL
     pub fn format_parallel_display(&self) -> String {
         if self.parallel_codes.is_empty() {
-            "N/A".to_string()  // No parallel set = N/A
+            "N/A".to_string()  
         } else {
             format!("[{}]", self.parallel_codes
                 .iter()
@@ -409,7 +406,7 @@ impl AssignmentWithCourse {
 }
 
 impl Assignment {
-    /// Format parallel codes for display
+    
     pub fn format_parallel_display(&self) -> String {
         if self.parallel_codes.is_empty() {
             "N/A".to_string()
@@ -421,26 +418,24 @@ impl Assignment {
                 .join(", "))
         }
     }
-    
-    /// Check if this assignment targets a specific parallel
+   
     pub fn targets_parallel(&self, parallel: &str) -> bool {
         if self.parallel_codes.is_empty() {
             return false;
         }
         
-        // "all"
+      
         if self.parallel_codes.contains(&"all".to_string()) {
             return true;
         }
         
-        // Check if the specific parallel is in the list
+
         self.parallel_codes.iter()
             .any(|p| p.eq_ignore_ascii_case(parallel))
     }
 }
 
 impl AssignmentData {
-    /// Format parallel codes for display
     pub fn format_parallel_display(&self) -> String {
         if self.parallel_codes.is_empty() {
             "N/A".to_string()
