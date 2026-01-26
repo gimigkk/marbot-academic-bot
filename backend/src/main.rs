@@ -160,7 +160,6 @@ async fn main() {
             print!("{}", line);
         }
         if i < bot_lines.len() {
-            // Same for BOT
             let line = bot_lines[i]
                 .replace('█', "\x1b[38;2;255;255;255m█\x1b[38;2;198;97;63m")
                 .replace('╗', "\x1b[38;2;198;97;63m╗")
