@@ -20,7 +20,6 @@ use regex::Regex;
 use once_cell::sync::Lazy;
 use std::sync::Mutex;
 
-// ===== SHARED CONSTANTS FROM CORE.RS =====
 static PRINT_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 
 const MAX_RETRIES: u32 = 4;
@@ -159,7 +158,7 @@ fn logger_log(logger: Option<&JobLogger>, msg: &str) {
         l.log(msg);
     } else {
         println!("{}", msg);
-        let _ = stdout().flush(); // Ensure colors are flushed
+        let _ = stdout().flush(); 
     }
 }
 
@@ -256,7 +255,6 @@ pub struct AIClarificationResult {
     pub is_cancellation: bool,
 }
 
-/// Public API: TUI-aware version (preferred when you have a JobLogger)
 pub async fn parse_clarification_response(
     text: &str, 
     assignment: &AssignmentWithCourse,
@@ -266,7 +264,6 @@ pub async fn parse_clarification_response(
     parse_clarification_response_internal(text, assignment, missing_fields, Some(logger)).await
 }
 
-/// Public API: stdout-only version (keeps compatibility with main branch)
 pub async fn parse_clarification_response_stdout(
     text: &str, 
     assignment: &AssignmentWithCourse,
@@ -284,7 +281,6 @@ async fn parse_clarification_response_internal(
     let current_deadline = assignment.deadline.map(|d| d.naive_utc());
     let next_meeting_hint = resolve_next_meeting(assignment);
 
-    // Simpler header without complex ANSI codes
     logger_log(logger, "┌──[CLARIFICATION PARSING]──────────────────");
     
     let message_display = text
@@ -447,7 +443,7 @@ async fn try_gemini_clarification(
         }
         
         if status.is_success() {
-            // PARSE FIRST, BEFORE LOGGING SUCCESS
+         
             let gemini_response: GeminiResponse = match response.json().await {
                 Ok(r) => r,
                 Err(e) => {
@@ -477,8 +473,8 @@ async fn try_gemini_clarification(
                     continue;
                 }
             };
-
-            // log success - only after everything worked
+            
+      
             if logger.is_none() { clear_previous_trying_stdout(&mut last_trying); }
             logger_log(logger, &format!("│ \x1b[32m✅ SUCCESS\x1b[0m\t: {} (Gemini {}/{})", model, index, GEMINI_MODELS.len()));
             
@@ -550,11 +546,10 @@ async fn try_groq_reasoning_clarification(
         
         if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
             if logger.is_none() { clear_previous_trying_stdout(&mut last_trying); }
-            continue;  // Silent continue for rate limits
+            continue;  
         }
         
         if status.is_success() {
-            // PARSE EVERYTHING FIRST
             let groq_response: GroqResponse = match response.json().await {
                 Ok(r) => r,
                 Err(e) => {
@@ -582,7 +577,6 @@ async fn try_groq_reasoning_clarification(
                 }
             };
 
-            // SUCCESS only after full parsing
             if logger.is_none() { clear_previous_trying_stdout(&mut last_trying); }
             logger_log(logger, &format!("│ \x1b[32m✅ SUCCESS\x1b[0m\t: {} (Groq Reasoning {}/{})", model, index, GROQ_REASONING_MODELS.len()));
             

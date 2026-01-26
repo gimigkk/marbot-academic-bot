@@ -22,7 +22,6 @@ pub enum CommandResponse {
     Text(String),
     ResendMessages { messages: Vec<String>, summary: String },
     
-    // for the new admin commands
     ProcessWithAI {
         message: String,
         force_mode: AIForceMode,
@@ -134,7 +133,6 @@ pub async fn handle_command(
             let current_time = Utc::now().with_timezone(&gmt7);
             let time_str = current_time.format("%H:%M:%S WIB").to_string();
             
-            // 8. Fun motivation based on time of day
             use chrono::Timelike;
             let hour = current_time.hour();
             let motivation = match hour {
@@ -330,15 +328,14 @@ pub async fn handle_command(
                     
             
                     let filtered_assignments: Vec<_> = assignments.into_iter().filter(|a| {
-                        // 1. Kalau sudah selesai, skip 
+                      
                         if a.is_completed { return false; }
-                        
-                        // 2. Tugas General (all) -> AMBIL
+                   
                         if a.parallel_codes.is_empty() || a.parallel_codes.contains(&"all".to_string()) {
                             return true; 
                         }
                         
-                        // 3. Cek setting user untuk matkul ini
+                       
                         if let Some(user_codes_str) = user_settings.get(&a.course_name) {
                          
                             let user_codes: Vec<&str> = user_codes_str.split(',').collect();
@@ -362,7 +359,7 @@ pub async fn handle_command(
                     let mut response = format_assignments_list(filtered_assignments, &header, false, true);
                     
                     if let CommandResponse::Text(ref mut text) = response {
-                         // Update pesan bantuan di bawah
+                       
                         if !has_settings {
                             text.push_str("\n\n⚠️ _Kamu belum mengatur kelas spesifik._\n_Ketik:_ `#setkelas <matkul> <k-kode> [p-kode]`\n_Contoh:_ `#setkelas pemrog k1 p2`");
                         } else {
@@ -467,15 +464,15 @@ pub async fn handle_command(
                 Ok((assignments, user_settings)) => {
                   
                     let filtered_assignments: Vec<_> = assignments.into_iter().filter(|a| {
-                        // 1. Skip completed tasks
+                    
                         if a.is_completed { return false; }
                         
-                        // 2. General tasks (all) -> INCLUDE
+                    
                         if a.parallel_codes.is_empty() || a.parallel_codes.contains(&"all".to_string()) {
                             return true; 
                         }
                         
-                        // 3. Check user settings for this course
+                    
                         if let Some(user_codes_str) = user_settings.get(&a.course_name) {
                             let user_codes: Vec<&str> = user_codes_str.split(',').collect();
                             

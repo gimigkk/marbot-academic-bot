@@ -74,30 +74,25 @@ pub fn extract_groq_text(groq_response: &GroqResponse) -> Result<String, String>
 }
 
 pub fn extract_ai_text(gemini_response: &GeminiResponse) -> Result<&str, String> {
-    // Check if response has any candidates
+ 
     if gemini_response.candidates.is_empty() {
         return Err("Gemini returned no candidates (possibly filtered by safety)".to_string());
     }
-    
-    // Get first candidate
+ 
     let candidate = &gemini_response.candidates[0];
     
-    // Check finish reason for errors
     if let Some(ref finish_reason) = candidate.finish_reason {
         if finish_reason != "STOP" && finish_reason != "MAX_TOKENS" {
             return Err(format!("Gemini stopped with reason: {}", finish_reason));
         }
     }
     
-    // Extract content
     let content = candidate.content.as_ref()
         .ok_or_else(|| "Gemini candidate missing content field".to_string())?;
-    
-    // Extract parts
+   
     let parts = content.parts.as_ref()
         .ok_or_else(|| "Gemini content missing parts field".to_string())?;
     
-    // Get first part's text
     parts
         .first()
         .map(|part| part.text.as_str())
@@ -124,7 +119,7 @@ pub(super) fn parse_classification(ai_text: &str) -> Result<AIClassification, St
     
     match serde_json::from_str::<AIClassification>(cleaned) {
         Ok(classification) => {
-            // Clean up parallel codes after deserialization
+       
             Ok(classification.clean_parallel_codes())
         }
         Err(e) => {
@@ -144,11 +139,10 @@ pub(super) fn parse_match_result(ai_text: &str, logger: &JobLogger) -> Result<Op
         .trim_start_matches("```")
         .trim_end_matches("```")
         .trim();
-    
-    // Use serde_json::Value for flexible parsing
+ 
     match serde_json::from_str::<serde_json::Value>(cleaned) {
         Ok(json_value) => {
-            // Extract fields manually to handle various formats
+          
             let confidence = json_value["confidence"]
                 .as_str()
                 .unwrap_or("low")
@@ -158,11 +152,11 @@ pub(super) fn parse_match_result(ai_text: &str, logger: &JobLogger) -> Result<Op
                 .as_str()
                 .map(|s| s.to_string());
             
-            // Handle reason as either string or object
+           
             let reason_text = match &json_value["reason"] {
                 serde_json::Value::String(s) => s.clone(),
                 serde_json::Value::Object(_) => {
-                    // If it's an object, try common keys or serialize it
+                 
                     json_value["reason"]["explanation"]
                         .as_str()
                         .or_else(|| json_value["reason"]["text"].as_str())
@@ -204,7 +198,6 @@ pub(super) fn parse_match_result(ai_text: &str, logger: &JobLogger) -> Result<Op
 
 // ===== NUMBER EXTRACTION =====
 
-/// Extract all numbers from a string using character-based parsing
 pub fn extract_numbers(text: &str) -> Vec<u32> {
     let mut numbers = Vec::new();
     let mut current_number = String::new();
@@ -220,7 +213,6 @@ pub fn extract_numbers(text: &str) -> Vec<u32> {
         }
     }
     
-    // Don't forget the last number if string ends with digits
     if !current_number.is_empty() {
         if let Ok(num) = current_number.parse::<u32>() {
             numbers.push(num);
@@ -256,8 +248,7 @@ pub fn extract_assignment_type(title: &str) -> Option<String> {
 
 // ===== SIMILARITY CALCULATION =====
 
-pub fn calculate_word_overlap(s1: &str, s2: &str) -> f32 {
-    // Create owned strings first to avoid temporary value issues
+pub fn calculate_word_overlap(s1: &str, s2: &str) -> f32 {  
     let s1_lower = s1.to_lowercase();
     let s2_lower = s2.to_lowercase();
     
@@ -303,7 +294,7 @@ pub(super) fn truncate_for_log(text: &str, max_chars: usize) -> String {
     if char_count <= max_chars {
         text.to_string()
     } else {
-        // Use chars().take() to handle Unicode properly
+     
         text.chars().take(max_chars).collect::<String>() + "..."
     }
 }

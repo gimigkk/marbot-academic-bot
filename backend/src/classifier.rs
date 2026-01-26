@@ -5,14 +5,13 @@ use crate::models::{MessageType, BotCommand};
 pub fn classify_message(text: &str) -> MessageType {
     let trimmed = text.trim();
     
-    // Check if it starts with # - if so, it's either a known command or unknown command
     if trimmed.starts_with('#') {
-        // Try to parse as known command
+        
         match parse_command(trimmed) {
             Some(cmd) => MessageType::Command(cmd),
     
             None => {
-                // Extract the attempted command
+              
                 let cmd_word = trimmed.split_whitespace()
                     .next()
                     .unwrap_or(trimmed);
@@ -28,7 +27,7 @@ pub fn classify_message(text: &str) -> MessageType {
 fn parse_command(text: &str) -> Option<BotCommand> {
     let trimmed = text.trim();
     
-    // Remove # and any spaces after it, then lowercase
+    
     let without_hash = trimmed.strip_prefix('#')?.trim();
     let parts: Vec<&str> = without_hash.split_whitespace().collect();
     
@@ -60,7 +59,7 @@ fn parse_command(text: &str) -> Option<BotCommand> {
                 
                 let mut split_idx = parts.len();
                 
-                // Cek dari token terakhir mundur sampai index 2
+            
                 for i in (2..parts.len()).rev() {
                     let token = parts[i];
                     let is_code = token.eq_ignore_ascii_case("all") || token.len() <= 3;
@@ -114,7 +113,7 @@ fn parse_command(text: &str) -> Option<BotCommand> {
                 let id = parts[1].parse().ok()?;
                 Some(BotCommand::Done(id))
             } else {
-                // Missing argument - return special error variant
+               
                 Some(BotCommand::MissingArgument("done".to_string()))
             }
         },
@@ -123,7 +122,7 @@ fn parse_command(text: &str) -> Option<BotCommand> {
                 let id = parts[1].parse().ok()?;
                 Some(BotCommand::Delete(id))
             } else {
-                // Missing argument - return special error variant
+              
                 Some(BotCommand::MissingArgument("delete".to_string()))
             }
         },
@@ -132,11 +131,10 @@ fn parse_command(text: &str) -> Option<BotCommand> {
                 let id = parts[1].parse().ok()?;
                 Some(BotCommand::Expand(id))
             } else {
-                // Missing argument - return special error variant
+              
                 Some(BotCommand::MissingArgument("expand".to_string()))
             }
         },
-        // Handle numeric-only commands like "# 123" or "#123"
         _ if command.chars().all(|c| c.is_numeric()) => {
             let id = command.parse().ok()?;
             Some(BotCommand::Expand(id))

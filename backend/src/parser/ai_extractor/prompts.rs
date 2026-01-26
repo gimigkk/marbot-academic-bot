@@ -4,7 +4,6 @@ use uuid::Uuid;
 use chrono::{Utc, FixedOffset, Duration}; 
 use super::context_builder::{MessageContext};
 
-/// Build assignment context list for the prompt
 fn build_context_assignments_list(
     assignments: &[Assignment],
     course_map: &HashMap<Uuid, String>
@@ -57,7 +56,6 @@ fn truncate_for_log(text: &str, max_len: usize) -> String {
     }
 }
 
-/// Build the classification prompt for AI models
 pub fn build_classification_prompt(
     text: &str, 
     available_courses: &str, 
@@ -394,7 +392,6 @@ Before outputting, verify:
     )
 }
 
-/// Build the matching prompt for assignment updates
 pub fn build_matching_prompt(
     changes: &str, 
     keywords: &[String], 
@@ -496,7 +493,6 @@ Think through the steps above, then provide your answer."#,
     )
 }
 
-/// Build a STRICT duplicate detection prompt
 pub fn build_duplicate_detection_prompt(
     title: &str,
     description: &str,

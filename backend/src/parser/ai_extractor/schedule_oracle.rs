@@ -26,12 +26,11 @@ struct CourseSchedule {
 }
 
 pub struct ScheduleOracle {
-    // Map: (course_code, parallel) -> Vec<(Weekday, start_time)>
     schedules: HashMap<(String, String), Vec<(Weekday, String)>>,
 }
 
 impl ScheduleOracle {
-    /// Load from your JSON file
+  
     pub fn load_from_file(path: &str) -> Result<Self, String> {
         let content = std::fs::read_to_string(path)
             .map_err(|e| format!("Failed to read schedule file: {}", e))?;
@@ -57,15 +56,14 @@ impl ScheduleOracle {
         weekday: Weekday,
     ) {
         for schedule in day_schedules {
-            // Extract course code (e.g., "KOM120C" from "KOM120C - Pemrograman")
+      
             let course_code = schedule.course
                 .split(" - ")
                 .next()
                 .unwrap_or(&schedule.course)
                 .trim()
                 .to_string();
-            
-            // Extract start time (e.g., "08:00" from "08:00-09:40")
+          
             let start_time = schedule.schedule
                 .split('-')
                 .next()
@@ -80,15 +78,14 @@ impl ScheduleOracle {
                 .push((weekday, start_time));
         }
     }
-    
-    /// Get next meeting with time (date and start time)
+   
     pub fn get_next_meeting_with_time(
         &self,
         course_name: &str,
         parallel_code: &str,
         from_date: NaiveDate,
     ) -> Option<(NaiveDate, String)> {
-        // Try to find matching course by name (fuzzy match)
+      
         let parallel_lower = parallel_code.to_lowercase();
         
         let matching_schedule = self.schedules
@@ -99,8 +96,7 @@ impl ScheduleOracle {
             })?;
         
         let schedule_times = matching_schedule.1;
-        
-        // Find next occurrence
+      
         let current_weekday = from_date.weekday();
         let mut next_meetings = Vec::new();
         
@@ -109,8 +105,7 @@ impl ScheduleOracle {
             let next_date = from_date + Duration::days(days_ahead);
             next_meetings.push((next_date, time.clone()));
         }
-        
-        // Sort by date, then by time
+      
         next_meetings.sort_by(|a, b| {
             a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1))
         });
@@ -118,7 +113,7 @@ impl ScheduleOracle {
         next_meetings.into_iter().next()
     }
     
-    /// Get next meeting for a course and parallel 
+  
     pub fn get_next_meeting(
         &self,
         course_name: &str,
@@ -129,11 +124,11 @@ impl ScheduleOracle {
             .map(|(date, _time)| date)
     }
     
-    /// Check if course code matches course name
+    
     fn course_matches(course_code: &str, course_name: &str) -> bool {
         let name_lower = course_name.to_lowercase();
         
-        // Map course codes to names (based on your data)
+     
         let mapping = [
             ("kom1221", vec!["metode kuantitatif", "metkuan", "mk"]),
             ("kom120d", vec!["matematika komputasi", "matkom", "pengantar matematika"]),
@@ -173,7 +168,7 @@ impl ScheduleOracle {
         }
     }
     
-    /// Get all schedule info for debugging
+
     pub fn get_schedule_for_course(
         &self,
         course_name: &str,
