@@ -308,8 +308,8 @@ async fn try_gemini_models(prompt: &str, logger: &JobLogger) -> Result<AIClassif
         let request_body = json!({
             "contents": [{"parts": [{"text": prompt}]}],
             "generationConfig": {
-                "temperature": 0.2,
-                "maxOutputTokens": 4096,
+                "temperature": 0.1,
+                "maxOutputTokens": 8192,
                 "responseMimeType": "application/json"
             }
         });
@@ -865,8 +865,8 @@ async fn try_gemini_duplicate_check(prompt: &str, logger: &JobLogger) -> Result<
         let request_body = json!({
             "contents": [{"parts": [{"text": prompt}]}],
             "generationConfig": {
-                "temperature": 0.0,
-                "maxOutputTokens": 1024,
+                "temperature": 0.1,
+                "maxOutputTokens": 8192,
                 "topP": 0.95,
                 "responseMimeType": "application/json"
             }
@@ -1114,8 +1114,8 @@ async fn try_gemini_matching(prompt: &str, logger: &JobLogger) -> Result<Option<
         let request_body = json!({
             "contents": [{"parts": [{"text": prompt}]}],
             "generationConfig": {
-                "temperature": 0.2,
-                "maxOutputTokens": 4096,
+                "temperature": 0.1,
+                "maxOutputTokens": 8192,
                 "responseMimeType": "application/json"
             }
         });

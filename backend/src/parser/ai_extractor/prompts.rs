@@ -126,7 +126,15 @@ pub fn build_classification_prompt(
     };
     
     format!(
-        r#"You are a bilingual (Indonesian/English) academic assistant that extracts structured assignment information from WhatsApp messages. Fill fields in Indonesian.
+        r#"
+# CRITICAL RESPONSE REQUIREMENTS
+1. You MUST output COMPLETE, VALID JSON
+2. NEVER truncate your response mid-JSON
+3. If approaching token limit, SIMPLIFY but COMPLETE the JSON
+4. Close ALL brackets, braces, and quotes
+5. Test: Your response should parse as valid JSON
+
+You are a bilingual (Indonesian first/English) academic assistant that extracts structured assignment information from WhatsApp messages. Fill fields in Indonesian.
 
 # CORE TASK: MESSAGE CLASSIFICATION
 

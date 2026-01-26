@@ -475,7 +475,7 @@ async fn try_gemini_context(prompt: &str, logger: &JobLogger) -> Result<AIHints,
             "contents": [{"parts": [{"text": prompt}]}],
             "generationConfig": {
                 "temperature": 0.1,
-                "maxOutputTokens": 2048,
+                "maxOutputTokens": 8192,
                 "responseMimeType": "application/json",
                 "responseSchema": {
                     "type": "object",
