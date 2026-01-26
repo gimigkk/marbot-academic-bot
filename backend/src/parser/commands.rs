@@ -8,8 +8,7 @@ use crate::database::crud::{
     get_last_completed_assignment,
     delete_assignment,
     set_user_course_parallel,
-    // ========== FITUR MYKELAS ==========
-    get_user_course_statuses,  // Ditambahkan untuk fitur #mykelas
+    get_user_course_statuses,  
 };
 
 use crate::models::{BotCommand, AssignmentWithCourse};
@@ -33,7 +32,7 @@ pub enum CommandResponse {
 
 pub enum AIForceMode {
     Update,    // Force interpretation as assignment_update
-    NewOnly,   // Force interpretation as assignment_info/multiple (never update)
+    NewOnly,   // Force interpretation as assignment_info/multiple 
 }
 
 /// Get current time in GMT+7 (Indonesian timezone)
@@ -296,12 +295,11 @@ pub async fn handle_command(
         }
 
         BotCommand::SetKelas(matkul, codes) => {
-            // codes sekarang adalah vector, misal ["k1", "p2"]
-            // Join dengan spasi hanya untuk log display
+         
             let codes_display = codes.join(" ");
             logger.log(&format!("⚙️ SetKelas command: {} [{}] from {}", matkul, codes_display, user_phone));
             
-            // Panggil fungsi CRUD yang baru (passing referensi vector)
+           
             match set_user_course_parallel(pool, user_phone, &matkul, &codes).await {
                 Ok(msg) => CommandResponse::Text(msg),
                 Err(e) => {
@@ -330,7 +328,7 @@ pub async fn handle_command(
                 Ok((assignments, user_settings)) => {
                     let has_settings = !user_settings.is_empty();
                     
-                    // --- SHARED FILTERING LOGIC ---
+            
                     let filtered_assignments: Vec<_> = assignments.into_iter().filter(|a| {
                         // 1. Kalau sudah selesai, skip 
                         if a.is_completed { return false; }
@@ -342,26 +340,21 @@ pub async fn handle_command(
                         
                         // 3. Cek setting user untuk matkul ini
                         if let Some(user_codes_str) = user_settings.get(&a.course_name) {
-                            // user_codes_str bisa berisi "k1" atau "k1,p2"
-                            // Kita pecah dulu menjadi vector
+                         
                             let user_codes: Vec<&str> = user_codes_str.split(',').collect();
                             
-                            // Cek apakah ADA kode tugas yang cocok dengan kode user
-                            // Misal: Tugas code "p2", User setting "k1,p2".
-                            // p2 ada di dalam [k1, p2]? Ya -> Tampilkan.
-                            
-                            // Iterate kode tugas
+            
                             for task_code in &a.parallel_codes {
                                 if user_codes.contains(&task_code.as_str()) {
                                     return true;
                                 }
                             }
                             
-                            // Jika tidak ada yang cocok sama sekali
+                          
                             return false;
                         }
                         
-                        // 4. Default: Jika user BELUM set kelas, tampilkan semua (biar aman)
+                       
                         true 
                     }).collect();
 
@@ -472,7 +465,7 @@ pub async fn handle_command(
 
             match get_active_assignments_for_user(pool, user_phone, Some(logger)).await {
                 Ok((assignments, user_settings)) => {
-                    // Apply the SAME filtering as #todo
+                  
                     let filtered_assignments: Vec<_> = assignments.into_iter().filter(|a| {
                         // 1. Skip completed tasks
                         if a.is_completed { return false; }
@@ -495,7 +488,7 @@ pub async fn handle_command(
                             return false;
                         }
                         
-                        // 4. Default: If user hasn't set class, show all (safe default)
+                  
                         true 
                     }).collect();
 
@@ -510,7 +503,7 @@ pub async fn handle_command(
                     } else {
                         let assignment = &filtered_assignments[idx];
 
-                        // Check if we have stored messages
+                     
                         if assignment.relating_messages.is_empty() {
                             return CommandResponse::Text(
                                 "❌ Pesan asli untuk tugas ini belum tersimpan.\n\
@@ -545,7 +538,7 @@ pub async fn handle_command(
                             due_text
                         );
 
-                        // Return messages to be resent
+                        
                         CommandResponse::ResendMessages {
                             messages: assignment.relating_messages.clone(),
                             summary,
@@ -579,17 +572,16 @@ pub async fn handle_command(
 
             match get_active_assignments_for_user(pool, user_phone, Some(logger)).await {
                 Ok((assignments, user_settings)) => {
-                    // Apply the SAME filtering as #todo
                     let filtered_assignments: Vec<_> = assignments.into_iter().filter(|a| {
-                        // 1. Skip completed tasks
+                    
                         if a.is_completed { return false; }
                         
-                        // 2. General tasks (all) -> INCLUDE
+                       
                         if a.parallel_codes.is_empty() || a.parallel_codes.contains(&"all".to_string()) {
                             return true; 
                         }
                         
-                        // 3. Check user settings for this course
+                       
                         if let Some(user_codes_str) = user_settings.get(&a.course_name) {
                             let user_codes: Vec<&str> = user_codes_str.split(',').collect();
                             
@@ -602,7 +594,7 @@ pub async fn handle_command(
                             return false;
                         }
                         
-                        // 4. Default: If user hasn't set class, show all (safe default)
+                
                         true 
                     }).collect();
 

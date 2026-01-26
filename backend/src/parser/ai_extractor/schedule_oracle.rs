@@ -22,7 +22,7 @@ struct ScheduleData {
 struct CourseSchedule {
     course: String,
     parallel: String,
-    schedule: String, // e.g., "08:00-09:40"
+    schedule: String, 
 }
 
 pub struct ScheduleOracle {
@@ -81,7 +81,7 @@ impl ScheduleOracle {
         }
     }
     
-    /// NEW: Get next meeting with time (date and start time)
+    /// Get next meeting with time (date and start time)
     pub fn get_next_meeting_with_time(
         &self,
         course_name: &str,
@@ -118,7 +118,7 @@ impl ScheduleOracle {
         next_meetings.into_iter().next()
     }
     
-    /// Get next meeting for a course and parallel (date only - backward compatible)
+    /// Get next meeting for a course and parallel 
     pub fn get_next_meeting(
         &self,
         course_name: &str,
@@ -169,7 +169,7 @@ impl ScheduleOracle {
         } else if to_num < from_num {
             (7 - from_num + to_num) as i64
         } else {
-            7 // Same day -> next week
+            7 
         }
     }
     

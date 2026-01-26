@@ -448,8 +448,6 @@ async fn webhook(
             tags.push(format!("#{}", cmd_tag));
         }
         MessageType::NeedsAI(_) => {
-            // Just mark as needs AI processing
-            // Final classification tags will be added after AI processes the message
             tags.push("#ai".to_string());
         }
     }
@@ -989,7 +987,7 @@ async fn handle_ai_classification(
     let source_chat_id = source_chat_id.to_string(); // Clone untuk async block
 
     match classification {
-        // NEW: Handle multiple assignments
+        // Handle multiple assignments
         AIClassification::MultipleAssignments { assignments, .. } => {
             // Add batch tag
             if let Some(tui_state) = TUI_STATE.get() {
@@ -1612,19 +1610,18 @@ async fn handle_single_assignment(
 }
 
 
-// FITUR BARU: FUNGSI HELPER DENGAN KIRIM REPLY DENGAN ID PESAN
+// FITUR : FUNGSI HELPER DENGAN KIRIM REPLY DENGAN ID PESAN
 
 // Fungsi Helper Baru: Bisa Kirim Reply ke ID tertentu
 async fn send_reply_with_id(chat_id: &str, text: &str, reply_to: Option<String>) -> Result<(), String> {
     let waha_url = format!("{}/api/sendText", std::env::var("WAHA_URL").unwrap_or_else(|_| "http://waha:3000".to_string()));
     let api_key = std::env::var("WAHA_API_KEY").unwrap_or_else(|_| "devkey123".to_string());
     
-    // Gunakan struct yang sudah diupdate dengan field reply_to
     let payload = SendTextRequest { 
         chat_id: chat_id.to_string(), 
         text: text.to_string(), 
         session: "default".to_string(),
-        reply_to: reply_to // Masukkan ID pesan disini
+        reply_to: reply_to 
     };
     
     let client = reqwest::Client::new();
@@ -1642,7 +1639,7 @@ async fn send_reply_with_id(chat_id: &str, text: &str, reply_to: Option<String>)
 async fn send_reply(chat_id: &str, text: &str) -> Result<(), String> {
     send_reply_with_id(chat_id, text, None).await
 }
-// END FITUR
+
 
 #[allow(non_snake_case)]
 /// Send update notification to all academic channels with quoted reply to original message
@@ -1776,7 +1773,6 @@ async fn send_academic_update_notification(
 }
 
 /// Format a message for manual quote fallback
-/// Truncates to 100 chars and removes newlines to prevent breaking WhatsApp markdown
 fn format_quote_fallback(message: &str) -> String {
     // Remove all newlines and excessive whitespace
     let cleaned = message
@@ -1846,9 +1842,6 @@ fn is_parallel_superset_or_equal(new_codes: &[String], existing_codes: &[String]
         return false;
     }
     
-    // New codes must contain ALL existing codes (superset or equal)
-    // Example: new=[k1,k2,k3] vs existing=[k1,k2] → true (superset)
-    // Example: new=[k2] vs existing=[k1,k2] → false (subset, not superset)
     existing_codes.iter().all(|existing| 
         new_codes.iter().any(|new| new.eq_ignore_ascii_case(existing))
     )
