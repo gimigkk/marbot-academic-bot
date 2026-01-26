@@ -85,7 +85,7 @@ async fn health_check() -> Json<serde_json::Value> {
 
 /// Check WAHA service health and authentication status
 async fn check_waha_health() -> String {
-    // Try multiple URLs in order of preference
+
     let waha_urls = vec![
         std::env::var("WAHA_URL").unwrap_or_else(|_| "http://marbot_waha:3001".to_string()),
         "http://localhost:3001".to_string(),
@@ -100,7 +100,7 @@ async fn check_waha_health() -> String {
         .build()
         .unwrap();
     
-    // Try each URL until one works
+  
     for waha_url in &waha_urls {
         let session_url = format!("{}/api/sessions/default", waha_url);
         
@@ -130,13 +130,13 @@ async fn check_waha_health() -> String {
                 }
             }
             Err(_) => {
-                // Try next URL
+               
                 continue;
             }
         }
     }
     
-    // All URLs failed
+
     "\x1b[31m❌ DOCKER NOT RUNNING\x1b[0m".to_string()
 }
 
@@ -144,13 +144,11 @@ async fn check_waha_health() -> String {
 async fn main() {
     dotenv::dotenv().ok();
 
-    // 1. Print MAR and BOT with white blocks and orange shadow
     let mar_lines: Vec<&str> = BANNER_ART.lines().collect();
     let bot_lines: Vec<&str> = BANNER_ART_BOT.lines().collect();
 
     for i in 0..mar_lines.len().max(bot_lines.len()) {
         if i < mar_lines.len() {
-            // Replace █ with white, ╔═╗║ etc. with orange shadow
             let line = mar_lines[i]
                 .replace('█', "\x1b[38;2;255;255;255m█\x1b[38;2;198;97;63m")
                 .replace('╗', "\x1b[38;2;198;97;63m╗")
@@ -219,7 +217,7 @@ async fn main() {
     let cache = Arc::new(Mutex::new(HashSet::new()));
     let spam_tracker = Arc::new(Mutex::new(HashMap::new())); 
 
-    // Cleanup for spam tracker, avoids memory leak
+
     let spam_tracker_clone = spam_tracker.clone();
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(300));
@@ -229,7 +227,7 @@ async fn main() {
             let mut tracker = spam_tracker_clone.lock().await;
             let now = Instant::now();
             
-            // Remove expired entries
+           
             tracker.retain(|_, (_, reset_time)| now < *reset_time);
             
             // Safety limit
@@ -242,12 +240,12 @@ async fn main() {
     // 4. Initialize TUI System
     let (tui_state, log_tx) = tui::init();
     
-    // Store TUI state globally for access in webhook handler
+    
     TUI_STATE.set(tui_state.clone()).ok();
     
     tui::spawn_log_collector(tui_state.clone());
 
-    // Periodic cleanup for dashboard.
+ 
     tui_state.clone().start_periodic_cleanup();
 
     // 5. Run Scheduler
@@ -270,13 +268,13 @@ async fn main() {
         tui_state: tui_state.clone(),  
     };
     
-    // Create dashboard routes with auth middleware
+  
     let dashboard_routes = Router::new()
         .route("/tui", get(dashboard::serve_dashboard_page))
         .route("/tui/api/data", get(dashboard::get_dashboard_data))
         .route_layer(middleware::from_fn(dashboard::basic_auth_middleware));
     
-    // Build the complete app - public routes + protected dashboard
+   
     let app = Router::new()
         .route("/webhook", post(webhook))
         .route("/health", get(health_check))
@@ -309,12 +307,12 @@ async fn webhook(
     //MONITORING GUIS
     let request_start = Instant::now();
 
-    // Only process "message.any" events
+   
     if payload.event != "message.any" {
         return StatusCode::OK;
     }
 
-    // Deduplication
+    
     let dedup_key = format!(
         "{}:{}:{}",
         payload.payload.id,
@@ -333,7 +331,7 @@ async fn webhook(
         }
     }
 
-    // Ignore messages from the bot itself
+
     if payload.payload.from_me {
         return StatusCode::OK;
     }
@@ -344,7 +342,7 @@ async fn webhook(
     // EXTRACT SENDER AND CHAT IDs
     let chat_id = &payload.payload.from;  
     
-    // Extract sender's actual phone number
+
     let sender_phone = if chat_id.ends_with("@g.us") {
         payload.payload.participant
             .as_ref()
@@ -353,19 +351,19 @@ async fn webhook(
         chat_id
     };
     
-    // Extract WhatsApp display name - Multi-engine compatible
+    // Extract WhatsApp display name 
     let sender_name = payload.payload.data
         .as_ref()
         .and_then(|data| {
-            // Try GOWS structure first: _data.Info.PushName
+
             data.info.as_ref()
                 .and_then(|info| info.push_name.as_ref())
                 .map(|s| s.as_str())
-                // Fallback to WEBJS/NOWEB: _data.pushName
+                // Fallback to WEBJS/NOWEB
                 .or_else(|| data.push_name.as_ref().map(|s| s.as_str()))
         })
         .unwrap_or_else(|| {
-            // Last resort: extract from phone number
+
             sender_phone.split('@').next().unwrap_or(sender_phone)
         });
 
@@ -386,7 +384,7 @@ async fn webhook(
             .entry(sender_phone.to_string())
             .or_insert((0, Instant::now() + Duration::from_secs(WINDOW_SECONDS)));
 
-        // Cek apakah waktu reset sudah lewat?
+        // Cek apakah waktu reset 
         if Instant::now() > *reset_time {
             *count = 1;
             *reset_time = Instant::now() + Duration::from_secs(WINDOW_SECONDS);
@@ -396,7 +394,7 @@ async fn webhook(
 
         // Cek BATAS
         if *count > MAX_MESSAGES {
-            // NOTE: This spam blocking happens before job creation, so no logger needed here
+
             println!("🚫 SPAM COMMAND BLOCKED: {} sent > {} cmds/{}s", sender_phone, MAX_MESSAGES, WINDOW_SECONDS);
             
             if *count == MAX_MESSAGES + 1 {
@@ -408,16 +406,15 @@ async fn webhook(
         }
     }
 
-    // Extract quoted message text and id
+
     let (quoted_message_text, quoted_message_id) = if let Some(quoted) = payload.payload.get_quoted_message() {
-        (Some(quoted.text.clone()), Some(quoted.id.clone()))  // Clone both to own them
+        (Some(quoted.text.clone()), Some(quoted.id.clone()))  
     } else {
         (None, None)
     };
 
-    // ============================================================
+    
     // TUI INTEGRATION: Create job logger
-    // ============================================================
     let job_id = tui::generate_job_id();
     let logger = tui::JobLogger::new(job_id.clone(), state.log_tx.clone());
 
@@ -452,15 +449,14 @@ async fn webhook(
         }
     }
 
-    // Remove duplicates
+
     tags.sort();
     tags.dedup();
 
-    // Store message body and quoted message for search
+
     let message_body_for_search = Some(payload.payload.body.clone());
     let quoted_message_for_search = quoted_message_text.clone();
 
-    // Get TUI state from global storage
     if let Some(tui_state) = TUI_STATE.get() {
         tui_state.create_job(
             job_id.clone(),
@@ -472,7 +468,7 @@ async fn webhook(
         ).await;
     }
 
-    // Terminal logging with compact formatting
+    
     let body_display = payload.payload.body
         .replace('\n', "\\n")
         .chars()
@@ -517,14 +513,14 @@ async fn webhook(
                     .ok()
                     .flatten();
 
-                // 3. Identifikasi field apa yang hilang (PENTING untuk konteks AI)
+                // 3. Identifikasi field apa yang hilang 
                 let missing_fields = if let Some(ref a) = current_assignment {
                     clarification::identify_missing_fields(a)
                 } else {
                     Vec::new()
                 };
 
-                // 4. Parse Jawaban User menggunakan AI (Async)
+                // 4. Parse Jawaban User menggunakan AI 
                 if let Some(ref assignment_obj) = current_assignment {
                     match clarification::parse_clarification_response(
                         &payload.payload.body, 
@@ -533,13 +529,13 @@ async fn webhook(
                         &logger,
                     ).await {
                         Ok(updates) => {
-                            // Extract fields from updates HashMap
+                           
                             let new_deadline = updates.get("deadline")
                                 .and_then(|d| crud::parse_deadline(d).ok());
                             let new_title = updates.get("title").cloned();
                             let new_description = updates.get("description").cloned();
                             
-                            // Parse parallel_codes
+                           
                             let new_parallel_codes = updates.get("parallel_codes")
                                 .map(|codes_str| {
                                     codes_str.split(',')
@@ -547,7 +543,7 @@ async fn webhook(
                                         .collect::<Vec<String>>()
                                 });
 
-                            // Handle course_id lookup if course_name is provided
+                           
                             let course_id = if let Some(course_name) = updates.get("course_name") {
                                 match crud::get_course_by_name(&state.pool, course_name).await {
                                     Ok(Some(course)) => Some(course.id),
@@ -579,7 +575,7 @@ async fn webhook(
                                 Some(&logger),
                             ).await {
                                 Ok(_) => {
-                                    // Update course_id if changed
+                                 
                                     if let Some(cid) = course_id {
                                         let _ = sqlx::query("UPDATE assignments SET course_id = $1 WHERE id = $2")
                                             .bind(cid)
@@ -587,8 +583,7 @@ async fn webhook(
                                             .execute(&state.pool)
                                             .await;
                                     }
-                                    
-                                    // Send notification to academic channels
+                                  
                                     if let Ok(Some(full_assignment)) = crud::get_assignment_with_course_by_id(&state.pool, assignment_id).await {
                                         send_academic_update_notification(
                                             chat_id,
@@ -641,7 +636,7 @@ async fn webhook(
                             }
                         }
                         Err(err_type) => {
-                            // Handle Error dari AI Parser
+                    
                             match err_type.as_str() {
                                 "cancelled" => {
                                     let cancel_msg = clarification::generate_cancellation_message(assignment_id);
@@ -676,7 +671,6 @@ async fn webhook(
         }
     }
     // ============= END CLARIFICATION =============
-
     // STEP 2: CHECK WHITELIST
     let (should_process, reason) =
         state.whitelist.should_process(chat_id, is_command);
@@ -703,7 +697,7 @@ async fn webhook(
                     }
                 }
                 CommandResponse::ResendMessages { messages, summary } => {
-                    // send each stored message
+                    
                     for (i, msg_content) in messages.iter().enumerate() {
                         let formatted_msg = format!("*↱* _Forwarded_ \n\n{}", msg_content);
                         
@@ -711,16 +705,16 @@ async fn webhook(
                             logger.log(&format!("❌ Failed to send message {}: {}", i + 1, e));
                         }
                         
-                        // Delay between messages
+                       
                         if i < messages.len() - 1 {
                             tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
                         }
                     }
 
-                    // Small delay before sending messages
+                
                     tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
 
-                    // First send summary
+                 
                     if let Err(e) = send_reply(chat_id, &summary).await {
                         logger.log(&format!("❌ Failed to send summary: {}", e));
                         logger.set_status(tui::state::JobStatus::Failed);
@@ -728,9 +722,9 @@ async fn webhook(
                         logger.set_status(tui::state::JobStatus::Completed);
                     }
                 }
-                // Handle AI processing request from commands
+                
                 CommandResponse::ProcessWithAI { message, force_mode: _, target_assignment } => {
-                    // Prepare AI context
+                  
                     let courses_list = crud::get_all_courses_formatted(&state.pool)
                         .await
                         .unwrap_or_default();
@@ -747,7 +741,7 @@ async fn webhook(
                     .map(|rows| rows.into_iter().collect())
                     .unwrap_or_default();
                     
-                    // Build AI message - only UPDATE mode now
+                  
                     let text: String = if let Some(ref target) = target_assignment {
                         let parallel_display = if target.parallel_codes.is_empty() {
                             String::from("N/A")
@@ -777,7 +771,7 @@ async fn webhook(
                         message
                     };
                     
-                    // Call AI extraction
+                  
                     match extract_with_ai(
                         text.as_str(),
                         &courses_list,
@@ -791,7 +785,7 @@ async fn webhook(
                         &logger,
                     ).await {
                         Ok(classification) => {
-                            // Validate it's an update
+                          
                             if !matches!(classification, AIClassification::AssignmentUpdate { .. }) {
                                 logger.log(&format!("⚠️ AI returned unexpected type: {:?}", classification));
                                 
@@ -809,7 +803,7 @@ async fn webhook(
                             
                             logger.log(&format!("✅ AI Classification: {:?}\n", classification));
                             
-                            // Apply update to target assignment
+                           
                             if let (Some(target), AIClassification::AssignmentUpdate { 
                                 new_deadline, 
                                 new_title, 
@@ -838,7 +832,7 @@ async fn webhook(
                                     Some(&logger),
                                 ).await {
                                     Ok(_) => {
-                                        // FIX 2.2: Corrected argument order
+                                    
                                         if deadline_parsed.is_some() || !parallel_codes.is_empty() || new_title.is_some() || new_description.is_some() {
                                             send_academic_update_notification(
                                                 chat_id,
@@ -890,11 +884,11 @@ async fn webhook(
         MessageType::NeedsAI(text) => {
             logger.log(">> Processing with AI...");
             
-            // Image handling  
+          
             let image_base64 = if payload.payload.has_media.unwrap_or(false) {
                 if let Some(ref media) = payload.payload.media {
                     if media.mimetype.as_ref().map(|m| m.starts_with("image/")).unwrap_or(false) {
-                        // ✅ NEW WAY - use the URL WAHA already gave us!
+                      
                         if let Some(ref url) = media.url {
                             match download_media_from_url(url, &logger).await {
                                 Ok(base64) => Some(base64),
@@ -911,33 +905,30 @@ async fn webhook(
                 } else { None }
             } else { None };
             
-            // Context fetching
+          
             let courses_list = crud::get_all_courses_formatted(&state.pool).await.unwrap_or_default();
             
-            // USE NEW FUNCTION: get_assignments_for_classification (20 assignments)
             let assignments = crud::get_assignments_for_classification(&state.pool, Some(&logger)).await.unwrap_or_default();
             
             let course_map = sqlx::query_as::<_, (uuid::Uuid, String)>("SELECT id, name FROM courses")
                 .fetch_all(&state.pool).await.map(|rows| rows.into_iter().collect()).unwrap_or_default();
             
-            // START MONITORING: AI Latency Timer
             let ai_start = Instant::now();
             
-            // Pass quoted message to AI
             match extract_with_ai(
                 &text, 
                 &courses_list, 
-                &assignments,  // 20 assignments for classification
+                &assignments,
                 &course_map, 
                 image_base64.as_deref(),
                 sender_phone,   
                 &state.pool,
                 quoted_message_text.as_deref(),
                 quoted_message_id.as_deref(),
-                &logger,  // Pass logger to AI
+                &logger, 
             ).await {
                 Ok(classification) => {
-                    //  STOP MONITORING: Log AI Duration
+                  
                     let ai_duration = ai_start.elapsed();
                     logger.log(&format!("🧠 AI Latency: {:.2?}", ai_duration));
 
@@ -963,7 +954,7 @@ async fn webhook(
         }
     }
     
-    // STOP MONITORING: Global Request Timer
+   
     let total_duration = request_start.elapsed();
     logger.log(&format!("⏱️ Total Request Processed in: {:.2?}\n", total_duration));
 
@@ -984,12 +975,12 @@ async fn handle_ai_classification(
     let message_id = message_id.to_string();
     let sender_id = sender_id.to_string();
     let message_body = message_body.to_string();
-    let source_chat_id = source_chat_id.to_string(); // Clone untuk async block
+    let source_chat_id = source_chat_id.to_string(); 
 
     match classification {
-        // Handle multiple assignments
+     
         AIClassification::MultipleAssignments { assignments, .. } => {
-            // Add batch tag
+         
             if let Some(tui_state) = TUI_STATE.get() {
                 tui_state.add_job_tag(logger.job_id().to_string(), "#batch".to_string()).await;
             }
@@ -1000,12 +991,11 @@ async fn handle_ai_classification(
                 let _ = send_reply(debug_id, &format!("📦 Processing {} assignments...", assignments.len())).await;
             }
             
-            // CRITICAL: Deduplicate within the batch BEFORE processing
             let mut unique_assignments = Vec::new();
             let mut seen = std::collections::HashSet::new();
             
             for assignment in &assignments {
-                // Create a unique key: course + title + parallel
+               
                 let parallel_key = if assignment.parallel_codes.is_empty() {
                     "none".to_string()
                 } else {
@@ -1022,7 +1012,7 @@ async fn handle_ai_classification(
                 if seen.insert(key) {
                     unique_assignments.push(assignment.clone());
                 } else {
-                    // Duplicate detected within batch
+                   
                     if let Some(debug_id) = &debug_group {
                         let _ = send_reply(
                             debug_id, 
@@ -1047,7 +1037,7 @@ async fn handle_ai_classification(
                 }
             }
             
-            // For MultipleAssignments:
+        
             for (index, assignment) in unique_assignments.into_iter().enumerate() {
                 handle_single_assignment(
                     pool.clone(),
@@ -1070,7 +1060,7 @@ async fn handle_ai_classification(
         
         // Single assignment - USE AI FOR DUPLICATE DETECTION
         AIClassification::AssignmentInfo { course_name, title, deadline, description, parallel_codes, .. } => {
-            // Add assignment tag
+           
             if let Some(tui_state) = TUI_STATE.get() {
                 tui_state.add_job_tag(logger.job_id().to_string(), "#assignment".to_string()).await;
             }
@@ -1099,7 +1089,7 @@ async fn handle_ai_classification(
             });
         }
         
-        // Assignment Update
+       
         AIClassification::AssignmentUpdate { 
             reference_keywords, 
             changes, 
@@ -1109,7 +1099,7 @@ async fn handle_ai_classification(
             parallel_codes, 
             .. 
         } => {
-            // Add update tag
+            
             if let Some(tui_state) = TUI_STATE.get() {
                 tui_state.add_job_tag(logger.job_id().to_string(), "#update".to_string()).await;
             }
@@ -1161,7 +1151,6 @@ async fn handle_ai_classification(
                             let deadline_parsed = new_deadline.as_ref()
                                 .and_then(|d| crud::parse_deadline(d).ok());
                             
-                            // Handle the result properly
                             match crud::update_assignment_fields(
                                 &pool_clone,
                                 id,
@@ -1309,7 +1298,6 @@ async fn handle_ai_classification(
         }
         
         AIClassification::Unrecognized { reason, category } => {
-            // Add unrecognized category tag
             if let Some(tui_state) = TUI_STATE.get() {
                 let tag = match category {
                     UnrecognizedCategory::Informal => "#informal",
@@ -1339,7 +1327,6 @@ async fn handle_ai_classification(
     }
 }
 
-/// Handle a single assignment with improved AI-powered duplicate detection
 #[allow(non_snake_case)]
 async fn handle_single_assignment(
     pool: PgPool,
@@ -1361,7 +1348,7 @@ async fn handle_single_assignment(
         .and_then(|d| crud::parse_deadline(d).ok());
     let parallel_code_parsed = extract_parallel_code(&title);
 
-    // Build final parallel codes Vectors - MORE EXPLICIT
+
     let final_parallel_codes: Vec<String> = {
         if !parallel_codes.is_empty() {
             parallel_codes.clone()
@@ -1376,7 +1363,7 @@ async fn handle_single_assignment(
         crud::get_course_by_name(&pool, name).await.ok().flatten().map(|c| c.id)
     } else { None };
     
-    // DUPLICATE DETECTION - WITH STRICT PARALLEL MATCHING
+   
     if let Some(_cid) = course_id {
         if let Some(cname) = &course_name {
             let course_map: HashMap<uuid::Uuid, String> = sqlx::query_as::<_, (uuid::Uuid, String)>(
@@ -1387,21 +1374,19 @@ async fn handle_single_assignment(
             .map(|r| r.into_iter().collect())
             .unwrap_or_default();
             
-            // USE NEW FUNCTION: get_recent_assignments_for_duplicate_check (100 assignments)
             let existing_assignments = crud::get_recent_assignments_for_duplicate_check(&pool, Some(&logger))
                 .await
                 .unwrap_or_default();
             
             if !existing_assignments.is_empty() {
-                // Save length BEFORE filtering
+        
                 let total_count = existing_assignments.len();
                 
-                // STRICT FILTERING: Only check duplicates if new parallels are superset or equal to existing
-                // This prevents treating parallel-specific variants as duplicates
+        
                 let mut strict_candidates: Vec<Assignment> = Vec::new();
                 
                 for assignment in existing_assignments {
-                    // Must be same course
+                 
                     let same_course = assignment.course_id
                         .and_then(|id| course_map.get(&id))
                         .map(|name| name.eq_ignore_ascii_case(cname))
@@ -1410,8 +1395,7 @@ async fn handle_single_assignment(
                     if !same_course {
                         continue;
                     }
-                    
-                    // Only consider duplicate if new parallels are superset or equal
+                
                     if is_parallel_superset_or_equal(&final_parallel_codes[..], &assignment.parallel_codes[..]) {
                         strict_candidates.push(assignment);
                     }
@@ -1491,7 +1475,7 @@ async fn handle_single_assignment(
     }
     
 
-    // CREATE NEW ASSIGNMENT (no duplicate found)
+
     let new_assignment = NewAssignment {
         course_id, 
         title: title_clone.clone(), 
@@ -1512,7 +1496,7 @@ async fn handle_single_assignment(
                 if let Ok(Some(assignment)) = crud::get_assignment_by_title_and_course(&pool, &title_clone, cid).await {
                     if let Ok(Some(full_assign)) = crud::get_assignment_with_course_by_id(&pool, assignment.id).await {
                         
-                        // Compact assignment info display
+                    
                         logger.log("🔍 Starting clarification check...");
                         logger.log(&format!("   \x1b[36m📚 {}\x1b[0m", full_assign.course_name));
                         logger.log(&format!("   \x1b[1m📝 {}\x1b[0m", full_assign.title));
@@ -1538,7 +1522,7 @@ async fn handle_single_assignment(
                             logger.log(&format!("   \x1b[35m🧩 {}\x1b[0m", full_assign.parallel_codes.join(", ").to_uppercase()));
                         }
                         
-                        // Check for missing fields
+                   
                         let missing = clarification::identify_missing_fields(&full_assign);
                         
                         if !missing.is_empty() {
@@ -1553,7 +1537,7 @@ async fn handle_single_assignment(
                                     Err(e) => logger.log(&format!("   \x1b[31m❌ Send failed: {}\x1b[0m\n", e)),
                                 }
                             }
-                            return; // Don't send success message
+                            return; 
                         } else {
                             logger.log("   \x1b[32m✅ Complete (no clarification needed)\x1b[0m\n");
                         }
@@ -1611,8 +1595,6 @@ async fn handle_single_assignment(
 
 
 // FITUR : FUNGSI HELPER DENGAN KIRIM REPLY DENGAN ID PESAN
-
-// Fungsi Helper Baru: Bisa Kirim Reply ke ID tertentu
 async fn send_reply_with_id(chat_id: &str, text: &str, reply_to: Option<String>) -> Result<(), String> {
     let waha_url = format!("{}/api/sendText", std::env::var("WAHA_URL").unwrap_or_else(|_| "http://waha:3000".to_string()));
     let api_key = std::env::var("WAHA_API_KEY").unwrap_or_else(|_| "devkey123".to_string());
@@ -1635,14 +1617,12 @@ async fn send_reply_with_id(chat_id: &str, text: &str, reply_to: Option<String>)
     if res.status().is_success() { Ok(()) } else { Err(format!("API Error")) }
 }
 
-// Wrapper agar kode lama yang memanggil send_reply("chat", "text") tetap jalan
 async fn send_reply(chat_id: &str, text: &str) -> Result<(), String> {
     send_reply_with_id(chat_id, text, None).await
 }
 
 
 #[allow(non_snake_case)]
-/// Send update notification to all academic channels with quoted reply to original message
 async fn send_academic_update_notification(
     source_chat: &str,
     assignment_id: uuid::Uuid,
@@ -1659,7 +1639,6 @@ async fn send_academic_update_notification(
     let academic_env = std::env::var("ACADEMIC_CHANNELS").unwrap_or_default();
     let channels: Vec<&str> = academic_env.split(',').map(|s| s.trim()).collect();
     
-    // Build list of updated fields
     let mut updated_fields = Vec::new();
     
     if let Some(d) = deadline {
@@ -1691,7 +1670,6 @@ async fn send_academic_update_notification(
         updated_fields.push(format!("deskripsi: {}", desc_preview));
     }
     
-    // If no fields were updated, don't send notification
     if updated_fields.is_empty() {
         return;
     }
@@ -1706,7 +1684,7 @@ async fn send_academic_update_notification(
         format!("{}, dan {}", rest.join(", "), last)
     };
     
-    // Format parallel codes for title
+   
     let parallel_display = if assignment_parallels.is_empty() {
         String::new()
     } else {
@@ -1716,7 +1694,7 @@ async fn send_academic_update_notification(
             .join(", "))
     };
     
-    // Query assignment to get message_ids and relating_messages
+    
     let assignment_data = sqlx::query_as::<_, (Vec<String>, Vec<String>)>(
         "SELECT message_ids, relating_messages FROM assignments WHERE id = $1"
     )
@@ -1772,9 +1750,9 @@ async fn send_academic_update_notification(
     }
 }
 
-/// Format a message for manual quote fallback
+
 fn format_quote_fallback(message: &str) -> String {
-    // Remove all newlines and excessive whitespace
+
     let cleaned = message
         .lines()
         .map(|line| line.trim())
@@ -1788,8 +1766,7 @@ fn format_quote_fallback(message: &str) -> String {
     } else {
         cleaned
     };
-    
-    // Format as quote
+
     format!("> {}", truncated)
 }
 
@@ -1821,10 +1798,8 @@ fn extract_parallel_code(title: &str) -> Option<String> {
     ["K1", "K2", "K3", "P1", "P2", "P3"].iter().find(|&c| u.contains(c)).map(|c| c.to_lowercase())
 }
 
-/// Check if new_codes is a superset or equal to existing_codes
-/// This determines if we should check for duplicates
 fn is_parallel_superset_or_equal(new_codes: &[String], existing_codes: &[String]) -> bool {
-    // "all" always matches
+
     if new_codes.iter().any(|c| c.eq_ignore_ascii_case("all")) {
         return true;
     }
@@ -1832,12 +1807,12 @@ fn is_parallel_superset_or_equal(new_codes: &[String], existing_codes: &[String]
         return true;
     }
     
-    // Both empty = match
+
     if new_codes.is_empty() && existing_codes.is_empty() {
         return true;
     }
     
-    // If either is empty but not both = no match
+
     if new_codes.is_empty() || existing_codes.is_empty() {
         return false;
     }
@@ -1848,21 +1823,19 @@ fn is_parallel_superset_or_equal(new_codes: &[String], existing_codes: &[String]
 }
 
 
-// Download from the actual URL provided by WAHA
+
 async fn download_media_from_url(media_url: &str, logger: &tui::JobLogger) -> Result<String, String> {
     logger.log(&format!("   📥 Original URL: {}", media_url));
     
-    // Fix localhost URLs - replace with actual Docker hostname
+
     let fixed_url = if media_url.contains("localhost:3000") {
-        // Try multiple possible hostnames
+   
         let waha_hosts = vec![
             std::env::var("WAHA_URL").ok(),
             Some("http://waha:3000".to_string()),
             Some("http://marbot_waha:3000".to_string()),
         ];
-        
-        // Use the first available hostname, or fallback to waha:3000
-        let base_url = waha_hosts.into_iter()
+                let base_url = waha_hosts.into_iter()
             .flatten()
             .next()
             .unwrap_or_else(|| "http://waha:3000".to_string());
@@ -1877,7 +1850,7 @@ async fn download_media_from_url(media_url: &str, logger: &tui::JobLogger) -> Re
     
     logger.log(&format!("   📥 Downloading from: {}", fixed_url));
     
-    // WAHA uses API Key authentication
+
     let api_key = std::env::var("WAHA_API_KEY")
         .unwrap_or_else(|_| "devkey123".to_string());
     
@@ -1906,7 +1879,7 @@ async fn download_media_from_url(media_url: &str, logger: &tui::JobLogger) -> Re
     use image::io::Reader as ImageReader;
     use std::io::Cursor;
 
-    // Compress if > 3.5MB
+
     if (bytes.len() as f64 / 1_000_000.0) > 3.5 {
         logger.log("   🔄 Compressing image...");
         
