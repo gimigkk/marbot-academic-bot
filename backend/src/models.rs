@@ -48,16 +48,13 @@ pub struct MessagePayload {
 }
 
 impl MessagePayload {
-   
     pub fn get_quoted_message(&self) -> Option<QuotedMessage> {
-     
+
         if let Some(ref quoted) = self.quoted_msg {
             return Some(quoted.clone());
         }
-        
-       
+     
         if let Some(reply_to) = self.extra.get("replyTo") {
-
             if let Some(body_str) = reply_to.get("body").and_then(|v| v.as_str()) {
                 return Some(QuotedMessage {
                     id: String::new(), 
@@ -130,7 +127,7 @@ pub struct SendTextRequest {
     pub text: String,
     pub session: String,
     #[serde(rename = "reply_to", skip_serializing_if = "Option::is_none")]
-    pub reply_to: Option<String>,  // Changed from "replyTo" to "reply_to" because of GOWS anjir
+    pub reply_to: Option<String>,  
 }
 
 #[derive(Debug, Serialize)]
@@ -171,7 +168,6 @@ pub enum BotCommand {
 }
 
 
-// struct untuk mapping setting user (untuk crud)
 #[derive(Debug, sqlx::FromRow)]
 pub struct UserCourseSetting {
     pub course_id: uuid::Uuid,
@@ -228,7 +224,7 @@ pub enum AIClassification {
 }
 
 impl AIClassification {
-  
+    /// Clean up parallel codes - if "all" is present, remove all other codes
     pub fn clean_parallel_codes(self) -> Self {
         match self {
             AIClassification::AssignmentInfo { 
@@ -287,8 +283,6 @@ impl AIClassification {
                     original_message,
                 }
             }
-            
-        
             other => other,
         }
     }
@@ -310,6 +304,7 @@ pub enum UnrecognizedCategory {
     AcademicRelated,   
 }
 
+/// Individual assignment data for batch processing
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct AssignmentData {
     pub course_name: String,
@@ -391,10 +386,9 @@ impl AssignmentWithCourse {
     pub fn deadline_is_missing(&self) -> bool {
         self.deadline.is_none()
     }
-    // FORMAT PARALLEL
     pub fn format_parallel_display(&self) -> String {
         if self.parallel_codes.is_empty() {
-            "N/A".to_string()  
+            "N/A".to_string()  // No parallel set = N/A
         } else {
             format!("[{}]", self.parallel_codes
                 .iter()
@@ -406,7 +400,7 @@ impl AssignmentWithCourse {
 }
 
 impl Assignment {
-    
+  
     pub fn format_parallel_display(&self) -> String {
         if self.parallel_codes.is_empty() {
             "N/A".to_string()
@@ -423,13 +417,11 @@ impl Assignment {
         if self.parallel_codes.is_empty() {
             return false;
         }
-        
       
         if self.parallel_codes.contains(&"all".to_string()) {
             return true;
         }
-        
-
+       
         self.parallel_codes.iter()
             .any(|p| p.eq_ignore_ascii_case(parallel))
     }
