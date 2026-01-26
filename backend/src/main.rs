@@ -304,7 +304,6 @@ async fn webhook(
     Json(payload): Json<WebhookPayload>,
 ) -> StatusCode {
 
-    //MONITORING GUIS
     let request_start = Instant::now();
 
    
@@ -501,23 +500,21 @@ async fn webhook(
         if is_clarification_reply {
             logger.log(&format!("📝 Clarification response detected from {}", sender_phone));
             
-            // 1. Extract ID Assignment dari pesan yang di-reply
+
             if let Some(assignment_id) = clarification::extract_assignment_id_from_message(&quoted.text) {
                 
-                // 2. Ambil data assignment saat ini dari database
                 let current_assignment = crud::get_assignment_with_course_by_id(&state.pool, assignment_id)
                     .await
                     .ok()
                     .flatten();
 
-                // 3. Identifikasi field apa yang hilang 
                 let missing_fields = if let Some(ref a) = current_assignment {
                     clarification::identify_missing_fields(a)
                 } else {
                     Vec::new()
                 };
 
-                // 4. Parse Jawaban User menggunakan AI 
+             
                 if let Some(ref assignment_obj) = current_assignment {
                     match clarification::parse_clarification_response(
                         &payload.payload.body, 

@@ -14,7 +14,7 @@ pub async fn start_scheduler(
 ) -> Result<(), JobSchedulerError> {
     let sched = JobScheduler::new().await?;
 
-    // Get TUI state from global storage
+
     let tui_state = crate::TUI_STATE.get().cloned();
 
     // 1. REMINDER HARIAN (UTC TIME)
@@ -31,7 +31,7 @@ pub async fn start_scheduler(
         Box::pin(async move {
             let job_id = crate::tui::generate_job_id();
             
-            // Register system job in TUI
+        
             if let Some(tui) = &tui_state {
                 tui.create_job(
                     job_id.clone(),
@@ -67,7 +67,7 @@ pub async fn start_scheduler(
         let tui_state = tui_state_urgent.clone();
         
         Box::pin(async move {
-            // PRE-CHECK: Only create job if there are urgent tasks
+        
             let now = Utc::now();
             let one_hour_later = now + chrono::Duration::hours(1);
             
@@ -171,7 +171,6 @@ async fn check_personal_reminders(
 
     logger.log(&format!("📨 Menemukan {} tugas untuk reminder personal", tasks.len()));
 
-    // Import for concurrent processing
     use futures::stream::{self, StreamExt};
 
     let client = reqwest::Client::new();
@@ -179,31 +178,29 @@ async fn check_personal_reminders(
     let api_key = std::env::var("WAHA_API_KEY").unwrap_or_else(|_| "devkey123".to_string());
 
     for task in tasks {
-        // Get course name
+    
         let course_name: String = sqlx::query_scalar("SELECT name FROM courses WHERE id = $1")
             .bind(task.course_id)
             .fetch_one(&pool)
             .await?;
 
         if let Some(cid) = task.course_id {
-            // Get target users
+
             let interested_users = crud::get_users_for_course_reminder(&pool, cid).await?;
             
             let deadline_wib = task.deadline.unwrap()
                 .with_timezone(&chrono::FixedOffset::east_opt(7 * 3600).unwrap());
             let time_str = deadline_wib.format("%H:%M").to_string();
 
-            // Format parallel display
             let parallel_display = if !task.parallel_codes.is_empty() {
                 format!(" {}", task.format_parallel_display())
             } else {
                 String::new()
             };
 
-            // Concurrent processing with rate limiting
             let mut recipients = Vec::new();
             
-            // Filter users first
+         
             for (user_id, user_codes_str) in interested_users {
                 let user_codes: Vec<&str> = user_codes_str.split(',').collect();
                 
@@ -226,7 +223,6 @@ async fn check_personal_reminders(
 
             logger.log(&format!("   -> Mengirim PM ke {} mahasiswa untuk tugas '{}'", recipients.len(), task.title));
 
-            // Build message once
             let message = format!(
                 "*[PENGINGAT PRIBADI H < 3 JAM]*\n\n\
                 📌 *{}*\n\
@@ -239,7 +235,6 @@ async fn check_personal_reminders(
                 time_str
             );
 
-            // Process in batches of 10 concurrent requests
             let client_ref = &client;
             let waha_url_ref = &waha_url;
             let api_key_ref = &api_key;
@@ -475,7 +470,6 @@ fn humanize_deadline(deadline: &Option<DateTime<Utc>>) -> String {
     match deadline {
         Some(deadline_utc) => {
             let delta = days_left(deadline_utc);
-            // Format tanggal juga pakai WIB
             let wib_offset = chrono::FixedOffset::east_opt(7 * 3600).unwrap();
             let deadline_wib = deadline_utc.with_timezone(&wib_offset);
             let due_wib = deadline_wib.date_naive();
