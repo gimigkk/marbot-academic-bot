@@ -14,18 +14,14 @@ use crate::tui::JobLogger;
 
 // ===== CONSTANTS & STATICS =====
 
-/// Compile regex once at startup for performance
 static PARALLEL_CODE_REGEX: Lazy<Regex> = Lazy::new(|| {
-    // Match k1-k4, p1-p4, r1-r4 (case-insensitive, word boundaries)
     Regex::new(r"(?i)\b([kprs][1-4])\b").unwrap()
 });
 
-/// Maximum number of sender history patterns to include
 const MAX_HISTORY_PATTERNS: usize = 3;
 
 // ===== PUBLIC TYPES =====
 
-/// Information about a quoted assignment from database
 #[derive(Debug, Clone)]
 pub struct QuotedAssignmentInfo {
     pub assignment_id: uuid::Uuid,
@@ -34,7 +30,6 @@ pub struct QuotedAssignmentInfo {
     pub parallel_codes: Vec<String>,
 }
 
-/// Minimal context needed for main AI prompt
 #[derive(Debug, Clone)]
 pub struct MessageContext {
     //pub parallel_codes: Vec<String>,   remove all global parallel references
@@ -47,8 +42,6 @@ pub struct MessageContext {
     pub quoted_message_summary: Option<String>,
     pub quoted_assignment_id: Option<uuid::Uuid>,
 }
-
-/// Per-course context hints with per-parallel schedule info
 #[derive(Debug, Clone)]
 pub struct CourseHint {
     pub course_name: String,
@@ -57,7 +50,6 @@ pub struct CourseHint {
     pub parallel_schedules: Vec<ParallelSchedule>,
 }
 
-/// Individual parallel schedule information
 #[derive(Debug, Clone)]
 pub struct ParallelSchedule {
     pub parallel_code: String,
@@ -66,13 +58,11 @@ pub struct ParallelSchedule {
 
 // ===== PRIVATE TYPES =====
 
-/// Sender's historical assignment patterns with temporal weighting
 #[derive(Debug, Default)]
 struct SenderHistory {
     parallel_patterns: Vec<ParallelPattern>,
 }
 
-/// Individual pattern with relevance scoring
 #[derive(Debug, Clone)]
 struct ParallelPattern {
     course_name: String,
@@ -84,7 +74,6 @@ struct ParallelPattern {
 
 // ===== PUBLIC API =====
 
-/// Extract ALL parallel codes from text (handles emojis, case-insensitive)
 pub fn extract_parallel_codes_from_text(text: &str) -> Vec<String> {
     let mut codes = Vec::new();
     
@@ -133,11 +122,11 @@ pub async fn build_context(
         SenderHistory::default()
     };
     
-    // Get courses list for AI
+   
     let courses_list = get_courses_list(pool).await
         .unwrap_or_else(|_| "No courses available".to_string());
     
-    // Byte safe truncater, Emojis was breaking the system
+
     fn truncate_utf8(s: &str, max_chars: usize) -> String {
         let truncated: String = s.chars().take(max_chars).collect();
         if truncated.len() < s.len() {
@@ -149,7 +138,7 @@ pub async fn build_context(
 
     let quoted_summary = quoted_message.map(|q| truncate_utf8(q, 200));
     
-    // Call lightweight AI for context resolution
+  
     let ai_hints = call_context_resolver_ai(
         message, 
         &sender_history, 
@@ -159,21 +148,20 @@ pub async fn build_context(
         quoted_assignment.as_ref(),
         logger,
     ).await?;
-    
-    // Calculate per-course schedule hints
+ 
     let course_hints = calculate_course_hints(
         &ai_hints,
         schedule_oracle,
         logger,
     );
     
-    // Generate deadline hint (single assignment only)
+
     let deadline_hint = generate_deadline_hint(&course_hints);
     
-    // Determine global deadline type
+  
     let global_deadline_type = determine_global_deadline_type(&course_hints);
     
-    // Extract quoted assignment ID
+
     let quoted_assignment_id = quoted_assignment.as_ref().map(|a| a.assignment_id);
     
     Ok(MessageContext {
@@ -191,16 +179,14 @@ pub async fn build_context(
 
 // ===== CONTEXT DECISION LOGIC =====
 
-/// Determine if sender history should be loaded (avoid context pollution)
 fn should_load_sender_history(
     text_extracted_parallels: &[String],
     quoted_assignment: &Option<QuotedAssignmentInfo>,
 ) -> bool {
-    // Skip history if we have explicit context
+   
     text_extracted_parallels.is_empty() && quoted_assignment.is_none()
 }
 
-/// Generate single deadline hint (only for unambiguous single-assignment case)
 fn generate_deadline_hint(course_hints: &[CourseHint]) -> Option<String> {
     if course_hints.len() == 1 {
         let hint = &course_hints[0];
@@ -211,7 +197,6 @@ fn generate_deadline_hint(course_hints: &[CourseHint]) -> Option<String> {
     None
 }
 
-/// Determine global deadline type across all courses
 fn determine_global_deadline_type(course_hints: &[CourseHint]) -> String {
     if course_hints.is_empty() {
         return "unknown".to_string();
@@ -221,7 +206,7 @@ fn determine_global_deadline_type(course_hints: &[CourseHint]) -> String {
         return course_hints[0].deadline_type.clone();
     }
     
-    // Check if all courses have same deadline type
+  
     let types: std::collections::HashSet<_> = course_hints
         .iter()
         .map(|h| h.deadline_type.as_str())
@@ -236,7 +221,6 @@ fn determine_global_deadline_type(course_hints: &[CourseHint]) -> String {
 
 // ===== DATABASE QUERIES =====
 
-/// Look up assignment by message ID (reliable database reference)
 async fn lookup_assignment_by_message_id(
     pool: &PgPool,
     message_id: &str,
@@ -265,7 +249,6 @@ async fn lookup_assignment_by_message_id(
     })
 }
 
-/// Get formatted list of all available courses
 async fn get_courses_list(pool: &PgPool) -> Result<String, sqlx::Error> {
     #[derive(Debug)]
     struct CourseRow {
@@ -303,14 +286,14 @@ async fn get_courses_list(pool: &PgPool) -> Result<String, sqlx::Error> {
     Ok(formatted)
 }
 
-/// Get sender's historical patterns with HYBRID scoring (frequency × recency × context)
+
 async fn get_sender_history(
     pool: &PgPool, 
     sender_id: &str,
     text_extracted_parallels: &[String],
 ) -> Result<SenderHistory, sqlx::Error> {
     
-    // Query with temporal and frequency data
+   
     let records = sqlx::query!(
         r#"
         SELECT 
@@ -339,20 +322,19 @@ async fn get_sender_history(
     .fetch_all(pool)
     .await?;
     
-    // Calculate relevance scores for each pattern
+   
     let mut patterns: Vec<ParallelPattern> = records
         .into_iter()
         .filter_map(|record| {
             record.parallel_codes.map(|parallel_codes| {
                 let count = record.count.unwrap_or(0) as i32;
                 let recency_weight = record.recency_weight as f32;
-                // SQLx returns DateTime<Utc>, but we store NaiveDateTime
+             
                 let last_used = record.last_used.unwrap().naive_utc();
-                
-                // BASE SCORE: frequency × recency
+              
                 let base_score = (count as f32) * recency_weight;
                 
-                // CONTEXT BOOST: If parallels match message context, boost significantly
+               
                 let context_boost = calculate_context_boost(
                     &parallel_codes, 
                     text_extracted_parallels
@@ -371,13 +353,13 @@ async fn get_sender_history(
         })
         .collect();
     
-    // Sort by relevance score (descending)
+   
     patterns.sort_by(|a, b| {
         b.relevance_score.partial_cmp(&a.relevance_score)
             .unwrap_or(std::cmp::Ordering::Equal)
     });
     
-    // Take top N patterns only (strict limit to prevent context pollution)
+ 
     patterns.truncate(MAX_HISTORY_PATTERNS);
     
     Ok(SenderHistory {
@@ -385,7 +367,6 @@ async fn get_sender_history(
     })
 }
 
-/// Calculate context boost multiplier based on parallel code overlap
 fn calculate_context_boost(
     pattern_parallels: &[String],
     message_parallels: &[String],
@@ -394,7 +375,6 @@ fn calculate_context_boost(
         return 1.0;
     }
     
-    // Check for overlap between pattern and message parallels
     let has_overlap = pattern_parallels.iter()
         .any(|pc| message_parallels.contains(pc));
     
@@ -407,7 +387,6 @@ fn calculate_context_boost(
 
 // ===== AI INTERACTION =====
 
-/// AI hints response structure
 #[derive(Debug, Deserialize)]
 struct AIHints {
     //parallel_codes: Vec<String>, remove the global
@@ -416,7 +395,6 @@ struct AIHints {
     course_hints: Vec<AICourseHint>,
 }
 
-/// Per-course hint from AI
 #[derive(Debug, Deserialize)]
 struct AICourseHint {
     course_name: String,
@@ -424,7 +402,6 @@ struct AICourseHint {
     deadline_type: String,
 }
 
-/// Call lightweight AI for context resolution
 async fn call_context_resolver_ai(
     message: &str,
     sender_history: &SenderHistory,
@@ -487,7 +464,6 @@ async fn try_gemini_context(prompt: &str, logger: &JobLogger) -> Result<AIHints,
     for (idx, model) in GEMINI_MODELS.iter().enumerate() {
         let index = idx + 1;
         
-        // Log trying line with box formatting
         print_trying_line(model, index, GEMINI_MODELS.len(), logger);
         
         let url = format!(
@@ -568,7 +544,6 @@ async fn try_gemini_context(prompt: &str, logger: &JobLogger) -> Result<AIHints,
         
         if response.status().is_success() {
             
-            // Try to parse response
             let gemini_response: GeminiResponse = match response.json().await {
                 Ok(r) => r,
                 Err(e) => {
@@ -579,7 +554,6 @@ async fn try_gemini_context(prompt: &str, logger: &JobLogger) -> Result<AIHints,
                 }
             };
             
-            // Try to extract text
             let ai_text = match extract_ai_text(&gemini_response) {
                 Ok(text) => text,
                 Err(e) => {
@@ -590,7 +564,6 @@ async fn try_gemini_context(prompt: &str, logger: &JobLogger) -> Result<AIHints,
                 }
             };
             
-            // Try to parse AI hints
             let hints = match parse_ai_hints(&ai_text) {
                 Ok(h) => h,
                 Err(e) => {
@@ -767,28 +740,25 @@ async fn try_groq_standard_context(prompt: &str, logger: &JobLogger) -> Result<A
     Err("All Groq standard models failed".to_string())
 }
 
-// ===== TRYING LINE HELPERS =====
 
 fn print_trying_line(model: &str, index: usize, total: usize, logger: &JobLogger) {
     use std::io::Write;
     print!("\r│ 🔄 TRYING : {} ({}/{})                    ", model, index, total);
     let _ = std::io::stdout().flush();
     
-    // Dashboard: send trying update
+
     logger.log_trying(model, index, total);
 }
 
 fn clear_trying_line(logger: &JobLogger) {
-    // Console: clear with \r
+   
     use std::io::Write;
     print!("\r                                                                  \r");
     let _ = std::io::stdout().flush();
     
-    // Dashboard: clear trying state
     logger.log_trying_clear();
 }
 
-/// Format sender history for prompt with relevance scoring
 fn format_history_for_prompt(history: &SenderHistory) -> String {
     if history.parallel_patterns.is_empty() {
         return "None".to_string();
@@ -818,7 +788,6 @@ fn format_history_for_prompt(history: &SenderHistory) -> String {
         .join("\n  ")
 }
 
-/// Build quoted assignment section for prompt
 fn build_quoted_section(
     quoted_assignment: Option<&QuotedAssignmentInfo>,
     quoted_context: Option<&str>,
@@ -849,7 +818,6 @@ CRITICAL: User is replying to this assignment from database:
     }
 }
 
-/// Build parallel extraction hint for prompt
 fn build_parallel_hint(text_extracted_parallels: &[String]) -> String {
     if !text_extracted_parallels.is_empty() {
         format!(
@@ -861,7 +829,7 @@ fn build_parallel_hint(text_extracted_parallels: &[String]) -> String {
     }
 }
 
-/// Build context resolver prompt with clear priority hierarchy
+
 fn build_context_resolver_prompt(
     message: &str,
     history_text: &str,
@@ -1027,7 +995,6 @@ fn format_duration(duration: &str) -> String {
     duration.to_string()
 }
 
-/// Parse AI hints from JSON response
 fn parse_ai_hints(json_text: &str) -> Result<AIHints, String> {
     serde_json::from_str(json_text)
         .map_err(|e| format!("Failed to parse AI hints: {}", e))
@@ -1035,7 +1002,6 @@ fn parse_ai_hints(json_text: &str) -> Result<AIHints, String> {
 
 // ===== SCHEDULE CALCULATION =====
 
-/// Calculate per-course hints with per-parallel schedule information
 fn calculate_course_hints(
     hints: &AIHints,
     schedule_oracle: &ScheduleOracle,
@@ -1085,7 +1051,6 @@ fn calculate_course_hints(
     course_hints
 }
 
-/// Calculate schedule information for each parallel code
 fn calculate_parallel_schedules(
     course_name: &str,
     parallel_codes: &[String],

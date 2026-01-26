@@ -249,7 +249,6 @@ pub async fn get_dashboard_data(State(state): State<AppState>) -> Json<Dashboard
     let job_responses: Vec<JobResponse> = jobs
         .iter()
         .map(|job| {
-            // Convert the job's creation timestamp to Unix timestamp in milliseconds
             let last_message_ms = job.started_at
                 .duration_since(std::time::UNIX_EPOCH)
                 .ok()

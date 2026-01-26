@@ -2,8 +2,6 @@ use std::collections::HashSet;
 
 /// Whitelist configuration for academic channels/groups
 pub struct Whitelist {
-    /// Chat IDs that are allowed to send academic info
-    /// Format: "6281234567890@c.us" for DMs or "123456789@g.us" for groups or "123@newsletter" for channels
     academic_channels: HashSet<String>,
 }
 
@@ -36,8 +34,6 @@ impl Whitelist {
         self.academic_channels.contains(chat_id)
     }
     
-    /// Check if we should process this message
-    /// Returns (should_process, reason)
     pub fn should_process(&self, chat_id: &str, is_command: bool) -> (bool, &'static str) {
         // Commands can come from ANYWHERE (DMs, groups, channels)
         if is_command {
@@ -52,7 +48,7 @@ impl Whitelist {
         }
     }
     
-    /// Add a channel to whitelist (useful for testing)
+    /// Add a channel to whitelist 
     #[allow(dead_code)]
     pub fn add_channel(&mut self, chat_id: String) {
         self.academic_channels.insert(chat_id);

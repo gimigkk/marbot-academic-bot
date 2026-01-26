@@ -7,7 +7,6 @@ use crate::tui::JobLogger;
 
 use crate::models::{Assignment, NewAssignment, Course, AssignmentWithCourse};
 
-// Helper macro for optional logging
 #[allow(unused_macros)]
 macro_rules! log {
     ($logger:expr, $($arg:tt)*) => {
@@ -19,8 +18,6 @@ macro_rules! log {
     };
 }
 
-// CREATE OPERATIONS
-/// Create a new assignment in the database
 #[allow(unused_variables)]
 #[allow(non_snake_case)]
 pub async fn create_assignment(
@@ -96,9 +93,6 @@ pub async fn create_assignment(
         new_assignment.title, real_course_name, parallel_display))
 }
 
-
-// COMPLETION OPERATIONS
-/// Mark assignment as complete
 pub async fn mark_assignment_complete(
     pool: &PgPool,
     assignment_id: Uuid,
@@ -119,7 +113,6 @@ pub async fn mark_assignment_complete(
     Ok(result.rows_affected() > 0)
 }
 
-/// Mark assignment as incomplete (Undo)
 pub async fn unmark_assignment_complete(
     pool: &PgPool,
     assignment_id: Uuid,
@@ -139,8 +132,6 @@ pub async fn unmark_assignment_complete(
     Ok(result.rows_affected() > 0)
 }
 
-// READ OPERATIONS
-/// Get the most recently completed assignment for a user
 pub async fn get_last_completed_assignment(
     pool: &PgPool,
     user_id: &str
@@ -174,7 +165,7 @@ pub async fn get_last_completed_assignment(
     Ok(assignment)
 }
 
-/// Get recent assignments for duplicate detection (
+
 pub async fn get_recent_assignments_for_duplicate_check(
     pool: &PgPool,
     logger: Option<&JobLogger>,
@@ -208,7 +199,6 @@ pub async fn get_recent_assignments_for_duplicate_check(
     Ok(assignments)
 }
 
-/// Get recent assignments for update matching 
 pub async fn get_recent_assignments_for_matching(
     pool: &PgPool,
     logger: Option<&JobLogger>,
@@ -242,7 +232,6 @@ pub async fn get_recent_assignments_for_matching(
     Ok(assignments)
 }
 
-/// Get assignments for classification context 
 pub async fn get_assignments_for_classification(
     pool: &PgPool,
     logger: Option<&JobLogger>,
@@ -287,7 +276,7 @@ pub async fn get_assignments_for_classification(
     result
 }
 
-// Update the original get_assignments 
+
 pub async fn get_assignments(
     pool: &PgPool,
     logger: Option<&JobLogger>,
@@ -332,7 +321,6 @@ pub async fn get_assignments(
     result
 }
 
-/// Get all courses as a HashMap for AI context
 pub async fn get_courses_map(pool: &PgPool) -> Result<HashMap<Uuid, String>, sqlx::Error> {
     let courses = sqlx::query_as::<_, (Uuid, String)>(
         "SELECT id, name FROM courses"
@@ -343,7 +331,6 @@ pub async fn get_courses_map(pool: &PgPool) -> Result<HashMap<Uuid, String>, sql
     Ok(courses.into_iter().collect())
 }
 
-/// Check if an assignment with this title already exists for a course
 pub async fn get_assignment_by_title_and_course(
     pool: &PgPool,
     title: &str,
@@ -379,7 +366,6 @@ pub async fn get_assignment_by_title_and_course(
     Ok(result)
 }
 
-/// Get active assignments (not past deadline)
 pub async fn get_active_assignments(
     pool: &PgPool,
     logger: Option<&JobLogger>,
@@ -514,7 +500,7 @@ pub async fn get_active_assignments_for_user(
     Ok((assignments, settings_map))
 }
 
-/// Find course by name (case-insensitive)
+
 pub async fn get_course_by_name(
     pool: &PgPool,
     course_name: &str,
@@ -529,7 +515,7 @@ pub async fn get_course_by_name(
     Ok(course)
 }
 
-/// Get course by name or alias with fuzzy matching support
+
 #[allow(non_snake_case)]
 pub async fn get_course_by_name_or_alias(
     pool: &PgPool,
@@ -602,7 +588,6 @@ pub async fn get_course_by_name_or_alias(
     Ok(None)
 }
 
-/// Get all courses formatted with their aliases for AI prompt
 pub async fn get_all_courses_formatted(pool: &PgPool) -> Result<String> {
     let courses = sqlx::query_as::<_, Course>(
         "SELECT * FROM courses ORDER BY name"
@@ -629,7 +614,7 @@ pub async fn get_all_courses_formatted(pool: &PgPool) -> Result<String> {
     Ok(format!("- {}", formatted))
 }
 
-/// Get assignment with course by ID
+
 pub async fn get_assignment_with_course_by_id(
     pool: &PgPool,
     assignment_id: Uuid,
@@ -660,7 +645,6 @@ pub async fn get_assignment_with_course_by_id(
     Ok(assignment)
 }
 
-/// Find assignments by keywords 
 pub async fn find_assignment_by_keywords(
     pool: &PgPool,
     keywords: &[String],
@@ -670,7 +654,6 @@ pub async fn find_assignment_by_keywords(
         return Ok(vec![]);
     }
     
-    // Strategy 1: Search by course + keywords
     if let Some(cid) = course_id {
         let patterns: Vec<String> = keywords
             .iter()
@@ -708,8 +691,6 @@ pub async fn find_assignment_by_keywords(
             return Ok(assignments);
         }
     }
-    
-    // Strategy 2: Search by keywords only
     let patterns: Vec<String> = keywords
         .iter()
         .map(|kw| format!("%{}%", kw.to_lowercase()))
@@ -744,7 +725,6 @@ pub async fn find_assignment_by_keywords(
 }
 
 // UPDATE OPERATIONS
-/// Update specific fields of an assignment
 #[allow(non_snake_case)]
 pub async fn update_assignment_fields(
     pool: &PgPool,
@@ -828,7 +808,7 @@ pub async fn update_assignment_fields(
 }
 
 // DELETE OPERATIONS
-/// Delete assignment by ID
+
 pub async fn delete_assignment(
     pool: &PgPool,
     id: Uuid,
@@ -851,7 +831,6 @@ pub fn parse_deadline(deadline_str: &str) -> Result<DateTime<Utc>, String> {
     // Define WIB timezone (UTC+7)
     let wib = FixedOffset::east_opt(7 * 3600).unwrap();
     
-    // Try parsing with timestamp first (YYYY-MM-DD HH:MM)
     if let Ok(naive_dt) = NaiveDateTime::parse_from_str(deadline_str, "%Y-%m-%d %H:%M") {
         return match wib.from_local_datetime(&naive_dt).single() {
             Some(dt_wib) => Ok(dt_wib.with_timezone(&Utc)),
@@ -859,7 +838,7 @@ pub fn parse_deadline(deadline_str: &str) -> Result<DateTime<Utc>, String> {
         };
     }
     
-    // Fallback: Try parsing date only (YYYY-MM-DD) - default to 23:59
+    //PALBACKK COK
     if let Ok(date) = chrono::NaiveDate::parse_from_str(deadline_str, "%Y-%m-%d") {
         let naive_datetime = date.and_hms_opt(23, 59, 59).unwrap();
         return match wib.from_local_datetime(&naive_datetime).single() {
@@ -871,7 +850,6 @@ pub fn parse_deadline(deadline_str: &str) -> Result<DateTime<Utc>, String> {
     Err(format!("Failed to parse deadline '{}'. Expected format: 'YYYY-MM-DD HH:MM' or 'YYYY-MM-DD'", deadline_str))
 }
 
-/// Set user preference for a specific course parallel (with fuzzy matching)
 #[allow(non_snake_case)]
 pub async fn set_user_course_parallel(
     pool: &PgPool,
@@ -879,18 +857,17 @@ pub async fn set_user_course_parallel(
     course_name_query: &str,
     parallel_codes: &[String],
 ) -> Result<String, sqlx::Error> {
-    // Store original query for feedback
-    let original_query = course_name_query.to_string();
     
-    // 1. Cari Course dulu berdasarkan nama/alias (with fuzzy matching)
+    let original_query = course_name_query.to_string();
+   
     let course = get_course_by_name_or_alias(pool, course_name_query).await?;
     
     match course {
         Some(c) => {
-            // Check if fuzzy matching was used
+          
             let is_exact_name_match = c.name.to_lowercase() == original_query.to_lowercase();
             
-            // Check if it matched via any alias
+        
             let matched_via_alias = if let Some(ref aliases) = c.aliases {
                 aliases.iter().any(|alias| alias.to_lowercase() == original_query.to_lowercase())
             } else {
@@ -915,7 +892,6 @@ pub async fn set_user_course_parallel(
 
             let is_special_course = special_courses.iter().any(|k| course_name_lower.contains(k));
 
-            // Bersihkan input codes (lowercase)
             let clean_codes: Vec<String> = parallel_codes.iter()
                 .map(|s| s.to_lowercase())
                 .collect();
@@ -975,8 +951,7 @@ pub async fn set_user_course_parallel(
             }
 
             let final_code_str = clean_codes.join(",");
-            
-            // 2. Upsert
+           
             sqlx::query(
                 r#"
                 INSERT INTO user_course_settings (user_id, course_id, parallel_code)
@@ -1052,9 +1027,8 @@ pub async fn get_users_for_course_reminder(
 
     Ok(rows.into_iter().map(|r| (r.user_id, r.parallel_code)).collect())
 }
-// ADDITIONAL HELPER IF NEEDED
 
-/// Helper to normalize parallel codes
+
 pub fn normalize_parallel_codes(codes: Vec<String>) -> Vec<String> {
     codes.iter()
         .map(|c| c.to_lowercase())

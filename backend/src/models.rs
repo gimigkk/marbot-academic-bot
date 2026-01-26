@@ -230,7 +230,6 @@ pub enum AIClassification {
 
 impl AIClassification {
     /// Clean up parallel codes - if "all" is present, remove all other codes
-    /// This is a safety net for when AI makes mistakes
     pub fn clean_parallel_codes(self) -> Self {
         match self {
             AIClassification::AssignmentInfo { 
@@ -294,11 +293,8 @@ impl AIClassification {
             other => other,
         }
     }
-    
-    /// Helper function to clean a parallel codes array
-    /// If "all" is present, return only ["all"]
+  
     fn clean_codes_array(codes: Vec<String>) -> Vec<String> {
-        // Check if "all" is present (case-insensitive)
         if codes.iter().any(|c| c.eq_ignore_ascii_case("all")) {
             vec!["all".to_string()]
         } else {

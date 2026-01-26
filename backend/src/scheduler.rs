@@ -56,7 +56,7 @@ pub async fn start_scheduler(
     })?).await?;
 
     // 2. REMINDER DEADLINE MEPET (H-1 JAM)
-    // Cek setiap 10 menit - but only create job when there are urgent tasks
+    // Cek setiap 10 menit 
     let pool_urgent = pool.clone();
     let log_tx_urgent = log_tx.clone();
     let tui_state_urgent = tui_state.clone();
@@ -261,8 +261,7 @@ async fn check_personal_reminders(
                         .send()
                         .await;
                     
-                    // Rate limit: 300ms between messages (instead of 2s)
-                    // 10 concurrent × 300ms = ~33 messages/second max
+                    // DELAYYY
                     tokio::time::sleep(std::time::Duration::from_millis(300)).await;
                 })
                 .await;
@@ -464,7 +463,6 @@ fn status_dot(deadline: &Option<DateTime<Utc>>) -> &'static str {
 }
 
 fn days_left(deadline_utc: &DateTime<Utc>) -> i64 {
-    // Force convert both to WIB (+7)
     let wib_offset = chrono::FixedOffset::east_opt(7 * 3600).unwrap();
     let now_wib = Utc::now().with_timezone(&wib_offset).date_naive();
     let due_wib = deadline_utc.with_timezone(&wib_offset).date_naive();
