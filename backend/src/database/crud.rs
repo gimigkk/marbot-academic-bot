@@ -871,7 +871,6 @@ pub fn parse_deadline(deadline_str: &str) -> Result<DateTime<Utc>, String> {
     Err(format!("Failed to parse deadline '{}'. Expected format: 'YYYY-MM-DD HH:MM' or 'YYYY-MM-DD'", deadline_str))
 }
 
-/// Set user preference for a specific course parallel (with fuzzy matching)
 #[allow(non_snake_case)]
 pub async fn set_user_course_parallel(
     pool: &PgPool,
@@ -879,7 +878,7 @@ pub async fn set_user_course_parallel(
     course_name_query: &str,
     parallel_codes: &[String],
 ) -> Result<String, sqlx::Error> {
-    // Store original query for feedback
+    
     let original_query = course_name_query.to_string();
     
     // 1. Cari Course dulu berdasarkan nama/alias (with fuzzy matching)
@@ -887,10 +886,10 @@ pub async fn set_user_course_parallel(
     
     match course {
         Some(c) => {
-            // Check if fuzzy matching was used
+          
             let is_exact_name_match = c.name.to_lowercase() == original_query.to_lowercase();
             
-            // Check if it matched via any alias
+        
             let matched_via_alias = if let Some(ref aliases) = c.aliases {
                 aliases.iter().any(|alias| alias.to_lowercase() == original_query.to_lowercase())
             } else {
@@ -915,7 +914,6 @@ pub async fn set_user_course_parallel(
 
             let is_special_course = special_courses.iter().any(|k| course_name_lower.contains(k));
 
-            // Bersihkan input codes (lowercase)
             let clean_codes: Vec<String> = parallel_codes.iter()
                 .map(|s| s.to_lowercase())
                 .collect();
@@ -975,8 +973,7 @@ pub async fn set_user_course_parallel(
             }
 
             let final_code_str = clean_codes.join(",");
-            
-            // 2. Upsert
+           
             sqlx::query(
                 r#"
                 INSERT INTO user_course_settings (user_id, course_id, parallel_code)
@@ -1052,9 +1049,8 @@ pub async fn get_users_for_course_reminder(
 
     Ok(rows.into_iter().map(|r| (r.user_id, r.parallel_code)).collect())
 }
-// ADDITIONAL HELPER IF NEEDED
 
-/// Helper to normalize parallel codes
+
 pub fn normalize_parallel_codes(codes: Vec<String>) -> Vec<String> {
     codes.iter()
         .map(|c| c.to_lowercase())
