@@ -17,7 +17,6 @@ use chrono::{DateTime, Duration, FixedOffset, Datelike, NaiveDate, Utc};
 use sqlx::PgPool;
 use std::time::Instant;
 
-/// Command response - can be text or multiple messages to resend
 pub enum CommandResponse {
     Text(String),
     ResendMessages { messages: Vec<String>, summary: String },
@@ -30,8 +29,8 @@ pub enum CommandResponse {
 }
 
 pub enum AIForceMode {
-    Update,    // Force interpretation as assignment_update
-    NewOnly,   // Force interpretation as assignment_info/multiple 
+    Update, 
+    NewOnly,
 }
 
 /// Get current time in GMT+7 (Indonesian timezone)
@@ -185,8 +184,7 @@ pub async fn handle_command(
                         .to_string(),
                 );
             }
-            
-            // Get assignment by ID from #tugas
+    
             match get_active_assignments_sorted(pool, Some(logger)).await {
                 Ok(assignments) => {
                     let idx = (id as usize).saturating_sub(1);
@@ -206,8 +204,7 @@ pub async fn handle_command(
                         target.course_name,
                         target.title
                     ));
-                    
-                    // Return special response to trigger AI processing
+
                     CommandResponse::ProcessWithAI {
                         message,
                         force_mode: AIForceMode::Update,
@@ -943,7 +940,6 @@ fn humanize_deadline(deadline: &Option<DateTime<Utc>>) -> String {
                              format!("Baru saja lewat ({})", time_str)
                         }
                     } else {
-                        // Menangani yang sudah lewat (overdue) today
                         format!("Lewat {} jam ({})", hours_left.abs(), time_str)
                     }
                 },

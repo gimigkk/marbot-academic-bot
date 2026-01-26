@@ -417,11 +417,8 @@ async fn webhook(
     // TUI INTEGRATION: Create job logger
     let job_id = tui::generate_job_id();
     let logger = tui::JobLogger::new(job_id.clone(), state.log_tx.clone());
-
-    // Extract tags based on message classification
     let mut tags = Vec::new();
 
-    // Add classification tag
     match &message_type {
         MessageType::Command(cmd) => {
             use crate::models::BotCommand;
@@ -1442,7 +1439,6 @@ async fn handle_single_assignment(
                                         String::new()
                                     };
                                     
-                                    // Include reason in the message
                                     let reason_display = if !reason.is_empty() {
                                         format!("\n_{}_", reason)
                                     } else {
@@ -1545,8 +1541,6 @@ async fn handle_single_assignment(
                 }
             }
             // ============ END CLARIFICATION ============
-
-            // Success message (only if NO clarification needed)
             if let Some(debug_id) = &debug_group_id {
                 let prefix = if assignment_number > 0 {
                     format!("{}. ", assignment_number)
