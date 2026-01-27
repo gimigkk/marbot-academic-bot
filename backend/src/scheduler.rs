@@ -371,7 +371,7 @@ async fn check_urgent_deadlines(
 
     let mut message = String::new();
 
-    message.push_str("*[JANGAN LUPA KUMPULKAN! H-1 JAM]*\n\n");
+    message.push_str("*[REMINDER! H-1 JAM]*\n\n");
 
     for (i, task) in urgent_tasks.iter().enumerate() {
         let status = status_dot(&task.deadline);
