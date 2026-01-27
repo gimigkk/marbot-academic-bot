@@ -370,6 +370,13 @@ async fn webhook(
     let message_type = classify_message(&payload.payload.body);
     let is_command = matches!(message_type, MessageType::Command(_));
 
+    // STEP 2: CHECK WHITELIST (BEFORE creating job to avoid dashboard clutter)
+    let (should_process, reason) = state.whitelist.should_process(chat_id, is_command);
+
+    if !should_process {
+        // Don't create job or log for ignored messages
+        return StatusCode::OK;
+    }
 
     // ANTI-SPAM (HANYA UNTUK COMMAND)
     if is_command {
@@ -660,15 +667,6 @@ async fn webhook(
         }
     }
     // ============= END CLARIFICATION =============
-    // STEP 2: CHECK WHITELIST
-    let (should_process, reason) =
-        state.whitelist.should_process(chat_id, is_command);
-
-    if !should_process {
-        logger.log(&format!("🚫 Ignoring: {} (from: {})\n", reason, chat_id));
-        logger.set_status(tui::state::JobStatus::Completed);
-        return StatusCode::OK;
-    }
 
     // STEP 3: HANDLE MESSAGE BASED ON TYPE
     match message_type {
