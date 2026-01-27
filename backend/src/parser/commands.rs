@@ -339,12 +339,28 @@ pub async fn handle_command(
                             
             
                             for task_code in &a.parallel_codes {
-                                if user_codes.contains(&task_code.as_str()) {
+                                let task_str = task_code.as_str();
+
+                              
+                                if user_codes.contains(&task_str) {
                                     return true;
+                                }
+
+                              
+                                if task_str.starts_with('r') {
+                                    let p_variant = format!("p{}", &task_str[1..]);
+                                    if user_codes.contains(&p_variant.as_str()) {
+                                        return true;
+                                    }
+                                } else if task_str.starts_with('p') {
+                                    let r_variant = format!("r{}", &task_str[1..]);
+                                    if user_codes.contains(&r_variant.as_str()) {
+                                        return true;
+                                    }
                                 }
                             }
                             
-                          
+                            // No match found
                             return false;
                         }
                         
@@ -474,8 +490,24 @@ pub async fn handle_command(
                             let user_codes: Vec<&str> = user_codes_str.split(',').collect();
                             
                             for task_code in &a.parallel_codes {
-                                if user_codes.contains(&task_code.as_str()) {
+                                let task_str = task_code.as_str();
+
+                                
+                                if user_codes.contains(&task_str) {
                                     return true;
+                                }
+
+                                
+                                if task_str.starts_with('r') {
+                                    let p_variant = format!("p{}", &task_str[1..]);
+                                    if user_codes.contains(&p_variant.as_str()) {
+                                        return true;
+                                    }
+                                } else if task_str.starts_with('p') {
+                                    let r_variant = format!("r{}", &task_str[1..]);
+                                    if user_codes.contains(&r_variant.as_str()) {
+                                        return true;
+                                    }
                                 }
                             }
                             
@@ -580,8 +612,24 @@ pub async fn handle_command(
                             let user_codes: Vec<&str> = user_codes_str.split(',').collect();
                             
                             for task_code in &a.parallel_codes {
-                                if user_codes.contains(&task_code.as_str()) {
+                                let task_str = task_code.as_str();
+
+                            
+                                if user_codes.contains(&task_str) {
                                     return true;
+                                }
+
+                        
+                                if task_str.starts_with('r') {
+                                    let p_variant = format!("p{}", &task_str[1..]);
+                                    if user_codes.contains(&p_variant.as_str()) {
+                                        return true;
+                                    }
+                                } else if task_str.starts_with('p') {
+                                    let r_variant = format!("r{}", &task_str[1..]);
+                                    if user_codes.contains(&r_variant.as_str()) {
+                                        return true;
+                                    }
                                 }
                             }
                             
