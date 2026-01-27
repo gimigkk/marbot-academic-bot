@@ -891,7 +891,7 @@ pub async fn set_user_course_parallel(
                 "struktur data", 
                 "metode kuantitatif", 
                 "rekayasa perangkat lunak", 
-                "user experience design"
+                "desain pengalaman pengguna"
             ];
 
             let is_special_course = special_courses.iter().any(|k| course_name_lower.contains(k));
