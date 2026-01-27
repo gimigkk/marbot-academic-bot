@@ -262,6 +262,8 @@ pub struct AIClarificationResult {
     pub description: Option<String>,
     pub parallel_codes: Option<Vec<String>>,
     pub is_cancellation: bool,
+    #[serde(default)] 
+    pub is_unrecognized: bool,
 }
 
 pub async fn parse_clarification_response(
@@ -739,8 +741,14 @@ RESPONSE FORMAT (JSON only):
   "title": "string" or null,
   "description": "string" or null,
   "parallel_codes": ["K1", "K2"] or null,
-  "is_cancellation": false
+  "is_cancellation": false,
+  "is_unrecognized": false
 }}
+
+IMPORTANT RULES:
+1. If the user says "cancel", "batal", "skip", set "is_cancellation": true.
+2. If the user input is GIBBERISH, UNRELATED (e.g., just an image without context, random letters), or does not answer the question, set "is_unrecognized": true.
+3. Otherwise, extract the data.
 
 Respond with ONLY the JSON."#,
         current_date = current_date,
@@ -766,6 +774,10 @@ fn parse_ai_response(
 
     let parsed: AIClarificationResult = serde_json::from_str(cleaned)
         .map_err(|e| format!("Failed to parse AI response: {} - Raw: {}", e, cleaned))?;
+
+    if parsed.is_unrecognized {
+        return Err("unrecognized".to_string());
+    }
 
     if parsed.is_cancellation {
         return Err("cancelled".to_string());
