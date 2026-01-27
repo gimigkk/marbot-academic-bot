@@ -224,6 +224,7 @@ IF quoted message present AND (quoted is assignment):
   - Clarification: "maksudnya", "more specifically", "lebih tepatnya"
   - Change verbs: "diundur", "berubah", "extended", "diperpanjang"
   - Date/time additions without "ada tugas baru"
+  - Course reassignment: "pindahin ke", "seharusnya [course]", "diubah ke [course]"
   
   **NEW signals:**
   - Explicit: "ada tugas lagi", "tugas baru", "another assignment"
@@ -359,11 +360,12 @@ Return valid JSON only. No markdown, no explanations.
 
 **ASSIGNMENT_UPDATE:**
 ```json
-{{"type": "assignment_update", "reference_keywords": array, "changes": string, "new_deadline": string|null, "new_title": string|null, "new_description": string|null, "parallel_codes": array}}
+{{"type": "assignment_update", "reference_keywords": array, "changes": string, "new_deadline": string|null, "new_title": string|null, "new_description": string|null, "new_course_name": string|null, "parallel_codes": array}}
 ```
 - reference_keywords: [course, identifier] from quoted/referenced assignment
 - changes: what user said in reply/update message
 - new_*: Only set fields that user explicitly changed
+- new_course_name: Only if user is explicitly changing the course (e.g. "pindahin ke RPL", "seharusnya masuk Grafkom")
 - parallel_codes: Only if user is changing target parallels
 
 ---

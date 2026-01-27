@@ -212,6 +212,7 @@ pub enum AIClassification {
         new_title: Option<String>,
         new_deadline: Option<String>,
         new_description: Option<String>,
+        new_course_name: Option<String>,
         parallel_codes: Vec<String>,  
         #[serde(default)]
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -270,6 +271,7 @@ impl AIClassification {
                 new_deadline,
                 new_title,
                 new_description,
+                new_course_name,
                 parallel_codes,
                 original_message,
             } => {
@@ -281,6 +283,7 @@ impl AIClassification {
                     new_deadline,
                     new_title,
                     new_description,
+                    new_course_name,
                     parallel_codes: cleaned_codes,
                     original_message,
                 }

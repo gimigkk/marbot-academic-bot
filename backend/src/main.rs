@@ -536,8 +536,9 @@ async fn webhook(
                                         .collect::<Vec<String>>()
                                 });
 
-                           
-                            let course_id = if let Some(course_name) = updates.get("course_name") {
+
+                            // Resolve course_id if course_name was provided
+                            let new_course_id = if let Some(course_name) = updates.get("course_name") {
                                 match crud::get_course_by_name(&state.pool, course_name).await {
                                     Ok(Some(course)) => Some(course.id),
                                     Ok(None) => {
@@ -563,35 +564,30 @@ async fn webhook(
                                 new_title.clone(),
                                 new_description.clone(),
                                 new_parallel_codes.clone(),
+                                new_course_id,  // ← ADD THIS PARAMETER
                                 Some(payload.payload.id.clone()),
                                 Some(payload.payload.body.clone()), 
                                 Some(&logger),
                             ).await {
                                 Ok(_) => {
-                                 
-                                    if let Some(cid) = course_id {
-                                        let _ = sqlx::query("UPDATE assignments SET course_id = $1 WHERE id = $2")
-                                            .bind(cid)
-                                            .bind(assignment_id)
-                                            .execute(&state.pool)
-                                            .await;
-                                    }
                                   
                                     if let Ok(Some(full_assignment)) = crud::get_assignment_with_course_by_id(&state.pool, assignment_id).await {
-                                        send_academic_update_notification(
-                                            chat_id,
-                                            assignment_id,  
-                                            &full_assignment.title,
-                                            &full_assignment.course_name,
-                                            &full_assignment.parallel_codes,
-                                            new_deadline,
-                                            new_parallel_codes.as_deref(),
-                                            new_title.as_deref(),
-                                            new_description.as_deref(),
-                                            &state.pool,  
-                                            &logger,
-                                        ).await;
-                                        
+                                        if new_deadline.is_some() || new_parallel_codes.is_some() || updates.get("course_name").is_some() {
+                                            send_academic_update_notification(
+                                                chat_id,
+                                                assignment_id,  
+                                                &full_assignment.title,
+                                                &full_assignment.course_name,
+                                                &full_assignment.parallel_codes,
+                                                new_deadline,
+                                                new_parallel_codes.as_deref(),
+                                                new_title.as_deref(),
+                                                new_description.as_deref(),
+                                                updates.get("course_name").map(|s| s.as_str()),
+                                                &state.pool,  
+                                                &logger,
+                                            ).await;
+                                        }
                                         let deadline_display = full_assignment.deadline
                                             .map(|d| {
                                                 let indonesia_time = d + ChronoDuration::hours(7);
@@ -801,12 +797,34 @@ async fn webhook(
                                 new_deadline, 
                                 new_title, 
                                 new_description, 
+                                new_course_name,  
                                 parallel_codes, 
                                 changes,
                                 .. 
                             }) = (target_assignment, classification) {
                                 let deadline_parsed = new_deadline.as_ref()
                                     .and_then(|d| crud::parse_deadline(d).ok());
+
+                                // Resolve course if changed
+                                let new_course_id = if let Some(ref cname) = new_course_name {
+                                    match crud::get_course_by_name(&state.pool, cname).await {
+                                        Ok(Some(course)) => {
+                                            logger.log(&format!("🔄 Changing course to: {}", cname));
+                                            Some(course.id)
+                                        }
+                                        Ok(None) => {
+                                            let _ = send_reply(chat_id, &format!("❌ Mata kuliah '{}' tidak ditemukan", cname)).await;
+                                            logger.set_status(tui::state::JobStatus::Failed);
+                                            return StatusCode::OK;
+                                        }
+                                        Err(e) => {
+                                            logger.log(&format!("❌ Failed to lookup course: {}", e));
+                                            None
+                                        }
+                                    }
+                                } else {
+                                    None
+                                };
 
                                 logger.log(&format!("🔍 DEBUG: Updating with message_id={}, body={}", 
                                     payload.payload.id, 
@@ -820,13 +838,14 @@ async fn webhook(
                                     new_title.clone(),
                                     new_description.clone(),
                                     if parallel_codes.is_empty() { None } else { Some(parallel_codes.clone()) },
+                                    new_course_id,  
                                     Some(payload.payload.id.clone()),
                                     Some(payload.payload.body.clone()),
                                     Some(&logger),
                                 ).await {
                                     Ok(_) => {
                                     
-                                        if deadline_parsed.is_some() || !parallel_codes.is_empty() || new_title.is_some() || new_description.is_some() {
+                                        if deadline_parsed.is_some() || !parallel_codes.is_empty() || new_course_id.is_some() {
                                             send_academic_update_notification(
                                                 chat_id,
                                                 target.id,  
@@ -837,6 +856,7 @@ async fn webhook(
                                                 Some(&parallel_codes),
                                                 new_title.as_deref(),
                                                 new_description.as_deref(),
+                                                new_course_name.as_deref(),
                                                 &state.pool,  
                                                 &logger,
                                             ).await;
@@ -1089,6 +1109,7 @@ async fn handle_ai_classification(
             new_deadline, 
             new_title, 
             new_description, 
+            new_course_name,
             parallel_codes, 
             .. 
         } => {
@@ -1112,6 +1133,26 @@ async fn handle_ai_classification(
                 .await
                 .map(|r| r.into_iter().collect())
                 .unwrap_or_default();
+
+                // Resolve new course if provided
+                let new_course_id = if let Some(ref cname) = new_course_name {
+                    match crud::get_course_by_name(&pool_clone, cname).await {
+                        Ok(Some(course)) => {
+                            logger_clone.log(&format!("🔄 Changing course to: {}", cname));
+                            Some(course.id)
+                        }
+                        Ok(None) => {
+                            logger_clone.log(&format!("⚠️ Course '{}' not found - ignoring course change", cname));
+                            None
+                        }
+                        Err(e) => {
+                            logger_clone.log(&format!("❌ Failed to lookup course: {}", e));
+                            None
+                        }
+                    }
+                } else {
+                    None
+                };
                 
                 let course_name = reference_keywords.first().cloned();
                 let course_id = if let Some(name) = &course_name {
@@ -1151,12 +1192,13 @@ async fn handle_ai_classification(
                                 None,
                                 new_description.clone(),
                                 if parallel_codes.is_empty() { None } else { Some(parallel_codes.clone()) },
+                                new_course_id,
                                 Some(msg_id.clone()),
                                 Some(msg_body.clone()),
                                 Some(&logger_clone),
                             ).await {
                                 Ok(_) => {
-                                    if deadline_parsed.is_some() || !parallel_codes.is_empty() {
+                                    if deadline_parsed.is_some() || !parallel_codes.is_empty() || new_course_id.is_some() {
                                         send_academic_update_notification(
                                             &source_chat_clone,
                                             id,  
@@ -1167,6 +1209,7 @@ async fn handle_ai_classification(
                                             if parallel_codes.is_empty() { None } else { Some(&parallel_codes) },
                                             None,
                                             new_description.as_deref(),
+                                            new_course_name.as_deref(),
                                             &pool_clone,  
                                             &logger,
                                         ).await;
@@ -1223,6 +1266,7 @@ async fn handle_ai_classification(
                             new_title.clone(),
                             new_description.clone(),
                             if parallel_codes.is_empty() { None } else { Some(parallel_codes.clone()) },
+                            new_course_id,
                             Some(msg_id),
                             Some(msg_body),
                             Some(&logger_clone),
@@ -1236,6 +1280,13 @@ async fn handle_ai_classification(
                                     course_name.unwrap_or_else(|| "General".to_string())
                                 };
                                 
+                                // Get the new course name if course changed
+                                let new_course_name_for_notification = if new_course_id.is_some() {
+                                    new_course_name.as_deref()
+                                } else {
+                                    None
+                                };
+
                                 send_academic_update_notification(
                                     &source_chat_clone,
                                     assignment_id,  
@@ -1246,6 +1297,7 @@ async fn handle_ai_classification(
                                     if parallel_codes.is_empty() { None } else { Some(&parallel_codes) },
                                     new_title.as_deref(),
                                     new_description.as_deref(),
+                                    new_course_name_for_notification,
                                     &pool_clone,  
                                     &logger,
                                 ).await;
@@ -1422,6 +1474,7 @@ async fn handle_single_assignment(
                                 None,
                                 Some(desc_clone.clone()), 
                                 if final_parallel_codes.is_empty() { None } else { Some(final_parallel_codes.clone()) },
+                                None,
                                 Some(message_id.to_string()),
                                 Some(message_body.to_string()),
                                 Some(&logger),
@@ -1645,12 +1698,13 @@ async fn send_academic_update_notification(
     source_chat: &str,
     assignment_id: uuid::Uuid,
     title: &str,
-    _course_name: &str,
+    course_name: &str,
     assignment_parallels: &[String],
     deadline: Option<chrono::DateTime<chrono::Utc>>,
     parallel_codes: Option<&[String]>,
     new_title: Option<&str>,
     new_description: Option<&str>,
+    new_course_name: Option<&str>,
     pool: &PgPool,
     logger: &tui::JobLogger,
 ) {
@@ -1658,13 +1712,17 @@ async fn send_academic_update_notification(
     let channels: Vec<&str> = academic_env.split(',').map(|s| s.trim()).collect();
     
     let mut updated_fields = Vec::new();
-    
+
+    if let Some(new_course) = new_course_name {
+        updated_fields.push(format!("dipindah dari {} ke {}", course_name, new_course));
+    }
+
     if let Some(d) = deadline {
         let wib = chrono::FixedOffset::east_opt(7 * 3600).unwrap();
         let deadline_wib = d.with_timezone(&wib);
         updated_fields.push(format!("deadline diubah jadi {}", deadline_wib.format("%d %b %Y, %H:%M WIB")));
     }
-    
+
     if let Some(codes) = parallel_codes {
         if !codes.is_empty() {
             let codes_display = codes.iter()
@@ -1674,11 +1732,11 @@ async fn send_academic_update_notification(
             updated_fields.push(format!("sekarang untuk [{}]", codes_display));
         }
     }
-    
+
     if let Some(t) = new_title {
         updated_fields.push(format!("judul diubah jadi \"{}\"", t));
     }
-    
+
     if let Some(d) = new_description {
         let desc_preview = if d.len() > 50 {
             format!("{}...", &d[..50])
