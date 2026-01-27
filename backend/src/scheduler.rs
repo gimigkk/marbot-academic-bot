@@ -431,6 +431,7 @@ async fn send_to_channels(
         text: message.clone(),
         session: "default".to_string(),
         reply_to: None,
+        mentions: None,
     };
 
     let _ = client

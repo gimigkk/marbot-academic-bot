@@ -128,6 +128,8 @@ pub struct SendTextRequest {
     pub session: String,
     #[serde(rename = "reply_to", skip_serializing_if = "Option::is_none")]
     pub reply_to: Option<String>,  
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mentions: Option<Vec<String>>,
 }
 
 #[derive(Debug, Serialize)]
