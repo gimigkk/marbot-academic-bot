@@ -94,9 +94,16 @@ pub fn generate_clarification_messages(
     } else {
         assignment.format_parallel_display()
     };
+
+    let sender_tag = assignment.sender_id.as_ref()
+        .map(|id| {
+            let num = id.split('@').next().unwrap_or(id);
+            format!("@{}", num)
+        })
+        .unwrap_or_default();
     
     let info_message = format!(
-        "*[PERLU KLARIFIKASI]*\n\
+        "*[PERLU KLARIFIKASI]* {}\n\
         `ID: {}`\n\
         \n\
         📌 *{}* - {}\n\
@@ -106,6 +113,7 @@ pub fn generate_clarification_messages(
         \n\
         *[INFO KURANG]:*\n\
         {}",
+        sender_tag, 
         assignment.id, 
         assignment.course_name,
         assignment.title,
@@ -124,6 +132,7 @@ pub fn generate_clarification_messages(
 
     (info_message, template_message)
 }
+
 
 pub fn extract_assignment_id_from_message(text: &str) -> Option<Uuid> {
     let cleaned_text = text.replace('`', "");

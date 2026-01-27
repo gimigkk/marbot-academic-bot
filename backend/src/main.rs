@@ -160,7 +160,6 @@ async fn main() {
             print!("{}", line);
         }
         if i < bot_lines.len() {
-            // Same for BOT
             let line = bot_lines[i]
                 .replace('█', "\x1b[38;2;255;255;255m█\x1b[38;2;198;97;63m")
                 .replace('╗', "\x1b[38;2;198;97;63m╗")
@@ -1524,13 +1523,17 @@ async fn handle_single_assignment(
                             if let Some(debug_id) = &debug_group_id {
                                 let (info_msg, template_msg) = clarification::generate_clarification_messages(&full_assign, &missing);
                                 let combined_msg = format!("{}\n{}", info_msg, template_msg);
+                                let mut mentions = Vec::new();
+                                if let Some(sid) = &full_assign.sender_id {
+                                    mentions.push(sid.clone());
+                                }
 
-                                match send_reply(debug_id, &combined_msg).await {
-                                    Ok(_) => logger.log("   \x1b[32m✅ Clarification sent\x1b[0m\n"),
+                                match send_reply_with_mentions(debug_id, &combined_msg, mentions).await {
+                                    Ok(_) => logger.log("   \x1b[32m✅ Clarification sent (with tag)\x1b[0m\n"),
                                     Err(e) => logger.log(&format!("   \x1b[31m❌ Send failed: {}\x1b[0m\n", e)),
                                 }
                             }
-                            return; 
+                            return;
                         } else {
                             logger.log("   \x1b[32m✅ Complete (no clarification needed)\x1b[0m\n");
                         }
@@ -1594,7 +1597,31 @@ async fn send_reply_with_id(chat_id: &str, text: &str, reply_to: Option<String>)
         chat_id: chat_id.to_string(), 
         text: text.to_string(), 
         session: "default".to_string(),
-        reply_to: reply_to 
+        reply_to: reply_to,
+        mentions: None
+    };
+    
+    let client = reqwest::Client::new();
+    let res = client.post(waha_url)
+        .header("X-Api-Key", api_key)
+        .json(&payload)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+        
+    if res.status().is_success() { Ok(()) } else { Err(format!("API Error")) }
+}
+
+async fn send_reply_with_mentions(chat_id: &str, text: &str, mentions: Vec<String>) -> Result<(), String> {
+    let waha_url = format!("{}/api/sendText", std::env::var("WAHA_URL").unwrap_or_else(|_| "http://waha:3000".to_string()));
+    let api_key = std::env::var("WAHA_API_KEY").unwrap_or_else(|_| "devkey123".to_string());
+    
+    let payload = SendTextRequest { 
+        chat_id: chat_id.to_string(), 
+        text: text.to_string(), 
+        session: "default".to_string(),
+        reply_to: None,
+        mentions: Some(mentions), 
     };
     
     let client = reqwest::Client::new();
