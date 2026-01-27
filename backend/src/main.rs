@@ -572,21 +572,22 @@ async fn webhook(
                                 Ok(_) => {
                                   
                                     if let Ok(Some(full_assignment)) = crud::get_assignment_with_course_by_id(&state.pool, assignment_id).await {
-                                        send_academic_update_notification(
-                                            chat_id,
-                                            assignment_id,  
-                                            &full_assignment.title,
-                                            &full_assignment.course_name,
-                                            &full_assignment.parallel_codes,
-                                            new_deadline,
-                                            new_parallel_codes.as_deref(),
-                                            new_title.as_deref(),
-                                            new_description.as_deref(),
-                                            updates.get("course_name").map(|s| s.as_str()),
-                                            &state.pool,  
-                                            &logger,
-                                        ).await;
-                                        
+                                        if new_deadline.is_some() || new_parallel_codes.is_some() || updates.get("course_name").is_some() {
+                                            send_academic_update_notification(
+                                                chat_id,
+                                                assignment_id,  
+                                                &full_assignment.title,
+                                                &full_assignment.course_name,
+                                                &full_assignment.parallel_codes,
+                                                new_deadline,
+                                                new_parallel_codes.as_deref(),
+                                                new_title.as_deref(),
+                                                new_description.as_deref(),
+                                                updates.get("course_name").map(|s| s.as_str()),
+                                                &state.pool,  
+                                                &logger,
+                                            ).await;
+                                        }
                                         let deadline_display = full_assignment.deadline
                                             .map(|d| {
                                                 let indonesia_time = d + ChronoDuration::hours(7);
@@ -844,7 +845,7 @@ async fn webhook(
                                 ).await {
                                     Ok(_) => {
                                     
-                                        if deadline_parsed.is_some() || !parallel_codes.is_empty() || new_title.is_some() || new_description.is_some() {
+                                        if deadline_parsed.is_some() || !parallel_codes.is_empty() || new_course_id.is_some() {
                                             send_academic_update_notification(
                                                 chat_id,
                                                 target.id,  
@@ -1197,7 +1198,7 @@ async fn handle_ai_classification(
                                 Some(&logger_clone),
                             ).await {
                                 Ok(_) => {
-                                    if deadline_parsed.is_some() || !parallel_codes.is_empty() {
+                                    if deadline_parsed.is_some() || !parallel_codes.is_empty() || new_course_id.is_some() {
                                         send_academic_update_notification(
                                             &source_chat_clone,
                                             id,  
