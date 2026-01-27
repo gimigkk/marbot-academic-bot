@@ -357,10 +357,15 @@ async fn parse_clarification_response_internal(
                 logger_log(logger, "└────────────────────────────────────────────");
                 return Ok(result);
             }
+            Err(e) if e.starts_with("FINAL:") => {
+                // This is a definitive result (unrecognized/cancelled), don't retry
+                logger_log(logger, "└────────────────────────────────────────────");
+                return Err(e.strip_prefix("FINAL:").unwrap_or(&e).to_string());
+            }
             Err(_) => {
                 if attempt < MAX_RETRIES - 1 {
                     logger_log(logger, &format!("│ ⚠️ Attempt {}/{}\t: All models failed, retrying...", 
-                             attempt + 1, MAX_RETRIES - 1));
+                            attempt + 1, MAX_RETRIES - 1));
                 }
             }
         }
@@ -478,9 +483,17 @@ async fn try_gemini_clarification(
             let result = match parse_ai_response(&ai_text, current_deadline) {
                 Ok(r) => r,
                 Err(e) => {
-                    all_rate_limited = false;
+                    // Check if this is a FINAL error that should not be retried
+                    if e.starts_with("FINAL:") {
+                        if logger.is_none() { clear_previous_trying_stdout(&mut last_trying); }
+                        let error_type = e.strip_prefix("FINAL:").unwrap_or(&e);
+                        logger_log(logger, &format!("│ ✅ IDENTIFIED\t: {} - {}", model, error_type));
+                        return Err(e);  // Propagate up immediately, don't try other models
+                    }
+                    
+                    // Otherwise, it's a retryable error
                     if logger.is_none() { clear_previous_trying_stdout(&mut last_trying); }
-                    logger_log(logger, &format!("│ \x1b[31m❌ PARSE FAILED\x1b[0m\t: {} - {}", model, e));
+                    logger_log(logger, &format!("│ ❌ PARSE FAILED\t: {} - {}", model, e));
                     continue;
                 }
             };
@@ -582,8 +595,17 @@ async fn try_groq_reasoning_clarification(
             let result = match parse_ai_response(&ai_text, current_deadline) {
                 Ok(r) => r,
                 Err(e) => {
+                    // Check if this is a FINAL error that should not be retried
+                    if e.starts_with("FINAL:") {
+                        if logger.is_none() { clear_previous_trying_stdout(&mut last_trying); }
+                        let error_type = e.strip_prefix("FINAL:").unwrap_or(&e);
+                        logger_log(logger, &format!("│ ✅ IDENTIFIED\t: {} - {}", model, error_type));
+                        return Err(e);  // Propagate up immediately, don't try other models
+                    }
+                    
+                    // Otherwise, it's a retryable error
                     if logger.is_none() { clear_previous_trying_stdout(&mut last_trying); }
-                    logger_log(logger, &format!("│ \x1b[31m❌ PARSE FAILED\x1b[0m\t: {} - {}", model, e));
+                    logger_log(logger, &format!("│ ❌ PARSE FAILED\t: {} - {}", model, e));
                     continue;
                 }
             };
@@ -776,11 +798,10 @@ fn parse_ai_response(
         .map_err(|e| format!("Failed to parse AI response: {} - Raw: {}", e, cleaned))?;
 
     if parsed.is_unrecognized {
-        return Err("unrecognized".to_string());
+        return Err("FINAL:unrecognized".to_string());
     }
-
     if parsed.is_cancellation {
-        return Err("cancelled".to_string());
+        return Err("FINAL:cancelled".to_string());
     }
 
     let mut updates = HashMap::new();
@@ -798,7 +819,7 @@ fn parse_ai_response(
                 updates.insert("deadline".to_string(), new_deadline.format("%Y-%m-%d %H:%M").to_string());
             }
         } else {
-            return Err("no_date".to_string());
+            return Err("FINAL:no_date".to_string());
         }
     }
 
