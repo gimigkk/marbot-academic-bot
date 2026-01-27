@@ -733,6 +733,7 @@ pub async fn update_assignment_fields(
     new_title: Option<String>,
     new_description: Option<String>,
     new_parallel_codes: Option<Vec<String>>,
+    new_course_id: Option<Uuid>,
     incoming_message_id: Option<String>,
     incoming_message_content: Option<String>,
     logger: Option<&JobLogger>,
@@ -752,6 +753,7 @@ pub async fn update_assignment_fields(
     let final_deadline = new_deadline.or(current.deadline);
     let final_title = new_title.unwrap_or(current.title);
     let final_description = new_description.unwrap_or(current.description);
+    let final_course_id = new_course_id.or(current.course_id);
     
     let final_parallel_codes: Vec<String> = if let Some(codes) = new_parallel_codes {
         codes.iter().map(|c| c.to_lowercase()).collect()
@@ -782,8 +784,9 @@ pub async fn update_assignment_fields(
             title = $3, 
             description = $4,
             parallel_codes = $5,
-            message_ids = $6,
-            relating_messages = $7
+            course_id = $6,          
+            message_ids = $7,        
+            relating_messages = $8    
         WHERE id = $1
         RETURNING 
             id, created_at, course_id, title, description, deadline,
@@ -795,8 +798,9 @@ pub async fn update_assignment_fields(
     .bind(&final_title)
     .bind(&final_description)
     .bind(&final_parallel_codes)
-    .bind(&final_message_ids)
-    .bind(&final_relating_messages)
+    .bind(final_course_id)         
+    .bind(&final_message_ids)       
+    .bind(&final_relating_messages) 
     .fetch_one(&mut *tx)
     .await?;
     
