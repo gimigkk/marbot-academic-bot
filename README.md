@@ -444,3 +444,10 @@ This avoids GLIBC version mismatches that occur when building on newer Ubuntu an
 **[serde](https://serde.rs/)** - Serialization framework with derive macros. The bot uses `#[serde(flatten)]` for dynamic fields and `#[serde(skip_serializing_if)]` for optional responses.
 
 **[reqwest](https://github.com/seanmonstar/reqwest)** - HTTP client with connection pooling. All API calls use a single `Client::new()` instance for connection reuse.
+
+---
+
+## Credits
+Developer: Gilang MW. & Arya F.
+
+Pen Tester: Ilham Edgar
