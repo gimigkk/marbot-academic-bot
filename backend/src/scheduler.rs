@@ -208,7 +208,25 @@ async fn check_personal_reminders(
                     true 
                 } else {
                     task.parallel_codes.iter().any(|task_code| {
-                        user_codes.iter().any(|user_code| user_code.eq_ignore_ascii_case(task_code))
+                        let task_str = task_code.to_lowercase();
+                        
+                        user_codes.iter().any(|user_code| {
+                            let user_str = user_code.trim().to_lowercase();
+                        
+                            if user_str == task_str {
+                                return true;
+                            }
+
+                
+                            if task_str.starts_with('r') && user_str.starts_with('p') {
+                                return task_str[1..] == user_str[1..];
+                            }
+                            if task_str.starts_with('p') && user_str.starts_with('r') {
+                                return task_str[1..] == user_str[1..];
+                            }
+                            
+                            false
+                        })
                     })
                 };
 
