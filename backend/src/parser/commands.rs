@@ -260,12 +260,12 @@ pub async fn handle_command(
                                 Some(code) if !code.is_empty() => {
                                   
                                     body.push_str(&format!("✅ {}\n", matkul));
-                                    body.push_str(&format!("└ Kelas: *{}*\n", code.to_uppercase()));
+                                    body.push_str(&format!("*└─* Kelas: *{}*\n", code.to_uppercase()));
                                 }
                                 _ => {
             
                                     body.push_str(&format!("❌ {}\n", matkul));
-                                    body.push_str("└ Kelas: _(belum diset)_\n");
+                                    body.push_str("*└─* Kelas: _(belum diset)_\n");
                                 }
                             }
             
