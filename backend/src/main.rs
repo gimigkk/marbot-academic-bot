@@ -371,7 +371,7 @@ async fn webhook(
     let is_command = matches!(message_type, MessageType::Command(_));
 
     // STEP 2: CHECK WHITELIST (BEFORE creating job to avoid dashboard clutter)
-    let (should_process, reason) = state.whitelist.should_process(chat_id, is_command);
+    let (should_process, _reason) = state.whitelist.should_process(chat_id, is_command);
 
     if !should_process {
         // Don't create job or log for ignored messages
