@@ -1355,12 +1355,17 @@ async fn handle_ai_classification(
                 }
                 UnrecognizedCategory::AcademicRelated => {
                     if let Some(debug_id) = debug_group_id {
-                        let message = reason
+                        let quoted_text = format_quote_fallback(&message_body);
+                        
+                        let reason_text = reason
                             .as_ref()
                             .map(|r| format!("_{}_", r))
                             .unwrap_or_else(|| "_Academic-related but not an assignment_".to_string());
                         
-                        let _ = send_reply(&debug_id, &message).await;
+                        // Combine quote with reason
+                        let full_message = format!("{}\n\n{}", quoted_text, reason_text);
+                        
+                        let _ = send_reply(&debug_id, &full_message).await;
                     }
                 }
             }
