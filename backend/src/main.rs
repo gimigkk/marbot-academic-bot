@@ -302,15 +302,14 @@ async fn webhook(
     State(state): State<AppState>,
     Json(payload): Json<WebhookPayload>,
 ) -> StatusCode {
-
     let request_start = Instant::now();
 
-   
+    // ============= BASIC FILTERS =============
     if payload.event != "message.any" {
         return StatusCode::OK;
     }
 
-    
+    // Deduplication
     let dedup_key = format!(
         "{}:{}:{}",
         payload.payload.id,
@@ -329,18 +328,14 @@ async fn webhook(
         }
     }
 
-
     if payload.payload.from_me {
         return StatusCode::OK;
     }
 
-    // Ignore messages from debug group
+    // ============= EXTRACT SENDER INFO =============
     let debug_group_id = std::env::var("DEBUG_GROUP_ID").ok();
-
-    // EXTRACT SENDER AND CHAT IDs
     let chat_id = &payload.payload.from;  
     
-
     let sender_phone = if chat_id.ends_with("@g.us") {
         payload.payload.participant
             .as_ref()
@@ -349,166 +344,43 @@ async fn webhook(
         chat_id
     };
     
-    // Extract WhatsApp display name 
     let sender_name = payload.payload.data
         .as_ref()
         .and_then(|data| {
-
             data.info.as_ref()
                 .and_then(|info| info.push_name.as_ref())
                 .map(|s| s.as_str())
-                // Fallback to WEBJS/NOWEB
                 .or_else(|| data.push_name.as_ref().map(|s| s.as_str()))
         })
         .unwrap_or_else(|| {
-
             sender_phone.split('@').next().unwrap_or(sender_phone)
         });
 
-    
-    // STEP 1: CLASSIFY MESSAGE DULUAN (Supaya bisa cek is_command)
-    let message_type = classify_message(&payload.payload.body);
-    let is_command = matches!(message_type, MessageType::Command(_));
-
-    // STEP 2: CHECK WHITELIST (BEFORE creating job to avoid dashboard clutter)
-    let (should_process, _reason) = state.whitelist.should_process(chat_id, is_command);
-
-    if !should_process {
-        // Don't create job or log for ignored messages
-        return StatusCode::OK;
-    }
-
-    // ANTI-SPAM (HANYA UNTUK COMMAND)
-    if is_command {
-        const MAX_MESSAGES: u32 = 5;      // Batas 5 command
-        const WINDOW_SECONDS: u64 = 30;   // Dalam 30 detik
-
-        let mut tracker = state.spam_tracker.lock().await;
-        
-        let (count, reset_time) = tracker
-            .entry(sender_phone.to_string())
-            .or_insert((0, Instant::now() + Duration::from_secs(WINDOW_SECONDS)));
-
-        // Cek apakah waktu reset 
-        if Instant::now() > *reset_time {
-            *count = 1;
-            *reset_time = Instant::now() + Duration::from_secs(WINDOW_SECONDS);
-        } else {
-            *count += 1;
-        }
-
-        // Cek BATAS
-        if *count > MAX_MESSAGES {
-
-            println!("🚫 SPAM COMMAND BLOCKED: {} sent > {} cmds/{}s", sender_phone, MAX_MESSAGES, WINDOW_SECONDS);
-            
-            if *count == MAX_MESSAGES + 1 {
-                let warning_msg = "⚠️ *RATE LIMIT REACHED*\nAnda mengirim command terlalu cepat. Harap tunggu sebentar.";
-                let _ = send_reply(chat_id, warning_msg).await;
-            }
-
-            return StatusCode::OK;
-        }
-    }
-
-
-    let (quoted_message_text, quoted_message_id) = if let Some(quoted) = payload.payload.get_quoted_message() {
-        (Some(quoted.text.clone()), Some(quoted.id.clone()))  
-    } else {
-        (None, None)
-    };
-
-    
-    // TUI INTEGRATION: Create job logger
-    let job_id = tui::generate_job_id();
-    let logger = tui::JobLogger::new(job_id.clone(), state.log_tx.clone());
-    let mut tags = Vec::new();
-
-    match &message_type {
-        MessageType::Command(cmd) => {
-            use crate::models::BotCommand;
-            let cmd_tag = match cmd {
-                BotCommand::Ping => "ping",
-                BotCommand::Tugas => "tugas",
-                BotCommand::Todo => "todo",
-                BotCommand::Today => "today",
-                BotCommand::Week => "week",
-                BotCommand::Help => "help",
-                BotCommand::Undo => "undo",
-                BotCommand::Done(_) => "done",
-                BotCommand::Delete(_) => "delete",
-                BotCommand::Expand(_) => "expand",
-                BotCommand::SetKelas(_, _) => "setkelas",
-                BotCommand::MyKelas => "mykelas",
-                BotCommand::MissingArgument(_) => "error",
-                BotCommand::UnknownCommand(_) => "unknown",
-                BotCommand::Update(_, _) => "ai",
-            };
-            tags.push(format!("#{}", cmd_tag));
-        }
-        MessageType::NeedsAI(_) => {
-            tags.push("#ai".to_string());
-        }
-    }
-
-
-    tags.sort();
-    tags.dedup();
-
-
-    let message_body_for_search = Some(payload.payload.body.clone());
-    let quoted_message_for_search = quoted_message_text.clone();
-
-    if let Some(tui_state) = TUI_STATE.get() {
-        tui_state.create_job(
-            job_id.clone(),
-            chat_id.to_string(),
-            sender_name.to_string(),
-            message_body_for_search,
-            quoted_message_for_search,
-            tags,
-        ).await;
-    }
-
-    
-    let body_display = payload.payload.body
-        .replace('\n', "\\n")
-        .chars()
-        .take(80)
-        .collect::<String>();
-
-    let body_truncated = if payload.payload.body.len() > 80 {
-        format!("\"{}...\"", body_display)
-    } else {
-        format!("\"{}\"", body_display)
-    };
-
-    let type_display = match &message_type {
-        MessageType::Command(cmd) => format!("Command({:?})", cmd),
-        MessageType::NeedsAI(_) => "NeedsAI".to_string(),
-    };
-
-    logger.log(&format!("\n| Message from: \x1b[32m{}\x1b[0m", chat_id));
-    logger.log(&format!("| Sender      : \x1b[32m{}\x1b[0m (\x1b[32m{}\x1b[0m)", sender_name, sender_phone));
-    logger.log(&format!("| Body        : \x1b[32m{}\x1b[0m", body_truncated));
-    logger.log(&format!("| Type        : \x1b[32m{}\x1b[0m\n", type_display));
-
-    if let Some(ref quoted) = quoted_message_text {
-        logger.log(&format!("| Quoted: \"{}\"\n", 
-            quoted.chars().take(80).collect::<String>()));
-    }
-
-    // ============= CLARIFICATION HANDLER =============
+    // ============= EARLY CLARIFICATION HANDLER =============
+    // Process BEFORE whitelist so clarification replies work from debug group
     if let Some(quoted) = payload.payload.get_quoted_message() {
         let is_clarification_reply = quoted.text.contains("*[PERLU KLARIFIKASI]*") 
             || (quoted.text.contains("ID:") && quoted.text.contains("```"));
         
         if is_clarification_reply {
+            // Create job for tracking
+            let job_id = tui::generate_job_id();
+            let logger = tui::JobLogger::new(job_id.clone(), state.log_tx.clone());
+            
+            if let Some(tui_state) = TUI_STATE.get() {
+                tui_state.create_job(
+                    job_id.clone(),
+                    chat_id.to_string(),
+                    sender_name.to_string(),
+                    Some(payload.payload.body.clone()),
+                    Some(quoted.text.clone()),
+                    vec!["#clarification".to_string()],
+                ).await;
+            }
+            
             logger.log(&format!("📝 Clarification response detected from {}", sender_phone));
             
-
             if let Some(assignment_id) = clarification::extract_assignment_id_from_message(&quoted.text) {
-                
                 let current_assignment = crud::get_assignment_with_course_by_id(&state.pool, assignment_id)
                     .await
                     .ok()
@@ -520,7 +392,6 @@ async fn webhook(
                     Vec::new()
                 };
 
-             
                 if let Some(ref assignment_obj) = current_assignment {
                     match clarification::parse_clarification_response(
                         &payload.payload.body, 
@@ -529,13 +400,11 @@ async fn webhook(
                         &logger,
                     ).await {
                         Ok(updates) => {
-                           
                             let new_deadline = updates.get("deadline")
                                 .and_then(|d| crud::parse_deadline(d).ok());
                             let new_title = updates.get("title").cloned();
                             let new_description = updates.get("description").cloned();
                             
-                           
                             let new_parallel_codes = updates.get("parallel_codes")
                                 .map(|codes_str| {
                                     codes_str.split(',')
@@ -543,8 +412,6 @@ async fn webhook(
                                         .collect::<Vec<String>>()
                                 });
 
-
-                            // Resolve course_id if course_name was provided
                             let new_course_id = if let Some(course_name) = updates.get("course_name") {
                                 match crud::get_course_by_name(&state.pool, course_name).await {
                                     Ok(Some(course)) => Some(course.id),
@@ -563,7 +430,6 @@ async fn webhook(
                                 None
                             };
 
-                            // Update Database
                             match crud::update_assignment_fields(
                                 &state.pool,
                                 assignment_id,
@@ -571,13 +437,12 @@ async fn webhook(
                                 new_title.clone(),
                                 new_description.clone(),
                                 new_parallel_codes.clone(),
-                                new_course_id,  // ← ADD THIS PARAMETER
+                                new_course_id,
                                 Some(payload.payload.id.clone()),
                                 Some(payload.payload.body.clone()), 
                                 Some(&logger),
                             ).await {
                                 Ok(_) => {
-                                  
                                     if let Ok(Some(full_assignment)) = crud::get_assignment_with_course_by_id(&state.pool, assignment_id).await {
                                         if new_deadline.is_some() || new_parallel_codes.is_some() || updates.get("course_name").is_some() {
                                             send_academic_update_notification(
@@ -595,6 +460,7 @@ async fn webhook(
                                                 &logger,
                                             ).await;
                                         }
+                                        
                                         let deadline_display = full_assignment.deadline
                                             .map(|d| {
                                                 let indonesia_time = d + ChronoDuration::hours(7);
@@ -632,7 +498,6 @@ async fn webhook(
                             }
                         }
                         Err(err_type) => {
-                    
                             match err_type.as_str() {
                                 "cancelled" => {
                                     let cancel_msg = clarification::generate_cancellation_message(assignment_id);
@@ -666,9 +531,134 @@ async fn webhook(
             }
         }
     }
-    // ============= END CLARIFICATION =============
+    // ============= END EARLY CLARIFICATION =============
 
-    // STEP 3: HANDLE MESSAGE BASED ON TYPE
+    // ============= CLASSIFY MESSAGE =============
+    let message_type = classify_message(&payload.payload.body);
+    let is_command = matches!(message_type, MessageType::Command(_));
+
+    // ============= WHITELIST CHECK =============
+    let (should_process, _reason) = state.whitelist.should_process(chat_id, is_command);
+
+    if !should_process {
+        return StatusCode::OK;
+    }
+
+    // ============= ANTI-SPAM (COMMANDS ONLY) =============
+    if is_command {
+        const MAX_MESSAGES: u32 = 5;
+        const WINDOW_SECONDS: u64 = 30;
+
+        let mut tracker = state.spam_tracker.lock().await;
+        
+        let (count, reset_time) = tracker
+            .entry(sender_phone.to_string())
+            .or_insert((0, Instant::now() + Duration::from_secs(WINDOW_SECONDS)));
+
+        if Instant::now() > *reset_time {
+            *count = 1;
+            *reset_time = Instant::now() + Duration::from_secs(WINDOW_SECONDS);
+        } else {
+            *count += 1;
+        }
+
+        if *count > MAX_MESSAGES {
+            println!("🚫 SPAM COMMAND BLOCKED: {} sent > {} cmds/{}s", sender_phone, MAX_MESSAGES, WINDOW_SECONDS);
+            
+            if *count == MAX_MESSAGES + 1 {
+                let warning_msg = "⚠️ *RATE LIMIT REACHED*\nAnda mengirim command terlalu cepat. Harap tunggu sebentar.";
+                let _ = send_reply(chat_id, warning_msg).await;
+            }
+
+            return StatusCode::OK;
+        }
+    }
+
+    // ============= EXTRACT QUOTED MESSAGE =============
+    let (quoted_message_text, quoted_message_id) = if let Some(quoted) = payload.payload.get_quoted_message() {
+        (Some(quoted.text.clone()), Some(quoted.id.clone()))  
+    } else {
+        (None, None)
+    };
+
+    // ============= TUI JOB CREATION =============
+    let job_id = tui::generate_job_id();
+    let logger = tui::JobLogger::new(job_id.clone(), state.log_tx.clone());
+    let mut tags = Vec::new();
+
+    match &message_type {
+        MessageType::Command(cmd) => {
+            use crate::models::BotCommand;
+            let cmd_tag = match cmd {
+                BotCommand::Ping => "ping",
+                BotCommand::Tugas => "tugas",
+                BotCommand::Todo => "todo",
+                BotCommand::Today => "today",
+                BotCommand::Week => "week",
+                BotCommand::Help => "help",
+                BotCommand::Undo => "undo",
+                BotCommand::Done(_) => "done",
+                BotCommand::Delete(_) => "delete",
+                BotCommand::Expand(_) => "expand",
+                BotCommand::SetKelas(_, _) => "setkelas",
+                BotCommand::MyKelas => "mykelas",
+                BotCommand::MissingArgument(_) => "error",
+                BotCommand::UnknownCommand(_) => "unknown",
+                BotCommand::Update(_, _) => "ai",
+            };
+            tags.push(format!("#{}", cmd_tag));
+        }
+        MessageType::NeedsAI(_) => {
+            tags.push("#ai".to_string());
+        }
+    }
+
+    tags.sort();
+    tags.dedup();
+
+    let message_body_for_search = Some(payload.payload.body.clone());
+    let quoted_message_for_search = quoted_message_text.clone();
+
+    if let Some(tui_state) = TUI_STATE.get() {
+        tui_state.create_job(
+            job_id.clone(),
+            chat_id.to_string(),
+            sender_name.to_string(),
+            message_body_for_search,
+            quoted_message_for_search,
+            tags,
+        ).await;
+    }
+
+    // ============= LOGGING =============
+    let body_display = payload.payload.body
+        .replace('\n', "\\n")
+        .chars()
+        .take(80)
+        .collect::<String>();
+
+    let body_truncated = if payload.payload.body.len() > 80 {
+        format!("\"{}...\"", body_display)
+    } else {
+        format!("\"{}\"", body_display)
+    };
+
+    let type_display = match &message_type {
+        MessageType::Command(cmd) => format!("Command({:?})", cmd),
+        MessageType::NeedsAI(_) => "NeedsAI".to_string(),
+    };
+
+    logger.log(&format!("\n| Message from: \x1b[32m{}\x1b[0m", chat_id));
+    logger.log(&format!("| Sender      : \x1b[32m{}\x1b[0m (\x1b[32m{}\x1b[0m)", sender_name, sender_phone));
+    logger.log(&format!("| Body        : \x1b[32m{}\x1b[0m", body_truncated));
+    logger.log(&format!("| Type        : \x1b[32m{}\x1b[0m\n", type_display));
+
+    if let Some(ref quoted) = quoted_message_text {
+        logger.log(&format!("| Quoted: \"{}\"\n", 
+            quoted.chars().take(80).collect::<String>()));
+    }
+
+    // ============= HANDLE MESSAGE BASED ON TYPE =============
     match message_type {
         MessageType::Command(cmd) => {
             logger.log(&format!("⚙️ Processing command: {:?}", cmd));
@@ -684,7 +674,6 @@ async fn webhook(
                     }
                 }
                 CommandResponse::ResendMessages { messages, summary } => {
-                    
                     for (i, msg_content) in messages.iter().enumerate() {
                         let formatted_msg = format!("*↱* _Forwarded_ \n\n{}", msg_content);
                         
@@ -692,16 +681,13 @@ async fn webhook(
                             logger.log(&format!("❌ Failed to send message {}: {}", i + 1, e));
                         }
                         
-                       
                         if i < messages.len() - 1 {
                             tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
                         }
                     }
 
-                
                     tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
 
-                 
                     if let Err(e) = send_reply(chat_id, &summary).await {
                         logger.log(&format!("❌ Failed to send summary: {}", e));
                         logger.set_status(tui::state::JobStatus::Failed);
@@ -711,7 +697,6 @@ async fn webhook(
                 }
                 
                 CommandResponse::ProcessWithAI { message, force_mode: _, target_assignment } => {
-                  
                     let courses_list = crud::get_all_courses_formatted(&state.pool)
                         .await
                         .unwrap_or_default();
@@ -728,7 +713,6 @@ async fn webhook(
                     .map(|rows| rows.into_iter().collect())
                     .unwrap_or_default();
                     
-                  
                     let text: String = if let Some(ref target) = target_assignment {
                         let parallel_display = if target.parallel_codes.is_empty() {
                             String::from("N/A")
@@ -758,7 +742,6 @@ async fn webhook(
                         message
                     };
                     
-                  
                     match extract_with_ai(
                         text.as_str(),
                         &courses_list,
@@ -772,7 +755,6 @@ async fn webhook(
                         &logger,
                     ).await {
                         Ok(classification) => {
-                          
                             if !matches!(classification, AIClassification::AssignmentUpdate { .. }) {
                                 logger.log(&format!("⚠️ AI returned unexpected type: {:?}", classification));
                                 
@@ -790,7 +772,6 @@ async fn webhook(
                             
                             logger.log(&format!("✅ AI Classification: {:?}\n", classification));
                             
-                           
                             if let (Some(target), AIClassification::AssignmentUpdate { 
                                 new_deadline, 
                                 new_title, 
@@ -803,7 +784,6 @@ async fn webhook(
                                 let deadline_parsed = new_deadline.as_ref()
                                     .and_then(|d| crud::parse_deadline(d).ok());
 
-                                // Resolve course if changed
                                 let new_course_id = if let Some(ref cname) = new_course_name {
                                     match crud::get_course_by_name(&state.pool, cname).await {
                                         Ok(Some(course)) => {
@@ -842,7 +822,6 @@ async fn webhook(
                                     Some(&logger),
                                 ).await {
                                     Ok(_) => {
-                                    
                                         if deadline_parsed.is_some() || !parallel_codes.is_empty() || new_course_id.is_some() {
                                             send_academic_update_notification(
                                                 chat_id,
@@ -895,11 +874,9 @@ async fn webhook(
         MessageType::NeedsAI(text) => {
             logger.log(">> Processing with AI...");
             
-          
             let image_base64 = if payload.payload.has_media.unwrap_or(false) {
                 if let Some(ref media) = payload.payload.media {
                     if media.mimetype.as_ref().map(|m| m.starts_with("image/")).unwrap_or(false) {
-                      
                         if let Some(ref url) = media.url {
                             match download_media_from_url(url, &logger).await {
                                 Ok(base64) => Some(base64),
@@ -916,7 +893,6 @@ async fn webhook(
                 } else { None }
             } else { None };
             
-          
             let courses_list = crud::get_all_courses_formatted(&state.pool).await.unwrap_or_default();
             
             let assignments = crud::get_assignments_for_classification(&state.pool, Some(&logger)).await.unwrap_or_default();
@@ -939,7 +915,6 @@ async fn webhook(
                 &logger, 
             ).await {
                 Ok(classification) => {
-                  
                     let ai_duration = ai_start.elapsed();
                     logger.log(&format!("🧠 AI Latency: {:.2?}", ai_duration));
 
@@ -965,7 +940,6 @@ async fn webhook(
         }
     }
     
-   
     let total_duration = request_start.elapsed();
     logger.log(&format!("⏱️ Total Request Processed in: {:.2?}\n", total_duration));
 
@@ -1355,6 +1329,7 @@ async fn handle_ai_classification(
                 }
                 UnrecognizedCategory::AcademicRelated => {
                     if let Some(debug_id) = debug_group_id {
+
                         let quoted_text = format_quote_fallback(&message_body);
                         
                         let reason_text = reason
