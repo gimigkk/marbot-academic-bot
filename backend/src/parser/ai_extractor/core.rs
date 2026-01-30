@@ -1,4 +1,4 @@
-use crate::models::{AIClassification, Assignment};
+use crate::models::{AIClassification, Assignment, AssignmentWithCourse};
 use uuid::Uuid;
 use serde_json::json;
 use std::collections::HashMap;
@@ -36,6 +36,7 @@ pub async fn extract_with_ai(
     quoted_message: Option<&str>,  
     quoted_message_id: Option<&str>,
     logger: &JobLogger,
+    target_assignment: Option<&AssignmentWithCourse>,
 ) -> Result<AIClassification, String> {
     let current_datetime = get_current_datetime();
     let current_date = get_current_date();
@@ -151,15 +152,31 @@ pub async fn extract_with_ai(
         }
     };
 
-    let prompt = build_classification_prompt(
-        text,
-        available_courses,
-        active_assignments,
-        course_map,
-        &current_datetime,
-        &current_date,
-        context.as_ref()
-    );
+    // Choose prompt based on mode
+    let prompt = if let Some(target) = target_assignment {
+        logger.log(&format!("│ 🎯 Mode\t: UPDATE (forced)"));
+        logger.log(&format!("│ 📌 Target\t: {} - {}", target.course_name, target.title));
+        
+        build_update_prompt(
+            text,
+            target,
+            &current_datetime,
+            &current_date,
+            context.as_ref()
+        )
+    } else {
+        logger.log(&format!("│ 🎯 Mode\t: CLASSIFICATION"));
+        
+        build_classification_prompt(
+            text,
+            available_courses,
+            active_assignments,
+            course_map,
+            &current_datetime,
+            &current_date,
+            context.as_ref()
+        )
+    };
 
     if image_base64.is_some() {
         logger.log("│ 🖼️  Image\t: Attached (may be irrelevant meme)");

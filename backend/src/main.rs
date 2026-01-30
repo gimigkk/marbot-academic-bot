@@ -713,37 +713,10 @@ async fn webhook(
                     .map(|rows| rows.into_iter().collect())
                     .unwrap_or_default();
                     
-                    let text: String = if let Some(ref target) = target_assignment {
-                        let parallel_display = if target.parallel_codes.is_empty() {
-                            String::from("N/A")
-                        } else {
-                            format!("[{}]", target.parallel_codes.join(", "))
-                        };
-                        
-                        let deadline_display = target.deadline
-                            .map(|d| d.format("%Y-%m-%d %H:%M").to_string())
-                            .unwrap_or_else(|| String::from("N/A"));
-                        
-                        format!(
-                            "UPDATE EXISTING ASSIGNMENT:\n\
-                            Course: {}\n\
-                            Title: {}\n\
-                            Current Deadline: {}\n\
-                            Parallels: {}\n\
-                            \n\
-                            CHANGES: {}",
-                            target.course_name,
-                            target.title,
-                            deadline_display,
-                            parallel_display,
-                            message
-                        )
-                    } else {
-                        message
-                    };
-                    
+                    // IMPORTANT: Pass original message, NOT the prefixed "UPDATE EXISTING..." text
+                    // The prompt builder will handle formatting
                     match extract_with_ai(
-                        text.as_str(),
+                        &message,  // Just the user's message: "deadline pertemuan berikutnya"
                         &courses_list,
                         &assignments,
                         &course_map,
@@ -753,16 +726,17 @@ async fn webhook(
                         quoted_message_text.as_deref(),
                         quoted_message_id.as_deref(),
                         &logger,
+                        target_assignment.as_ref(), // This triggers update mode
                     ).await {
                         Ok(classification) => {
+                            // Type validation (belt-and-suspenders)
                             if !matches!(classification, AIClassification::AssignmentUpdate { .. }) {
                                 logger.log(&format!("⚠️ AI returned unexpected type: {:?}", classification));
                                 
-                                let error_msg = "⚠️ *AI TIDAK MENGENALI SEBAGAI UPDATE*\n\n\
-                                    Coba gunakan kata kunci seperti:\n\
-                                    - 'deadline berubah menjadi...'\n\
+                                let error_msg = "⚠️ *AI GAGAL PARSING UPDATE*\n\n\
+                                    Coba format lebih jelas:\n\
+                                    - 'deadline berubah jadi...'\n\
                                     - 'diundur ke...'\n\
-                                    - 'judul: ...'\n\
                                     - 'untuk parallel: ...'";
                                 
                                 let _ = send_reply(chat_id, error_msg).await;
@@ -772,6 +746,7 @@ async fn webhook(
                             
                             logger.log(&format!("✅ AI Classification: {:?}\n", classification));
                             
+                            // Now safe to destructure
                             if let (Some(target), AIClassification::AssignmentUpdate { 
                                 new_deadline, 
                                 new_title, 
@@ -784,6 +759,7 @@ async fn webhook(
                                 let deadline_parsed = new_deadline.as_ref()
                                     .and_then(|d| crud::parse_deadline(d).ok());
 
+                                // Resolve new course if provided
                                 let new_course_id = if let Some(ref cname) = new_course_name {
                                     match crud::get_course_by_name(&state.pool, cname).await {
                                         Ok(Some(course)) => {
@@ -822,6 +798,7 @@ async fn webhook(
                                     Some(&logger),
                                 ).await {
                                     Ok(_) => {
+                                        // Send notifications if needed
                                         if deadline_parsed.is_some() || !parallel_codes.is_empty() || new_course_id.is_some() {
                                             send_academic_update_notification(
                                                 chat_id,
@@ -913,6 +890,7 @@ async fn webhook(
                 quoted_message_text.as_deref(),
                 quoted_message_id.as_deref(),
                 &logger, 
+                None,
             ).await {
                 Ok(classification) => {
                     let ai_duration = ai_start.elapsed();

@@ -1,4 +1,4 @@
-use crate::models::Assignment;
+use crate::models::{Assignment, AssignmentWithCourse};
 use std::collections::HashMap;
 use uuid::Uuid;
 use chrono::{Utc, FixedOffset, Duration}; 
@@ -399,6 +399,260 @@ Before outputting, verify:
         tomorrow_str,
         lusa_str,
         next_week_str
+    )
+}
+
+pub fn build_update_prompt(
+    update_message: &str,
+    target_assignment: &AssignmentWithCourse,
+    current_datetime: &str,
+    current_date: &str,
+    context: Option<&MessageContext>,
+) -> String {
+    let gmt7 = FixedOffset::east_opt(7 * 3600).unwrap();
+    let now = Utc::now().with_timezone(&gmt7);
+    
+    let tomorrow_str = (now + Duration::days(1)).format("%Y-%m-%d").to_string();
+    let lusa_str = (now + Duration::days(2)).format("%Y-%m-%d").to_string();
+    let next_week_str = (now + Duration::days(7)).format("%Y-%m-%d").to_string();
+    
+    let context_hints = if let Some(ctx) = context {
+        let mut hints = String::from("\n\n# CONTEXT HINTS FROM MESSAGE ANALYSIS\n\n");
+
+        hints.push_str(&format!(
+            "**Confidence:** {:.0}% | **Source:** {}\n\n",
+            ctx.parallel_confidence * 100.0,
+            ctx.parallel_source
+        ));
+        
+        if let Some(ref quoted) = ctx.quoted_message_summary {
+            hints.push_str("## QUOTED MESSAGE\n");
+            hints.push_str(&format!("  {}\n", quoted));
+            hints.push_str("  → User is updating this assignment\n\n");
+        }
+        
+        if !ctx.course_hints.is_empty() {
+            hints.push_str("## DETECTED COURSES\n");
+            for course_hint in &ctx.course_hints {
+                hints.push_str(&format!("- **{}**\n", course_hint.course_name));
+                
+                if !course_hint.parallel_codes.is_empty() {
+                    hints.push_str(&format!("  - Parallels: [{}]\n", course_hint.parallel_codes.join(", ")));
+                }
+                
+                if !course_hint.parallel_schedules.is_empty() {
+                    hints.push_str("  - Next meetings:\n");
+                    for ps in &course_hint.parallel_schedules {
+                        if let Some(ref meeting) = ps.next_meeting {
+                            hints.push_str(&format!("    - {} → {}\n", ps.parallel_code.to_uppercase(), meeting));
+                        }
+                    }
+                }
+            }
+            hints.push('\n');
+        }
+        
+        if let Some(ref deadline) = ctx.deadline_hint {
+            hints.push_str(&format!("**Suggested deadline:** {}\n\n", deadline));
+        }
+        
+        hints.push_str("## USAGE RULES\n");
+        hints.push_str("- Hints are SUGGESTIONS based on patterns\n");
+        hints.push_str("- 'ketika praktikum'/'during class' → use next meeting time\n");
+        hints.push_str("- Explicit times ('besok jam 13') → use that time with schedule date if available\n");
+        hints.push_str("- Different meeting times per parallel → use EARLIEST time, keep ALL parallels together\n");
+        hints
+    } else {
+        String::new()
+    };
+    
+    let parallel_display = if target_assignment.parallel_codes.is_empty() {
+        "N/A".to_string()
+    } else {
+        format!("[{}]", target_assignment.parallel_codes.join(", "))
+    };
+    
+    let deadline_display = target_assignment.deadline
+        .map(|d| d.format("%Y-%m-%d %H:%M").to_string())
+        .unwrap_or_else(|| "N/A".to_string());
+    
+    let description_display = target_assignment.description
+        .as_deref()
+        .unwrap_or("N/A");
+    
+    format!(
+        r#"
+# CRITICAL RESPONSE REQUIREMENTS
+1. You MUST output COMPLETE, VALID JSON
+2. NEVER truncate your response mid-JSON
+3. If approaching token limit, SIMPLIFY but COMPLETE the JSON
+4. Close ALL brackets, braces, and quotes
+5. Test: Your response should parse as valid JSON
+
+You are a bilingual (Indonesian first/English) academic assistant updating an existing assignment. Fill fields in Indonesian.
+
+# CORE TASK: UPDATE EXISTING ASSIGNMENT
+
+**Current time:** {} (GMT+7)
+**Today:** {}
+**Update message:** "{}"
+
+**ASSIGNMENT BEING UPDATED:**
+**Course:** {}
+**Title:** {}
+**Current Deadline:** {}
+**Parallels:** {}
+**Description:** {}
+
+{}
+
+**Temporal references:**
+- Besok/Tomorrow → {} 23:59
+- Lusa/Day after tomorrow → {} 23:59
+- Minggu depan/Next week → {} 23:59
+
+---
+
+# EXTRACTION RULES
+
+## TITLE (2-3 words minimum, max 40 chars, MUST BE SPECIFIC)
+
+Single-word titles are prohibited. Every title must have a distinguishing element.
+
+**Priority order:**
+1. Use identifier: "LKP 15", "Quiz 3", "Problem Set 5"
+2. Use descriptive type: "Tugas Berpasangan", "Laporan Praktikum"
+3. Add topic if mentioned: "Quiz Chapter 5", "Tugas Modul 2"
+4. Add course as minimum context: "Quiz Grafkom", "Tugas RPL"
+
+**PROHIBITED:** Do not output single-word titles
+- NOT "Quiz" → USE "Quiz [Course/Topic]"
+- NOT "Tugas" → USE "Tugas [Type/Topic/Course]"
+- NOT "Kuis" → USE "Kuis [Course/Topic]"
+
+Only set `new_title` if user explicitly changes the title.
+
+## DEADLINE (format: YYYY-MM-DD HH:MM)
+
+**Priority order:**
+
+1. **WHEN-DURING patterns** ("ketika praktikum", "saat kelas", "during class", "pertemuan berikutnya"):
+   → Use EXACT schedule time from context hints
+   → If multiple parallels with different times: Use EARLIEST time, keep ALL parallels
+   Example: "deadline pertemuan berikutnya" + K4: 08:00, P4: 10:00 → Use "2026-02-04 08:00"
+
+2. **EXPLICIT TIME with relative date** ("besok jam 13", "Jumat pukul 14:00"):
+   → IF context hint date within 7 days of relative date: Use hint DATE with message TIME
+   → ELSE: Use calculated relative date with message TIME
+   Example: "besok jam 13:00" + Hint "2026-01-12 08:00" → "2026-01-12 13:00"
+
+3. **DATE ONLY** ("besok", "Friday", "minggu depan"):
+   → Calculate date, use 23:59
+   Example: "deadline besok" → "2026-01-31 23:59"
+
+4. **NO deadline info:**
+   → Use null (do NOT guess)
+
+## PARALLEL CODES (array: ["k1", "k2", ...])
+
+Valid codes: k1-k4, p1-p4, r1-r4, all
+
+**CRITICAL: Extract from UPDATE MESSAGE, NOT from existing assignment**
+
+**Decision tree:**
+1. Does message contain "all"/"semua"/"everyone"? → Return ["all"], STOP
+2. Extract specific codes from UPDATE MESSAGE text
+3. IF no codes in UPDATE MESSAGE: Check context hints
+4. IF still none: Return [] (empty = no change)
+
+**Pattern recognition:**
+- "untuk K2 P2" → ["k2", "p2"]
+- "paralel K1" → ["k1"]
+- "semua kelas" → ["all"]
+- "diubah ke k3" → ["k3"]
+
+**IMPORTANT:** Empty array means "no change to parallels", NOT "use existing parallels"
+
+## DESCRIPTION (optional for updates)
+
+- Extract from message content if user provides new description
+- If no new description mentioned: return null
+- Never copy existing description
+
+## COURSE CHANGE (rare)
+
+Only set `new_course_name` if user EXPLICITLY moves assignment to different course:
+- "pindahin ke RPL"
+- "seharusnya masuk Grafkom"
+- "diubah ke Kalkulus"
+
+Otherwise: return null
+
+---
+
+# OUTPUT SCHEMA
+
+Return valid JSON only. No markdown, no explanations.
+
+```json
+{{
+  "type": "assignment_update",
+  "reference_keywords": ["{}"],
+  "changes": "brief summary in Indonesian of what user changed",
+  "new_deadline": "YYYY-MM-DD HH:MM" | null,
+  "new_title": string | null,
+  "new_description": string | null,
+  "new_course_name": string | null,
+  "parallel_codes": [] | ["k1", "k2", ...]
+}}
+```
+
+**Fields:**
+- `reference_keywords`: Always use [course name] of target assignment
+- `changes`: What user said in their update message (keep it brief)
+- `new_*`: Only set fields that user explicitly changed
+- `parallel_codes`: Codes from UPDATE MESSAGE, empty array if no change mentioned
+
+---
+
+# REASONING CHECKLIST
+
+Before outputting, verify:
+1. For "ketika praktikum"/"pertemuan berikutnya" → used exact schedule time
+2. For "besok jam X" → used schedule date with message time if available
+3. If multiple parallels with different meeting times → used EARLIEST time
+4. Parallel codes extracted from UPDATE MESSAGE, not existing assignment
+5. Title is specific (has identifier or descriptive type) if being changed
+6. Description is only set if user provided new description
+7. Course change only if explicitly mentioned
+8. Empty parallel_codes array means "no change", not "use existing"
+
+**Common errors to avoid:**
+- Using existing assignment's parallels instead of message's parallels
+- Splitting into multiple assignments (THIS IS AN UPDATE, NOT NEW ASSIGNMENTS)
+- Inventing new info not mentioned in update message
+- Setting fields to existing values (only set what changed)
+- Generic titles like "Tugas", "Assignment" if changing title
+
+**CRITICAL FOR UPDATES:**
+- If update mentions "untuk K2 P2" → extract ["k2", "p2"] from MESSAGE
+- If update says "deadline pertemuan berikutnya" with K4:08:00, P4:10:00 → use earliest (08:00)
+- DO NOT create multiple assignments, this is ONE update
+- Only fill fields the user wants to change
+"#,
+        current_datetime,
+        current_date,
+        update_message,
+        target_assignment.course_name,
+        target_assignment.title,
+        deadline_display,
+        parallel_display,
+        description_display,
+        context_hints,
+        tomorrow_str,
+        lusa_str,
+        next_week_str,
+        target_assignment.course_name
     )
 }
 
