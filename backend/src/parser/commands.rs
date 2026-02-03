@@ -670,7 +670,7 @@ pub async fn handle_command(
                 "*[Halow aku Maarbot 👋]*\n\
                 _Ilkomerz61's Memory Augmented Academic Recollection BOT_\n\n\
                 *USER GUIDE (BACA KALO BINGUNG FITUR MARBOT)*\n\
-                https://ipb.link/marbot\n\
+                https://ipb.link/marbot\n\n\
                 *Perintah Umum:*\n\
                 - #ping — cek bot hidup & latency\n\
                 - #tugas — lihat semua tugas (global)\n\
