@@ -664,6 +664,7 @@ pub async fn handle_command(
             }
         }
 
+        
         BotCommand::Help => {
             logger.log(&format!("❓ Help command received from {}", user_phone));
             CommandResponse::Text(
