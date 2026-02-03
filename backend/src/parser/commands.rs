@@ -668,28 +668,30 @@ pub async fn handle_command(
             logger.log(&format!("❓ Help command received from {}", user_phone));
             CommandResponse::Text(
                 "*[Halow aku Maarbot 👋]*\n\
-                    _Ilkomerz61's Memory Augmented Academic Recollection BOT_\n\n\
-                    *Perintah Umum:*\n\
-                    - #ping — cek bot hidup & latency\n\
-                    - #tugas — lihat semua tugas (global)\n\
-                    - #today — tugas deadline hari ini\n\
-                    - #week — tugas 7 hari ke depan\n\
-                    - #help — bantuan\n\n\
-                    *Perintah Personal:*\n\
-                    - #todo — lihat tugas pribadi kamu\n\
-                    - #<id> — lihat detail tugas dari #todo\n\
-                    - #done <id> — tandai selesai\n\
-                    - #undo — batalkan #done terakhir\n\n\
-                    *Perintah Pengaturan:*\n\
-                    - #setkelas <matkul> <kode1> <kode2> — atur kode pararel untuk matkul\n\
-                    - #mykelas — lihat settings kode parallel kamu\n\n\
-                    *Perintah Admin:*\n\
-                    - #delete <id> — hapus tugas (id dari #tugas)\n\
-                    - #update <id> <pesan> — update tugas dengan AI\n\n\
-                    *Penting:* #<id> dan #done selalu pakai nomor dari *#todo*. _Info tugas akan otomatis tersimpan via grup info akademik, tidak dari chat lain._\n\n\
-                    *Want to Contribute?*\n\
-                    github.com/gimigkk/marbot-academic-bot"
-                    .to_string(),
+                _Ilkomerz61's Memory Augmented Academic Recollection BOT_\n\n\
+                *USER GUIDE (BACA KALO BINGUNG FITUR MARBOT)*\n\
+                https://ipb.link/marbot\n\
+                *Perintah Umum:*\n\
+                - #ping — cek bot hidup & latency\n\
+                - #tugas — lihat semua tugas (global)\n\
+                - #today — tugas deadline hari ini\n\
+                - #week — tugas 7 hari ke depan\n\
+                - #help — bantuan\n\n\
+                *Perintah Personal:*\n\
+                - #todo — lihat tugas pribadi kamu\n\
+                - #<id> — lihat detail tugas dari #todo\n\
+                - #done <id> — tandai selesai\n\
+                - #undo — batalkan #done terakhir\n\n\
+                *Perintah Pengaturan:*\n\
+                - #setkelas <matkul> <kode1> <kode2> — atur kode pararel untuk matkul\n\
+                - #mykelas — lihat settings kode parallel kamu\n\n\
+                *Perintah Admin:*\n\
+                - #delete <id> — hapus tugas (id dari #tugas)\n\
+                - #update <id> <pesan> — update tugas dengan AI\n\n\
+                *Penting:* #<id> dan #done selalu pakai nomor dari *#todo*. _Info tugas akan otomatis tersimpan via grup info akademik, tidak dari chat lain._\n\n\
+                *Want to Contribute?*\n\
+                github.com/gimigkk/marbot-academic-bot"
+                .to_string(),
             )
         }
 
