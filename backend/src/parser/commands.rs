@@ -623,7 +623,7 @@ pub async fn handle_command(
                         .to_string(),
                 );
             }
-
+            
             match get_active_assignments_sorted(pool, Some(logger)).await {
                 Ok(assignments) => {
                     let idx = (index as usize).saturating_sub(1);
