@@ -186,7 +186,7 @@ async fn check_personal_reminders(
 
         if let Some(cid) = task.course_id {
 
-            let interested_users = crud::get_users_for_course_reminder(&pool, cid).await?;
+            let interested_users = crud::get_users_for_course_reminder(&pool, cid, task.id).await?;
             
             let deadline_wib = task.deadline.unwrap()
                 .with_timezone(&chrono::FixedOffset::east_opt(7 * 3600).unwrap());
