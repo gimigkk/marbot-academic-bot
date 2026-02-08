@@ -343,7 +343,7 @@ Return valid JSON only. No markdown, no explanations.
 ```
 - category="informal" → no academic context
 - category="academic_related" → academic but missing course/identifier
-- reason=null for informal, required string for academic_related
+- reason=null for informal, required string for academic_related, explain in 1 line max.
 
 **MULTIPLE_ASSIGNMENTS:**
 ```json
@@ -747,7 +747,7 @@ Return JSON with reasoning:
 **Rules:**
 - Only return ID with "high" confidence
 - If "medium" or "low" → return null (safer to not match)
-- Include your reasoning for transparency
+- Include your reasoning for transparency in a single line
 
 Think through the steps above, then provide your answer."#,
         changes,
