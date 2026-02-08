@@ -1014,18 +1014,26 @@ struct UserTarget {
     user_id: String,
     parallel_code: String,
 }
+
 pub async fn get_users_for_course_reminder(
     pool: &PgPool,
     course_id: Uuid,
+    assignment_id: Uuid, 
 ) -> Result<Vec<(String, String)>, sqlx::Error> {
     let rows = sqlx::query_as::<_, UserTarget>(
         r#"
-        SELECT user_id, parallel_code 
-        FROM user_course_settings 
-        WHERE course_id = $1
+        SELECT ucs.user_id, ucs.parallel_code 
+        FROM user_course_settings ucs
+        WHERE ucs.course_id = $1
+          AND NOT EXISTS (
+            SELECT 1 FROM user_completions uc 
+            WHERE uc.user_id = ucs.user_id 
+              AND uc.assignment_id = $2
+          )
         "#
     )
     .bind(course_id)
+    .bind(assignment_id)  
     .fetch_all(pool)
     .await?;
 
