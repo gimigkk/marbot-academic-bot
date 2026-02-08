@@ -900,12 +900,12 @@ pub async fn set_user_course_parallel(
                 .map(|s| s.to_lowercase())
                 .collect();
 
-            if is_special_course {
+           if is_special_course {
                 // Validasi 1: Harus ada 2 kode
                 if clean_codes.len() != 2 {
                     return Ok(format!(
                         "{}⚠️ *Perhatian!*\n\
-                        Mata kuliah *{}* memiliki kelas Kuliah (K) dan Praktikum (P).\n\n\
+                        Mata kuliah *{}* memiliki kelas Kuliah (K) dan Praktikum/Responsi (P/R).\n\n\
                         Harap masukkan kedua kode kelas.\n\
                         *Contoh:* `#setkelas {} k1 p2`", 
                         fuzzy_match_notice,
@@ -914,16 +914,15 @@ pub async fn set_user_course_parallel(
                     ));
                 }
 
-                // Validasi 2: Harus kombinasi K dan P (atau sebaliknya)
                 let has_k = clean_codes.iter().any(|code| code.starts_with('k'));
-                let has_p = clean_codes.iter().any(|code| code.starts_with('p'));
+                let has_p = clean_codes.iter().any(|code| code.starts_with('p') || code.starts_with('r'));
 
                 if !has_k || !has_p {
                     return Ok(format!(
                         "{}❌ *Format Salah!*\n\
-                        Untuk *{}*, kamu harus memasukkan satu kode Kuliah (awalan K) dan satu Praktikum (awalan P).\n\
-                        Jangan masukkan dua-duanya K atau dua-duanya P.\n\n\
-                        *Contoh:* `#setkelas {} k1 p2`",
+                        Untuk *{}*, kamu harus memasukkan satu kode Kuliah (awalan K) dan satu Praktikum/Responsi (awalan P/R).\n\
+                        Jangan masukkan dua-duanya K atau dua-duanya P/R.\n\n\
+                        *Contoh:* `#setkelas {} k1 p2` (atau k1 r2)",
                         fuzzy_match_notice,
                         c.name,
                         original_query
