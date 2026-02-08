@@ -1550,6 +1550,7 @@ async fn handle_single_assignment(
                 }
             }
             // ============ END CLARIFICATION ============
+
             if let Some(debug_id) = &debug_group_id {
                 let prefix = if assignment_number > 0 {
                     format!("{}. ", assignment_number)
@@ -1570,16 +1571,23 @@ async fn handle_single_assignment(
                     String::new()
                 };
                 
+                let sender_tag = sender_id.split('@').next().unwrap_or(sender_id);
+                
                 logger.log("📤 Sending success message...");
-                let _ = send_reply(
+    
+                let message = format!("{}✨ *NEW TASK* @{}\n📝 *{}*\n📚 {}{}{}", 
+                    prefix, 
+                    sender_tag, 
+                    title_clone, 
+                    course_name.unwrap_or_default(),
+                    deadline_str,
+                    parallel_str
+                );
+
+                let _ = send_reply_with_mentions(
                     debug_id, 
-                    &format!("{}✨ *NEW TASK*: {}\n📚 {}{}{}", 
-                        prefix, 
-                        title_clone, 
-                        course_name.unwrap_or_default(),
-                        deadline_str,
-                        parallel_str
-                    )
+                    &message,
+                    vec![sender_id.to_string()] 
                 ).await;
             }
         }

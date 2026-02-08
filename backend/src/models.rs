@@ -427,8 +427,23 @@ impl Assignment {
             return true;
         }
        
-        self.parallel_codes.iter()
-            .any(|p| p.eq_ignore_ascii_case(parallel))
+        self.parallel_codes.iter().any(|p| {
+            let p_str = p.to_lowercase();
+            let target_str = parallel.to_lowercase();
+            
+            if p_str == target_str {
+                return true;
+            }
+
+            if p_str.starts_with('r') && target_str.starts_with('p') {
+                return p_str[1..] == target_str[1..];
+            }
+            if p_str.starts_with('p') && target_str.starts_with('r') {
+                return p_str[1..] == target_str[1..];
+            }
+
+            false
+        })
     }
 }
 
