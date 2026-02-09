@@ -883,13 +883,11 @@ fn humanize_deadline(deadline: &Option<DateTime<Utc>>) -> String {
                     
                     if hours_left > 0 {
                         let mins_left = duration.num_minutes() % 60; 
-                        
                         if mins_left > 0 {
                             format!("{} jam {} menit lagi ({})", hours_left, mins_left, time_str)
                         } else {
                             format!("{} jam lagi ({})", hours_left, time_str)
                         }
-                        
                     } else if hours_left == 0 {
                         let mins_left = duration.num_minutes();
                         if mins_left > 0 {
@@ -902,12 +900,17 @@ fn humanize_deadline(deadline: &Option<DateTime<Utc>>) -> String {
                     }
                 },
                 1 => format!("Besok ({} {})", date_str, time_str),
-                d if d >= 2 => format!("H-{} ({} {})", d, date_str, time_str), 
+
+                d if d >= 2 => {
+                    let day_name = get_day_name_id(due);
+                    format!("H-{} ({}, {} {})", d, day_name, date_str, time_str)
+                }, 
+
                 -1 => format!("Kemarin ({} {})", date_str, time_str),
                 d => format!("lewat {} hari ({} {})", d.abs(), date_str, time_str),
             }
         }
-        None => "_Belum ada deadline_".to_string()
+        None => "_Belum ada deadline_".to_string() 
     }
 }
 
@@ -922,6 +925,17 @@ fn format_date_id(date: NaiveDate) -> String {
     format!("{} {} {}", day, month, date.year())
 }
 
+fn get_day_name_id(date: NaiveDate) -> &'static str {
+    match date.weekday() {
+        chrono::Weekday::Mon => "Sen",
+        chrono::Weekday::Tue => "Sel",
+        chrono::Weekday::Wed => "Rab",
+        chrono::Weekday::Thu => "Kam",
+        chrono::Weekday::Fri => "Jum",
+        chrono::Weekday::Sat => "Sab",
+        chrono::Weekday::Sun => "Min",
+    }
+}
 
 fn sanitize_wa_md(s: &str) -> String {
     s.replace('*', "×")
