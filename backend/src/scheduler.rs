@@ -1,11 +1,11 @@
 // backend/src/scheduler.rs
-use tokio_cron_scheduler::{Job, JobScheduler, JobSchedulerError};
-use sqlx::PgPool;
 use crate::database::crud;
 use crate::models::SendTextRequest;
+use crate::tui::{state::LogEntry, JobLogger};
 use chrono::{DateTime, Datelike, NaiveDate, Utc};
-use crate::tui::{JobLogger, state::LogEntry};
+use sqlx::PgPool;
 use tokio::sync::mpsc;
+use tokio_cron_scheduler::{Job, JobScheduler, JobSchedulerError};
 //use tokio::time::sleep;
 
 pub async fn start_scheduler(
@@ -14,7 +14,6 @@ pub async fn start_scheduler(
 ) -> Result<(), JobSchedulerError> {
     let sched = JobScheduler::new().await?;
 
-
     let tui_state = crate::TUI_STATE.get().cloned();
 
     // 1. REMINDER HARIAN (UTC TIME)
@@ -22,99 +21,111 @@ pub async fn start_scheduler(
     let pool_pagi = pool.clone();
     let log_tx_pagi = log_tx.clone();
     let tui_state_pagi = tui_state.clone();
-    
-    sched.add(Job::new_async("0 0 0 * * *", move |_uuid, _l| {
-        let pool = pool_pagi.clone();
-        let log_tx = log_tx_pagi.clone();
-        let tui_state = tui_state_pagi.clone();
-        
-        Box::pin(async move {
-            let job_id = crate::tui::generate_job_id();
-            
-        
-            if let Some(tui) = &tui_state {
-                tui.create_job(
-                    job_id.clone(),
-                    "SYSTEM".to_string(),
-                    "Daily Reminder".to_string(),
-                    Some("Morning task reminder (07:00 WIB)".to_string()),
-                    None,
-                    vec!["#scheduler".to_string(), "#reminder".to_string(), "#daily".to_string()],
-                ).await;
-            }
-            
-            let logger = JobLogger::new(job_id, log_tx);
-            
-            logger.log("⏰ REMINDER PAGI (00:00 UTC / 07:00 WIB)");
-            if let Err(e) = run_reminder_task(pool, "_Selamat pagi Ilkomers!_", &logger).await {
-                logger.log(&format!("❌ Error reminder pagi: {}", e));
-                logger.set_status(crate::tui::state::JobStatus::Failed);
-            } else {
-                logger.set_status(crate::tui::state::JobStatus::Completed);
-            }
-        })
-    })?).await?;
+
+    sched
+        .add(Job::new_async("0 0 0 * * *", move |_uuid, _l| {
+            let pool = pool_pagi.clone();
+            let log_tx = log_tx_pagi.clone();
+            let tui_state = tui_state_pagi.clone();
+
+            Box::pin(async move {
+                let job_id = crate::tui::generate_job_id();
+
+                if let Some(tui) = &tui_state {
+                    tui.create_job(
+                        job_id.clone(),
+                        "SYSTEM".to_string(),
+                        "Daily Reminder".to_string(),
+                        Some("Morning task reminder (07:00 WIB)".to_string()),
+                        None,
+                        vec![
+                            "#scheduler".to_string(),
+                            "#reminder".to_string(),
+                            "#daily".to_string(),
+                        ],
+                    )
+                    .await;
+                }
+
+                let logger = JobLogger::new(job_id, log_tx);
+
+                logger.log("⏰ REMINDER PAGI (00:00 UTC / 07:00 WIB)");
+                if let Err(e) = run_reminder_task(pool, "_Selamat pagi Ilkomers!_", &logger).await {
+                    logger.log(&format!("❌ Error reminder pagi: {}", e));
+                    logger.set_status(crate::tui::state::JobStatus::Failed);
+                } else {
+                    logger.set_status(crate::tui::state::JobStatus::Completed);
+                }
+            })
+        })?)
+        .await?;
 
     // 2. REMINDER DEADLINE MEPET (H-1 JAM)
-    // Cek setiap 10 menit 
+    // Cek setiap 10 menit
     let pool_urgent = pool.clone();
     let log_tx_urgent = log_tx.clone();
     let tui_state_urgent = tui_state.clone();
-    
-    sched.add(Job::new_async("0 1/10 * * * *", move |_uuid, _l| {
-        let pool = pool_urgent.clone();
-        let log_tx = log_tx_urgent.clone();
-        let tui_state = tui_state_urgent.clone();
-        
-        Box::pin(async move {
-        
-            let now = Utc::now();
-            let one_hour_later = now + chrono::Duration::hours(1);
-            
-            let urgent_count = sqlx::query_scalar::<_, i64>(
-                r#"
+
+    sched
+        .add(Job::new_async("0 1/10 * * * *", move |_uuid, _l| {
+            let pool = pool_urgent.clone();
+            let log_tx = log_tx_urgent.clone();
+            let tui_state = tui_state_urgent.clone();
+
+            Box::pin(async move {
+                let now = Utc::now();
+                let one_hour_later = now + chrono::Duration::hours(1);
+
+                let urgent_count = sqlx::query_scalar::<_, i64>(
+                    r#"
                 SELECT COUNT(*) 
                 FROM assignments a
                 WHERE a.deadline > $1 
                   AND a.deadline <= $2 
                   AND a.reminder_1h_sent = FALSE
-                "#
-            )
-            .bind(now)
-            .bind(one_hour_later)
-            .fetch_one(&pool)
-            .await
-            .unwrap_or(0);
-            
-            // Only create job entry if there's work to do
-            if urgent_count == 0 {
-                return; // Silent return - no logs, no job entry
-            }
-            
-            let job_id = crate::tui::generate_job_id();
-            
-            // Register system job in TUI
-            if let Some(tui) = &tui_state {
-                tui.create_job(
-                    job_id.clone(),
-                    "SYSTEM".to_string(),
-                    "Urgent Alert".to_string(),
-                    Some(format!("Found {} urgent deadline(s)", urgent_count)),
-                    None,
-                    vec!["#scheduler".to_string(), "#urgent".to_string(), "#alert".to_string()],
-                ).await;
-            }
-            
-            let logger = JobLogger::new(job_id, log_tx);
-            
-            if let Err(e) = check_urgent_deadlines(pool, &logger).await {
-                logger.log(&format!("❌ Error checking urgent deadlines: {}", e));
-                logger.set_status(crate::tui::state::JobStatus::Failed);
-            } else {
-                logger.set_status(crate::tui::state::JobStatus::Completed);
-            }
-        })
-    })?).await?;
+                "#,
+                )
+                .bind(now)
+                .bind(one_hour_later)
+                .fetch_one(&pool)
+                .await
+                .unwrap_or(0);
+
+                // Only create job entry if there's work to do
+                if urgent_count == 0 {
+                    return; // Silent return - no logs, no job entry
+                }
+
+                let job_id = crate::tui::generate_job_id();
+
+                // Register system job in TUI
+                if let Some(tui) = &tui_state {
+                    tui.create_job(
+                        job_id.clone(),
+                        "SYSTEM".to_string(),
+                        "Urgent Alert".to_string(),
+                        Some(format!("Found {} urgent deadline(s)", urgent_count)),
+                        None,
+                        vec![
+                            "#scheduler".to_string(),
+                            "#urgent".to_string(),
+                            "#alert".to_string(),
+                        ],
+                    )
+                    .await;
+                }
+
+                let logger = JobLogger::new(job_id, log_tx);
+
+                if let Err(e) = check_urgent_deadlines(pool, &logger).await {
+                    logger.log(&format!("❌ Error checking urgent deadlines: {}", e));
+                    logger.set_status(crate::tui::state::JobStatus::Failed);
+                } else {
+                    logger.set_status(crate::tui::state::JobStatus::Completed);
+                }
+            })
+        })?)
+        .await?;
 
     sched.start().await?;
 
@@ -122,26 +133,26 @@ pub async fn start_scheduler(
     // Cek setiap 10 menit
     let pool_personal = pool.clone();
     let log_tx_personal = log_tx.clone();
-    sched.add(Job::new_async("0 5/10 * * * *", move |_uuid, _l| {
-        let pool = pool_personal.clone();
-        let log_tx = log_tx_personal.clone();
-        Box::pin(async move {
-            let job_id = crate::tui::generate_job_id();
-            let logger = JobLogger::new(job_id, log_tx);
-            
-            //logger.log("🕵️ Mengecek Personal Reminder (H-3 Jam)..."); <-- menuh"in logger gw cok
-            if let Err(e) = check_personal_reminders(pool, &logger).await {
-                logger.log(&format!("❌ Error personal reminder: {}", e));
-                logger.set_status(crate::tui::state::JobStatus::Failed);
-            } else {
-                logger.set_status(crate::tui::state::JobStatus::Completed);
-            }
-        })
-    })?).await?;
+    sched
+        .add(Job::new_async("0 5/10 * * * *", move |_uuid, _l| {
+            let pool = pool_personal.clone();
+            let log_tx = log_tx_personal.clone();
+            Box::pin(async move {
+                let job_id = crate::tui::generate_job_id();
+                let logger = JobLogger::new(job_id, log_tx);
+
+                //logger.log("🕵️ Mengecek Personal Reminder (H-3 Jam)..."); <-- menuh"in logger gw cok
+                if let Err(e) = check_personal_reminders(pool, &logger).await {
+                    logger.log(&format!("❌ Error personal reminder: {}", e));
+                    logger.set_status(crate::tui::state::JobStatus::Failed);
+                } else {
+                    logger.set_status(crate::tui::state::JobStatus::Completed);
+                }
+            })
+        })?)
+        .await?;
     Ok(())
 }
-
-
 
 async fn check_personal_reminders(
     pool: PgPool,
@@ -158,7 +169,7 @@ async fn check_personal_reminders(
         WHERE deadline > $1 
           AND deadline <= $2 
           AND personal_reminder_sent = FALSE
-        "#
+        "#,
     )
     .bind(now)
     .bind(three_hours_later)
@@ -169,7 +180,10 @@ async fn check_personal_reminders(
         return Ok(());
     }
 
-    logger.log(&format!("📨 Menemukan {} tugas untuk reminder personal", tasks.len()));
+    logger.log(&format!(
+        "📨 Menemukan {} tugas untuk reminder personal",
+        tasks.len()
+    ));
 
     use futures::stream::{self, StreamExt};
 
@@ -178,17 +192,17 @@ async fn check_personal_reminders(
     let api_key = std::env::var("WAHA_API_KEY").unwrap_or_else(|_| "devkey123".to_string());
 
     for task in tasks {
-    
         let course_name: String = sqlx::query_scalar("SELECT name FROM courses WHERE id = $1")
             .bind(task.course_id)
             .fetch_one(&pool)
             .await?;
 
         if let Some(cid) = task.course_id {
-
             let interested_users = crud::get_users_for_course_reminder(&pool, cid, task.id).await?;
-            
-            let deadline_wib = task.deadline.unwrap()
+
+            let deadline_wib = task
+                .deadline
+                .unwrap()
                 .with_timezone(&chrono::FixedOffset::east_opt(7 * 3600).unwrap());
             let time_str = deadline_wib.format("%H:%M").to_string();
 
@@ -199,32 +213,32 @@ async fn check_personal_reminders(
             };
 
             let mut recipients = Vec::new();
-            
-         
+
             for (user_id, user_codes_str) in interested_users {
                 let user_codes: Vec<&str> = user_codes_str.split(',').collect();
-                
-                let is_match = if task.parallel_codes.is_empty() || task.parallel_codes.contains(&"all".to_string()) {
-                    true 
+
+                let is_match = if task.parallel_codes.is_empty()
+                    || task.parallel_codes.contains(&"all".to_string())
+                {
+                    true
                 } else {
                     task.parallel_codes.iter().any(|task_code| {
                         let task_str = task_code.to_lowercase();
-                        
+
                         user_codes.iter().any(|user_code| {
                             let user_str = user_code.trim().to_lowercase();
-                        
+
                             if user_str == task_str {
                                 return true;
                             }
 
-                
                             if task_str.starts_with('r') && user_str.starts_with('p') {
                                 return task_str[1..] == user_str[1..];
                             }
                             if task_str.starts_with('p') && user_str.starts_with('r') {
                                 return task_str[1..] == user_str[1..];
                             }
-                            
+
                             false
                         })
                     })
@@ -239,7 +253,11 @@ async fn check_personal_reminders(
                 continue;
             }
 
-            logger.log(&format!("   -> Mengirim PM ke {} mahasiswa untuk tugas '{}'", recipients.len(), task.title));
+            logger.log(&format!(
+                "   -> Mengirim PM ke {} mahasiswa untuk tugas '{}'",
+                recipients.len(),
+                task.title
+            ));
 
             let message = format!(
                 "*[PENGINGAT PRIBADI H < 3 JAM]*\n\n\
@@ -265,7 +283,7 @@ async fn check_personal_reminders(
                         text: message_ref.clone(),
                         session: "default".to_string(),
                         reply_to: None,
-                        mentions:None
+                        mentions: None,
                     };
 
                     let _ = client_ref
@@ -274,14 +292,14 @@ async fn check_personal_reminders(
                         .json(&payload)
                         .send()
                         .await;
-                    
+
                     // DELAYYY
                     tokio::time::sleep(std::time::Duration::from_millis(300)).await;
                 })
                 .await;
         }
 
-        // 4. Update status 
+        // 4. Update status
         sqlx::query("UPDATE assignments SET personal_reminder_sent = TRUE WHERE id = $1")
             .bind(task.id)
             .execute(&pool)
@@ -290,7 +308,6 @@ async fn check_personal_reminders(
 
     Ok(())
 }
-
 
 // --- LOGIC REMINDER HARIAN ---
 async fn run_reminder_task(
@@ -333,7 +350,7 @@ async fn run_reminder_task(
     send_to_channels(message, logger).await
 }
 
-// REMINDER H-1 JAM  
+// REMINDER H-1 JAM
 async fn check_urgent_deadlines(
     pool: PgPool,
     logger: &JobLogger,
@@ -364,7 +381,7 @@ async fn check_urgent_deadlines(
         WHERE a.deadline > $1 
           AND a.deadline <= $2 
           AND a.reminder_1h_sent = FALSE
-        "#
+        "#,
     )
     .bind(now)
     .bind(one_hour_later)
@@ -375,17 +392,21 @@ async fn check_urgent_deadlines(
         return Ok(());
     }
 
-    let urgent_tasks: Vec<UrgentTask> = rows.iter().map(|row| {
-        UrgentTask {
+    let urgent_tasks: Vec<UrgentTask> = rows
+        .iter()
+        .map(|row| UrgentTask {
             id: row.get("id"),
             title: row.get("title"),
             course_name: row.get("course_name"),
             deadline: row.get("deadline"),
             parallel_codes: row.get("parallel_codes"),
-        }
-    }).collect();
+        })
+        .collect();
 
-    logger.log(&format!("🚨 Menemukan {} tugas deadline < 1 jam", urgent_tasks.len()));
+    logger.log(&format!(
+        "🚨 Menemukan {} tugas deadline < 1 jam",
+        urgent_tasks.len()
+    ));
 
     let mut message = String::new();
 
@@ -408,7 +429,7 @@ async fn check_urgent_deadlines(
         message.push_str(&format!("*└─* `#{}{}`\n", course, parallel_display));
         message.push('\n');
     }
-    
+
     message.push_str("_Segera kumpulkan!_ 🔥");
 
     send_to_channels(message, logger).await?;
@@ -418,12 +439,11 @@ async fn check_urgent_deadlines(
             .execute(&pool)
             .await?;
     }
-        
+
     logger.log("✅ Reminder urgent gabungan berhasil dikirim.");
 
     Ok(())
 }
-
 
 // --- HELPER FUNCTIONS ---
 async fn send_to_channels(
@@ -459,7 +479,7 @@ async fn send_to_channels(
         .json(&payload)
         .send()
         .await;
-    
+
     Ok(())
 }
 
@@ -468,12 +488,17 @@ fn status_dot(deadline: &Option<DateTime<Utc>>) -> &'static str {
     match deadline {
         Some(d) => {
             let days = days_left(d);
-            if days < 1 { "🔴" } 
-            else if days == 1 { "🟠" } 
-            else if days == 2 { "🟡" } 
-            else { "🟢" }
+            if days < 1 {
+                "🔴"
+            } else if days == 1 {
+                "🟠"
+            } else if days == 2 {
+                "🟡"
+            } else {
+                "🟢"
+            }
         }
-        None => "⚪"
+        None => "⚪",
     }
 }
 
@@ -481,7 +506,7 @@ fn days_left(deadline_utc: &DateTime<Utc>) -> i64 {
     let wib_offset = chrono::FixedOffset::east_opt(7 * 3600).unwrap();
     let now_wib = Utc::now().with_timezone(&wib_offset).date_naive();
     let due_wib = deadline_utc.with_timezone(&wib_offset).date_naive();
-    
+
     (due_wib - now_wib).num_days()
 }
 
@@ -489,20 +514,23 @@ fn days_left(deadline_utc: &DateTime<Utc>) -> i64 {
 fn humanize_deadline(deadline: &Option<DateTime<Utc>>) -> String {
     match deadline {
         Some(deadline_utc) => {
-            let delta = days_left(deadline_utc);
-            let wib_offset = chrono::FixedOffset::east_opt(7 * 3600).unwrap();
-            let deadline_wib = deadline_utc.with_timezone(&wib_offset);
-            let due_wib = deadline_wib.date_naive();
-            let date_str = format_date_id(due_wib);
-            let time_str = deadline_wib.format("%H:%M").to_string();
+            let gmt7 = chrono::FixedOffset::east_opt(7 * 3600).unwrap();
+            let deadline_gmt7 = deadline_utc.with_timezone(&gmt7);
 
-            let now_wib = Utc::now().with_timezone(&wib_offset);
+            // Menggunakan waktu sekarang GMT+7
+            let now_gmt7 = Utc::now().with_timezone(&gmt7);
+            let now = now_gmt7.date_naive();
+            let due = deadline_gmt7.date_naive();
+
+            let delta = (due - now).num_days();
+            let date_str = format_date_id(due);
+            let time_str = deadline_gmt7.format("%H:%M").to_string();
 
             match delta {
                 0 => {
-                    let duration = deadline_wib.signed_duration_since(now_wib);
+                    let duration = deadline_gmt7.signed_duration_since(now_gmt7);
                     let hours_left = duration.num_hours();
-                    
+
                     if hours_left > 0 {
                         let mins_left = duration.num_minutes() % 60;
                         if mins_left > 0 {
@@ -520,28 +548,57 @@ fn humanize_deadline(deadline: &Option<DateTime<Utc>>) -> String {
                     } else {
                         format!("Lewat {} jam ({})", hours_left.abs(), time_str)
                     }
-                },
-                1 => format!("Besok ({})", date_str),
-                d if d >= 2 => format!("H-{} ({})", d, date_str), 
-                -1 => format!("Kemarin ({})", date_str),
-                d => format!("lewat {} hari ({})", d.abs(), date_str),
+                }
+                1 => format!("Besok ({} {})", date_str, time_str),
+
+                d if d >= 2 => {
+                    let day_name = get_day_name_id(due);
+                    format!("H-{} ({}, {} {})", d, day_name, date_str, time_str)
+                }
+
+                -1 => format!("Kemarin ({} {})", date_str, time_str),
+                d => format!("lewat {} hari ({} {})", d.abs(), date_str, time_str),
             }
         }
-        None => "_Belum ada deadline_".to_string()
+        None => "_Belum ada deadline_".to_string(),
     }
 }
 
 fn format_date_id(date: NaiveDate) -> String {
     let day = date.day();
     let month = match date.month() {
-        1 => "Jan", 2 => "Feb", 3 => "Mar", 4 => "Apr",
-        5 => "Mei", 6 => "Jun", 7 => "Jul", 8 => "Agu",
-        9 => "Sep", 10 => "Okt", 11 => "Nov", 12 => "Des",
+        1 => "Jan",
+        2 => "Feb",
+        3 => "Mar",
+        4 => "Apr",
+        5 => "Mei",
+        6 => "Jun",
+        7 => "Jul",
+        8 => "Agu",
+        9 => "Sep",
+        10 => "Okt",
+        11 => "Nov",
+        12 => "Des",
         _ => "???",
     };
     format!("{} {} {}", day, month, date.year())
 }
 
+fn get_day_name_id(date: NaiveDate) -> &'static str {
+    match date.weekday() {
+        chrono::Weekday::Mon => "Sen",
+        chrono::Weekday::Tue => "Sel",
+        chrono::Weekday::Wed => "Rab",
+        chrono::Weekday::Thu => "Kam",
+        chrono::Weekday::Fri => "Jum",
+        chrono::Weekday::Sat => "Sab",
+        chrono::Weekday::Sun => "Min",
+    }
+}
+
 fn sanitize_wa_md(s: &str) -> String {
-    s.replace('*', "×").replace('_', " ").replace('~', "-").replace('`', "'")
+    s.replace('*', "×")
+        .replace('_', " ")
+        .replace('~', "-")
+        .replace('`', "'")
 }
