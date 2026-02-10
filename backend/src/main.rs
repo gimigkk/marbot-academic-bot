@@ -15,7 +15,7 @@ use tokio::net::TcpListener;
 use sqlx::PgPool;
 use std::time::{Instant, Duration}; 
 use std::collections::HashMap;
-//use chrono::{Datelike};
+use chrono::Datelike;
 use chrono::Duration as ChronoDuration;
 use once_cell::sync::OnceCell;
 
@@ -1559,12 +1559,23 @@ async fn handle_single_assignment(
                 };
                 
                 let deadline_str = deadline_parsed
-                    .map(|d| {
-                        let indonesia_time = d + ChronoDuration::hours(7);
-                        format!("\n⏰ {}", indonesia_time.format("%Y-%m-%d %H:%M WIB"))
-                    })
-                    .unwrap_or_default();
-                
+        .map(|d| {
+            let indonesia_time = d + ChronoDuration::hours(7);
+            
+            let day_name = match indonesia_time.weekday() {
+                chrono::Weekday::Mon => "Sen",
+                chrono::Weekday::Tue => "Sel",
+                chrono::Weekday::Wed => "Rab",
+                chrono::Weekday::Thu => "Kam",
+                chrono::Weekday::Fri => "Jum",
+                chrono::Weekday::Sat => "Sab",
+                chrono::Weekday::Sun => "Min",
+            };
+
+                format!("\n⏰ {}, {}", day_name, indonesia_time.format("%Y-%m-%d %H:%M WIB"))
+                })
+                .unwrap_or_default();
+
                 let parallel_str = if !final_parallel_codes.is_empty() {
                     format!("\n🧩 Parallel: {}", final_parallel_codes.join(", ").to_uppercase())
                 } else {
@@ -1940,3 +1951,4 @@ async fn download_media_from_url(media_url: &str, logger: &tui::JobLogger) -> Re
         return Ok(general_purpose::STANDARD.encode(&bytes));
     }
 }
+
