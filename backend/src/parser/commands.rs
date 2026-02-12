@@ -8,7 +8,8 @@ use crate::database::crud::{
     get_last_completed_assignment,
     delete_assignment,
     set_user_course_parallel,
-    get_user_course_statuses,  
+    get_user_course_statuses,
+    set_user_daily_preference,
 };
 
 use crate::models::{BotCommand, AssignmentWithCourse};
@@ -358,6 +359,33 @@ pub async fn handle_command(
                         "❌ Maaf, terjadi kesalahan saat mengambil data tugas.\n_Coba lagi sebentar ya._"
                             .to_string(),
                     )
+                }
+            }
+        }
+
+        BotCommand::Daily(status) => {
+            logger.log(&format!("⏰ Daily command: {} from {}", status, user_phone));
+            
+            let enabled = status == 1;
+            match set_user_daily_preference(pool, user_phone, enabled).await {
+                Ok(_) => {
+                    let msg = if enabled {
+                        format!(
+                            "✅ *Daily Reminder Aktif!*\n\n\
+                            Bot akan mengirimkan #todo kamu setiap jam 07:00 WIB.\n\
+                            _Ketik #daily 0 untuk mematikan._"
+                        )
+                    } else {
+                        format!(
+                            "🔕 *Daily Reminder Non-Aktif*\n\n\
+                            Kamu tidak akan menerima #todo otomatis lagi."
+                        )
+                    };
+                    CommandResponse::Text(msg)
+                }
+                Err(e) => {
+                    logger.log(&format!("❌ Gagal set daily preference: {}", e));
+                    CommandResponse::Text("❌ Terjadi kesalahan server.".to_string())
                 }
             }
         }

@@ -163,6 +163,7 @@ pub enum BotCommand {
     Delete(u32),
     SetKelas(String, Vec<String>),
     MyKelas,
+    Daily(i32),
     UnknownCommand(String),
     MissingArgument(String),
     Update(u32, String),      

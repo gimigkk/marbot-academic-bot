@@ -1045,3 +1045,32 @@ pub fn normalize_parallel_codes(codes: Vec<String>) -> Vec<String> {
         .map(|c| c.to_lowercase())
         .collect()
 }
+
+pub async fn set_user_daily_preference(
+    pool: &sqlx::PgPool,
+    user_id: &str,
+    enabled: bool,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        r#"
+        INSERT INTO user_preferences (user_id, daily_enabled)
+        VALUES ($1, $2)
+        ON CONFLICT (user_id) 
+        DO UPDATE SET daily_enabled = $2
+        "#,
+    )
+    .bind(user_id)
+    .bind(enabled)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+pub async fn get_daily_subscribers(pool: &sqlx::PgPool) -> Result<Vec<String>, sqlx::Error> {
+    let users = sqlx::query_scalar::<_, String>(
+        "SELECT user_id FROM user_preferences WHERE daily_enabled = TRUE"
+    )
+    .fetch_all(pool)
+    .await?;
+    Ok(users)
+}

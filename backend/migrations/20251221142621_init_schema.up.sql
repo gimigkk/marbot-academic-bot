@@ -64,6 +64,13 @@ CREATE TABLE IF NOT EXISTS public.user_course_settings (
     PRIMARY KEY (user_id, course_id)
 );
 
+-- TABEL 6: USER PREFRENCE
+CREATE TABLE IF NOT EXISTS public.user_preferences (
+    user_id TEXT PRIMARY KEY, -- Nomor WA
+    daily_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
 -- Indexes
 CREATE INDEX IF NOT EXISTS idx_user_settings_user ON public.user_course_settings(user_id);
 CREATE INDEX IF NOT EXISTS idx_user_completions_user ON public.user_completions (user_id, completed_at DESC);

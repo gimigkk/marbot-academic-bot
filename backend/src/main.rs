@@ -602,6 +602,7 @@ async fn webhook(
                 BotCommand::Expand(_) => "expand",
                 BotCommand::SetKelas(_, _) => "setkelas",
                 BotCommand::MyKelas => "mykelas",
+                BotCommand::Daily(_) => "daily",
                 BotCommand::MissingArgument(_) => "error",
                 BotCommand::UnknownCommand(_) => "unknown",
                 BotCommand::Update(_, _) => "ai",
