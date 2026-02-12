@@ -1,12 +1,12 @@
 // backend/src/scheduler.rs
-use crate::database::crud;
+use crate::database::crud::{self, get_active_assignments_for_user, get_daily_subscribers};
 use crate::models::SendTextRequest;
 use crate::tui::{state::LogEntry, JobLogger};
 use chrono::{DateTime, Datelike, NaiveDate, Utc};
 use sqlx::PgPool;
 use tokio::sync::mpsc;
 use tokio_cron_scheduler::{Job, JobScheduler, JobSchedulerError};
-//use tokio::time::sleep;
+// use tokio::time::sleep;
 
 pub async fn start_scheduler(
     pool: PgPool,
@@ -16,7 +16,7 @@ pub async fn start_scheduler(
 
     let tui_state = crate::TUI_STATE.get().cloned();
 
-    // 1. REMINDER HARIAN (UTC TIME)
+    // 1. REMINDER HARIAN (GLOBAL + PERSONAL)
     // 07:00 WIB = 00:00 UTC
     let pool_pagi = pool.clone();
     let log_tx_pagi = log_tx.clone();
@@ -35,13 +35,13 @@ pub async fn start_scheduler(
                     tui.create_job(
                         job_id.clone(),
                         "SYSTEM".to_string(),
-                        "Daily Reminder".to_string(),
-                        Some("Morning task reminder (07:00 WIB)".to_string()),
+                        "Morning Routine".to_string(), // Ganti nama biar general
+                        Some("Global & Personal Reminder (07:00 WIB)".to_string()),
                         None,
                         vec![
                             "#scheduler".to_string(),
-                            "#reminder".to_string(),
                             "#daily".to_string(),
+                            "#morning".to_string(),
                         ],
                     )
                     .await;
@@ -49,13 +49,20 @@ pub async fn start_scheduler(
 
                 let logger = JobLogger::new(job_id, log_tx);
 
-                logger.log("⏰ REMINDER PAGI (00:00 UTC / 07:00 WIB)");
-                if let Err(e) = run_reminder_task(pool, "_Selamat pagi Ilkomers!_", &logger).await {
-                    logger.log(&format!("❌ Error reminder pagi: {}", e));
-                    logger.set_status(crate::tui::state::JobStatus::Failed);
-                } else {
-                    logger.set_status(crate::tui::state::JobStatus::Completed);
+                logger.log("⏰ MEMULAI MORNING ROUTINE (07:00 WIB)");
+                
+                logger.log("📡 Mengirim Reminder Global...");
+                if let Err(e) = run_reminder_task(pool.clone(), "_Selamat pagi Ilkomers!_", &logger).await {
+                    logger.log(&format!("❌ Error reminder global: {}", e));
                 }
+
+                // REMINDER PERSONAL
+                logger.log("🚀 Menjalankan Personal Daily Reminder...");
+                if let Err(e) = run_personal_daily_reminder(pool, &logger).await {
+                    logger.log(&format!("❌ Error personal daily reminder: {}", e));
+                }
+
+                logger.set_status(crate::tui::state::JobStatus::Completed);
             })
         })?)
         .await?;
@@ -601,4 +608,104 @@ fn sanitize_wa_md(s: &str) -> String {
         .replace('_', " ")
         .replace('~', "-")
         .replace('`', "'")
+}
+
+async fn run_personal_daily_reminder(
+    pool: PgPool,
+    logger: &JobLogger,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let subscribers = get_daily_subscribers(&pool).await?;
+    
+    if subscribers.is_empty() {
+        logger.log("ℹ️ Tidak ada subscriber daily reminder.");
+        return Ok(());
+    }
+
+    logger.log(&format!("📨 Mengirim daily summary ke {} user...", subscribers.len()));
+
+    let client = reqwest::Client::new();
+    let waha_url = std::env::var("WAHA_URL").unwrap_or_else(|_| "http://waha:3000".to_string());
+    let api_key = std::env::var("WAHA_API_KEY").unwrap_or_else(|_| "devkey123".to_string());
+
+    for user_phone in subscribers {
+        match get_active_assignments_for_user(&pool, &user_phone, None).await {
+            Ok((assignments, user_settings)) => {
+                
+                let filtered_assignments: Vec<_> = assignments.into_iter().filter(|a| {
+                    if a.is_completed { return false; }
+                    
+                    if a.parallel_codes.is_empty() || a.parallel_codes.contains(&"all".to_string()) {
+                        return true; 
+                    }
+                    
+                    if let Some(user_codes_str) = user_settings.get(&a.course_name) {
+                        let user_codes: Vec<&str> = user_codes_str.split(',').collect();
+                        for task_code in &a.parallel_codes {
+                            let task_str = task_code.as_str();
+                            if user_codes.contains(&task_str) { return true; }
+                            
+                            // Handle p/r variants
+                            if task_str.starts_with('r') {
+                                let p_variant = format!("p{}", &task_str[1..]);
+                                if user_codes.contains(&p_variant.as_str()) { return true; }
+                            } else if task_str.starts_with('p') {
+                                let r_variant = format!("r{}", &task_str[1..]);
+                                if user_codes.contains(&r_variant.as_str()) { return true; }
+                            }
+                        }
+                        return false;
+                    }
+                    true 
+                }).collect();
+
+                if filtered_assignments.is_empty() {
+                    continue; 
+                }
+
+                let mut message = String::new();
+                message.push_str("🌞 *[Daily Reminder]*\n_Semangat pagi! Ini daftar tugas kamu:_\n\n");
+
+                for (i, a) in filtered_assignments.iter().enumerate() {
+                    let status_emoji = status_dot(&a.deadline);
+                    let due_text = humanize_deadline(&a.deadline);
+                    let title = sanitize_wa_md(&a.title);
+                    let course = sanitize_wa_md(&a.first_alias);
+                    
+                    let parallel_display = if !a.parallel_codes.is_empty() {
+                         format!(" {}", a.format_parallel_display())
+                    } else { String::new() };
+
+                    message.push_str(&format!("{} *[{}]* *{}*\n", status_emoji, i + 1, title));
+                    message.push_str(&format!("*├─* {}\n", due_text));
+                    message.push_str(&format!("*└─* `#{}{}`\n", course, parallel_display));
+                    message.push('\n');
+                }
+                
+                message.push_str("\n_#daily 0 untuk berhenti langganan._");
+
+                let payload = SendTextRequest {
+                    chat_id: user_phone.clone(),
+                    text: message,
+                    session: "default".to_string(),
+                    reply_to: None,
+                    mentions: None,
+                };
+
+                let _ = client
+                    .post(format!("{}/api/sendText", waha_url))
+                    .header("X-Api-Key", &api_key)
+                    .json(&payload)
+                    .send()
+                    .await;
+                
+                // Delay
+                tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+            }
+            Err(e) => {
+                logger.log(&format!("⚠️ Error fetch todo user {}: {}", user_phone, e));
+            }
+        }
+    }
+
+    Ok(())
 }
