@@ -51,7 +51,18 @@ fn parse_command(text: &str) -> Option<BotCommand> {
                 Some(BotCommand::MissingArgument("update".to_string()))
             }
         },
-        
+
+       "daily" => {
+            if parts.len() > 1 {       
+                if let Ok(status) = parts[1].parse() {
+                    Some(BotCommand::Daily(status))
+                } else {
+                    Some(BotCommand::MissingArgument("daily".to_string()))
+                }
+            } else {
+                Some(BotCommand::MissingArgument("daily".to_string()))
+            }
+        },
 
         // --- Set Kelas ---
         "setkelas" | "set" => {

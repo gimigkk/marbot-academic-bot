@@ -763,6 +763,13 @@ pub async fn handle_command(
                     - #setkelas pemrog k1 p2\n\n\
                     💡 _Gunakan nama matkul yang benar (lihat di #tugas)_"
                 }
+                "daily" => {
+                    "⚠️ *Cara pakai yang benar:*\n\n\
+                    #daily <1 atau 0>\n\n\
+                    *Contoh:*\n\
+                    - #daily 1  (✅ Aktifkan reminder)\n\
+                    - #daily 0  (🔕 Matikan reminder)"
+                }
                 "update" => {
                     "⚠️ *Cara pakai yang benar:*\n\n\
                     #update <nomor> <pesan update>\n\n\
