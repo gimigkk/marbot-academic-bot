@@ -698,7 +698,7 @@ pub async fn handle_command(
             CommandResponse::Text(
                 "*[Halow aku Maarbot 👋]*\n\
                 _Ilkomerz61's Memory Augmented Academic Recollection BOT_\n\n\
-                *USER GUIDE (BACA KALO BINGUNG CARA SETUP MARBOT)*\n\
+                *USER GUIDE (TUTOR SETUP MARBOT)*\n\
                 https://ipb.link/marbot\n\n\
                 *Perintah Umum:*\n\
                 - #ping — cek bot hidup & latency\n\
@@ -713,7 +713,8 @@ pub async fn handle_command(
                 - #undo — batalkan #done terakhir\n\n\
                 *Perintah Pengaturan:*\n\
                 - #setkelas <matkul> <kode1> <kode2> — atur kode pararel untuk matkul\n\
-                - #mykelas — lihat settings kode parallel kamu\n\n\
+                - #mykelas — lihat settings kode parallel kamu\n\
+                - #daily <1/0> — aktifkan/matikan reminder #todo harian\n\n\
                 *Perintah Admin:*\n\
                 - #delete <id> — hapus tugas (id dari #tugas)\n\
                 - #update <id> <pesan> — update tugas dengan AI\n\n\
