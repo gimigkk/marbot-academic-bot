@@ -8,7 +8,7 @@
   ██║ ╚═╝ ██║██║  ██║██║  ██║██║  ██║██████╔╝╚██████╔╝   ██║   
   ╚═╝     ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝  ╚═════╝    ╚═╝   
                                                      
-  WhatsApp Academic Assistant v1.0
+  WhatsApp Academic Assistant v1.2
   Created by Gilang & Arya
 </pre>
 
