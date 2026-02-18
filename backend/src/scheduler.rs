@@ -7,6 +7,8 @@ use sqlx::PgPool;
 use tokio::sync::mpsc;
 use tokio_cron_scheduler::{Job, JobScheduler, JobSchedulerError};
 // use tokio::time::sleep;
+use std::collections::HashMap;
+use tokio::time::Duration;
 
 pub async fn start_scheduler(
     pool: PgPool,
@@ -15,6 +17,20 @@ pub async fn start_scheduler(
     let sched = JobScheduler::new().await?;
 
     let tui_state = crate::TUI_STATE.get().cloned();
+    
+    // REMINDER IFTAR LOGIC
+    schedule_today_iftar(pool.clone(), log_tx.clone()).await;
+    let pool_ramadhan = pool.clone();
+    let log_tx_ramadhan = log_tx.clone();
+    sched
+        .add(Job::new_async("0 5 0 * * *", move |_uuid, _l| {
+            let pool = pool_ramadhan.clone();
+            let log_tx = log_tx_ramadhan.clone();
+            Box::pin(async move {
+                schedule_today_iftar(pool, log_tx).await;
+            })
+        })?)
+        .await?;
 
     // 1. REMINDER HARIAN (GLOBAL + PERSONAL)
     // 07:00 WIB = 00:00 UTC
@@ -708,4 +724,94 @@ async fn run_personal_daily_reminder(
     }
 
     Ok(())
+}
+
+// FITUR SPECIAL RAMADHAN
+async fn run_iftar_reminder(pool: PgPool, logger: &JobLogger) {
+    logger.log("🕌 Waktunya Buka Puasa (Dramaga, Bogor)!");
+    
+    let message = String::from(
+        "🕌 *ALHAMDULILLAH, WAKTUNYA BUKA PUASA!* @all 🕌\n\n\
+        Telah masuk waktu Maghrib untuk wilayah *Dramaga, Bogor* dan sekitarnya.\n\n\
+        _Allahumma laka shumtu wa bika amantu wa 'ala rizqika afthartu. Birahmatika yaa arhamar roohimin._\n\n\
+        Selamat berbuka puasa Ilkomers! 🍉🍹"
+    );
+
+    if let Err(e) = send_to_channels(message, logger).await {
+        logger.log(&format!("❌ Gagal mengirim reminder iftar: {}", e));
+    }
+}
+
+pub async fn schedule_today_iftar(pool: PgPool, log_tx: mpsc::UnboundedSender<LogEntry>) {
+    let job_id = crate::tui::generate_job_id();
+
+    // LOGGER (TEST DULU)
+    if let Some(tui) = crate::TUI_STATE.get() {
+        tui.create_job(
+            job_id.clone(),
+            "SYSTEM".to_string(),
+            "Ramadhan Iftar".to_string(),
+            Some("Pengecekan Jadwal Buka Puasa".to_string()),
+            None,
+            vec!["#scheduler".to_string(), "#ramadhan".to_string(), "#iftar".to_string()],
+        ).await;
+    }
+
+    let logger = JobLogger::new(job_id, log_tx.clone());
+
+    let wib_offset = chrono::FixedOffset::east_opt(7 * 3600).unwrap();
+    let now_wib = Utc::now().with_timezone(&wib_offset);
+    let today_str = now_wib.format("%Y-%m-%d").to_string();
+
+    let file_content = match std::fs::read_to_string("json/ramadhan_dramaga.json") {
+        Ok(c) => c,
+        Err(e) => {
+            logger.log(&format!("⚠️ Skip iftar: File json/ramadhan_dramaga tidak terbaca ({})", e));
+            logger.set_status(crate::tui::state::JobStatus::Failed);
+            return; 
+        }
+    };
+
+    let schedule: HashMap<String, String> = match serde_json::from_str(&file_content) {
+        Ok(s) => s,
+        Err(_) => {
+            logger.log("⚠️ Gagal parsing ramadhan_dramaga.json");
+            logger.set_status(crate::tui::state::JobStatus::Failed); 
+            return;
+        }
+    };
+
+    if let Some(maghrib_time) = schedule.get(&today_str) {
+        let time_parts: Vec<&str> = maghrib_time.split(':').collect();
+        if time_parts.len() == 2 {
+            let h: u32 = time_parts[0].parse().unwrap_or(0);
+            let m: u32 = time_parts[1].parse().unwrap_or(0);
+
+            let maghrib_dt_wib = now_wib.date_naive().and_hms_opt(h, m, 0).unwrap();
+            let maghrib_utc = maghrib_dt_wib.and_local_timezone(wib_offset).unwrap().with_timezone(&Utc);
+            
+            let now_utc = Utc::now();
+
+            if maghrib_utc > now_utc {
+                let duration_to_sleep = (maghrib_utc - now_utc).to_std().unwrap();
+                
+                logger.log(&format!("🌙 Jadwal Buka Puasa hari ini: {}. Menunggu {:?}...", maghrib_time, duration_to_sleep));
+
+                logger.set_status(crate::tui::state::JobStatus::Completed); 
+
+                tokio::spawn(async move {
+                    tokio::time::sleep(duration_to_sleep).await;
+                    run_iftar_reminder(pool, &logger).await;
+                });
+            } else {
+                logger.log("🌙 Jadwal Buka Puasa hari ini sudah lewat.");
+                logger.set_status(crate::tui::state::JobStatus::Completed); 
+            }
+        } else {
+            logger.set_status(crate::tui::state::JobStatus::Failed); 
+        }
+    } else {
+        logger.log("ℹ️ Tidak ada jadwal Iftar untuk hari ini.");
+        logger.set_status(crate::tui::state::JobStatus::Completed); 
+    }
 }
