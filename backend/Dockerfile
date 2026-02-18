@@ -6,6 +6,7 @@ COPY Cargo.toml Cargo.lock ./
 COPY src ./src
 COPY migrations ./migrations
 COPY schedule.json ./schedule.json
+COPY json ./json
 
 RUN apt-get update && apt-get install -y screen && rm -rf /var/lib/apt/lists/*
 
@@ -28,12 +29,14 @@ RUN apt-get update && apt-get install -y \
     ca-certificates \
     libssl3 \
     curl \
+    screen \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy binary and files from builder
 COPY --from=builder /app/target/release/marbot /app/marbot
 COPY --from=builder /app/migrations /app/migrations
 COPY --from=builder /app/schedule.json /app/schedule.json
+COPY --from=builder /app/json /app/json
 
 EXPOSE 3000
 
