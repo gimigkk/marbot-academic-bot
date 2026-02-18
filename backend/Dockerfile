@@ -6,7 +6,7 @@ COPY Cargo.toml Cargo.lock ./
 COPY src ./src
 COPY migrations ./migrations
 COPY schedule.json ./schedule.json
-COPY json ./json
+COPY ramadhan_dramaga.json ./ramadhan_dramaga.json  
 
 RUN apt-get update && apt-get install -y screen && rm -rf /var/lib/apt/lists/*
 
@@ -36,7 +36,7 @@ RUN apt-get update && apt-get install -y \
 COPY --from=builder /app/target/release/marbot /app/marbot
 COPY --from=builder /app/migrations /app/migrations
 COPY --from=builder /app/schedule.json /app/schedule.json
-COPY --from=builder /app/json /app/json
+COPY --from=builder /app/ramadhan_dramaga.json /app/ramadhan_dramaga.json 
 
 EXPOSE 3000
 

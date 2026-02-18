@@ -763,10 +763,10 @@ pub async fn schedule_today_iftar(pool: PgPool, log_tx: mpsc::UnboundedSender<Lo
     let now_wib = Utc::now().with_timezone(&wib_offset);
     let today_str = now_wib.format("%Y-%m-%d").to_string();
 
-    let file_content = match std::fs::read_to_string("json/ramadhan_dramaga.json") {
+    let file_content = match std::fs::read_to_string("ramadhan_dramaga.json") {
         Ok(c) => c,
         Err(e) => {
-            logger.log(&format!("⚠️ Skip iftar: File json/ramadhan_dramaga tidak terbaca ({})", e));
+            logger.log(&format!("⚠️ Skip iftar: ramadhan_dramaga.json tidak terbaca ({})", e));
             logger.set_status(crate::tui::state::JobStatus::Failed);
             return; 
         }
