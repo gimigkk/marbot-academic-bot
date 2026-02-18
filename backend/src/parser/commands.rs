@@ -367,21 +367,79 @@ pub async fn handle_command(
             logger.log(&format!("⏰ Daily command: {} from {}", status, user_phone));
             
             let enabled = status == 1;
+            
+            // Tetep set preference
             match set_user_daily_preference(pool, user_phone, enabled).await {
                 Ok(_) => {
-                    let msg = if enabled {
-                        format!(
-                            "✅ *Daily Reminder Aktif!*\n\n\
-                            Bot akan mengirimkan #todo kamu setiap jam 07:00 WIB.\n\
-                            _Ketik #daily 0 untuk mematikan._"
-                        )
+                    if enabled {
+                        // CEK SETTINGS
+                        match get_user_course_statuses(&pool, user_phone).await {
+                            Ok(statuses) => {
+                                // Ga ada settings sama sekali
+                                if statuses.is_empty() {
+                                    return CommandResponse::Text(
+                                        "✅ *Daily Reminder Aktif!*\n\n\
+                                        ⚠️ *PERHATIAN:* Kamu belum set kelas sama sekali.\n\
+                                        Setiap pagi kamu akan dapat *SEMUA tugas* dari *SEMUA kelas paralel*.\n\n\
+                                        *Rekomendasi setup:*\n\
+                                        1. Lihat matkul: #tugas\n\
+                                        2. Set kelas: #setkelas <matkul> <kode>\n\
+                                        3. Cek hasil: #mykelas\n\n\
+                                        💡 _Contoh:_ `#setkelas pemrog k1 p2`\n\n\
+                                        _Matikan: #daily 0_"
+                                            .to_string()
+                                    );
+                                }
+                                
+                                // Ada kelas yang belum di-set
+                                let unset_courses: Vec<String> = statuses
+                                    .iter()
+                                    .filter(|s| s.parallel_code.as_ref().map_or(true, |c| c.is_empty()))
+                                    .map(|s| sanitize_wa_md(&s.course_name))
+                                    .collect();
+                                
+                                if !unset_courses.is_empty() {
+                                    let course_list = unset_courses.join("\n• ");
+                                    
+                                    return CommandResponse::Text(
+                                        format!(
+                                            "✅ *Daily Reminder Aktif!*\n\n\
+                                            ⚠️ *PERHATIAN:* Ada kelas yang belum di-set:\n• {}\n\n\
+                                            Untuk matkul di atas, kamu akan dapat *semua tugas* \
+                                            dari *semua kelas paralel*.\n\n\
+                                            Set kelas: `#setkelas <matkul> <kode>`\n\
+                                            Cek status: `#mykelas`\n\n\
+                                            _Matikan: #daily 0_",
+                                            course_list
+                                        )
+                                    );
+                                }
+                                
+                                // Settings lengkap
+                                CommandResponse::Text(
+                                    "✅ *Daily Reminder Aktif!*\n\n\
+                                    Bot akan mengirimkan #todo kamu setiap jam 07:00 WIB.\n\
+                                    _Ketik #daily 0 untuk mematikan._"
+                                        .to_string()
+                                )
+                            }
+                            Err(_) => {
+                                // Fallback kalau ga bisa cek settings
+                                CommandResponse::Text(
+                                    "✅ *Daily Reminder Aktif!*\n\n\
+                                    Bot akan mengirimkan #todo kamu setiap jam 07:00 WIB.\n\
+                                    _Ketik #daily 0 untuk mematikan._"
+                                        .to_string()
+                                )
+                            }
+                        }
                     } else {
-                        format!(
+                        CommandResponse::Text(
                             "🔕 *Daily Reminder Non-Aktif*\n\n\
                             Kamu tidak akan menerima #todo otomatis lagi."
+                                .to_string()
                         )
-                    };
-                    CommandResponse::Text(msg)
+                    }
                 }
                 Err(e) => {
                     logger.log(&format!("❌ Gagal set daily preference: {}", e));
@@ -698,7 +756,7 @@ pub async fn handle_command(
             CommandResponse::Text(
                 "*[Halow aku Maarbot 👋]*\n\
                 _Ilkomerz61's Memory Augmented Academic Recollection BOT_\n\n\
-                *USER GUIDE (BACA KALO BINGUNG CARA SETUP MARBOT)*\n\
+                *USER GUIDE (TUTOR SETUP MARBOT)*\n\
                 https://ipb.link/marbot\n\n\
                 *Perintah Umum:*\n\
                 - #ping — cek bot hidup & latency\n\
@@ -713,7 +771,8 @@ pub async fn handle_command(
                 - #undo — batalkan #done terakhir\n\n\
                 *Perintah Pengaturan:*\n\
                 - #setkelas <matkul> <kode1> <kode2> — atur kode pararel untuk matkul\n\
-                - #mykelas — lihat settings kode parallel kamu\n\n\
+                - #mykelas — lihat settings kode parallel kamu\n\
+                - #daily <1/0> — aktifkan/matikan reminder #todo harian\n\n\
                 *Perintah Admin:*\n\
                 - #delete <id> — hapus tugas (id dari #tugas)\n\
                 - #update <id> <pesan> — update tugas dengan AI\n\n\
