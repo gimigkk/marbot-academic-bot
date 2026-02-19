@@ -1,15 +1,16 @@
-// backend/src/scheduler.rs
 use crate::database::crud::{self, get_active_assignments_for_user, get_daily_subscribers};
 use crate::models::SendTextRequest;
 use crate::tui::{state::LogEntry, JobLogger};
 use chrono::{DateTime, Datelike, NaiveDate, Utc};
 use sqlx::PgPool;
-use tokio::sync::mpsc;
-use tokio_cron_scheduler::{Job, JobScheduler, JobSchedulerError};
 // use tokio::time::sleep;
 use std::collections::HashMap;
-use tokio::time::Duration;
+use std::sync::{Arc, Mutex};
+use tokio::sync::mpsc;
+use tokio_cron_scheduler::{Job, JobScheduler, JobSchedulerError};
 
+/// Registers all scheduled jobs and starts the cron scheduler.
+/// All jobs must be added before calling `sched.start()`.
 pub async fn start_scheduler(
     pool: PgPool,
     log_tx: mpsc::UnboundedSender<LogEntry>,
@@ -17,20 +18,6 @@ pub async fn start_scheduler(
     let sched = JobScheduler::new().await?;
 
     let tui_state = crate::TUI_STATE.get().cloned();
-    
-    // REMINDER IFTAR LOGIC
-    schedule_today_iftar(pool.clone(), log_tx.clone()).await;
-    let pool_ramadhan = pool.clone();
-    let log_tx_ramadhan = log_tx.clone();
-    sched
-        .add(Job::new_async("0 5 0 * * *", move |_uuid, _l| {
-            let pool = pool_ramadhan.clone();
-            let log_tx = log_tx_ramadhan.clone();
-            Box::pin(async move {
-                schedule_today_iftar(pool, log_tx).await;
-            })
-        })?)
-        .await?;
 
     // 1. REMINDER HARIAN (GLOBAL + PERSONAL)
     // 07:00 WIB = 00:00 UTC
@@ -66,9 +53,11 @@ pub async fn start_scheduler(
                 let logger = JobLogger::new(job_id, log_tx);
 
                 logger.log("⏰ MEMULAI MORNING ROUTINE (07:00 WIB)");
-                
+
                 logger.log("📡 Mengirim Reminder Global...");
-                if let Err(e) = run_reminder_task(pool.clone(), "_Selamat pagi Ilkomers!_", &logger).await {
+                if let Err(e) =
+                    run_reminder_task(pool.clone(), "_Selamat pagi Ilkomers!_", &logger).await
+                {
                     logger.log(&format!("❌ Error reminder global: {}", e));
                 }
 
@@ -150,8 +139,6 @@ pub async fn start_scheduler(
         })?)
         .await?;
 
-    sched.start().await?;
-
     // 3. REMINDER PERSONAL (H-3 JAM) - PRIVATE CHAT
     // Cek setiap 10 menit
     let pool_personal = pool.clone();
@@ -174,7 +161,117 @@ pub async fn start_scheduler(
             })
         })?)
         .await?;
+
+    // REMINDER IFTAR LOGIC
+    // Cek setiap menit. `last_sent` mencegah pengiriman ganda dalam satu hari.
+    let log_tx_iftar = log_tx.clone();
+    let iftar_last_sent: Arc<Mutex<Option<NaiveDate>>> = Arc::new(Mutex::new(None));
+
+    sched
+        .add(Job::new_async("0 * * * * *", move |_uuid, _l| {
+            let last_sent = iftar_last_sent.clone();
+            let log_tx = log_tx_iftar.clone();
+            Box::pin(async move {
+                check_iftar(last_sent, log_tx).await;
+            })
+        })?)
+        .await?;
+
+    sched.start().await?;
     Ok(())
+}
+
+// FITUR SPECIAL RAMADHAN
+/// Cek setiap menit apakah waktu maghrib sudah tiba berdasarkan `ramadhan_dramaga.json`.
+/// Job entry di Dashboard hanya dibuat saat pesan benar-benar dikirim.
+/// `last_sent` di-flip ke hari ini hanya setelah pengiriman sukses.
+async fn check_iftar(
+    last_sent: Arc<Mutex<Option<NaiveDate>>>,
+    log_tx: mpsc::UnboundedSender<LogEntry>,
+) {
+    static SCHEDULE_JSON: &str = include_str!("../ramadhan_dramaga.json");
+
+    let wib_offset = chrono::FixedOffset::east_opt(7 * 3600).unwrap();
+    let now_utc = Utc::now();
+    let now_wib = now_utc.with_timezone(&wib_offset);
+    let today = now_wib.date_naive();
+
+    {
+        let guard = last_sent.lock().unwrap();
+        if *guard == Some(today) {
+            return;
+        }
+    }
+
+    let schedule: HashMap<String, String> = match serde_json::from_str(SCHEDULE_JSON) {
+        Ok(s) => s,
+        Err(_) => return,
+    };
+
+    #[allow(non_snake_case)]
+    let maghrib_time = match schedule.get(&today.format("%Y-%m-%d").to_string()) {
+        Some(t) => t.clone(),
+        None => return, // Bukan hari Ramadhan, silent return
+    };
+
+    let time_parts: Vec<&str> = maghrib_time.split(':').collect();
+    if time_parts.len() != 2 {
+        return;
+    }
+
+    let h: u32 = time_parts[0].parse().unwrap_or(0);
+    let m: u32 = time_parts[1].parse().unwrap_or(0);
+
+    let maghrib_utc = today
+        .and_hms_opt(h, m, 0)
+        .unwrap()
+        .and_local_timezone(wib_offset)
+        .unwrap()
+        .with_timezone(&Utc);
+
+    // Fire dalam menit yang sama dengan maghrib
+    let diff_secs = (now_utc - maghrib_utc).num_seconds();
+    if diff_secs < 0 || diff_secs > 59 {
+        return;
+    }
+
+    let job_id = crate::tui::generate_job_id();
+    if let Some(tui) = crate::TUI_STATE.get() {
+        tui.create_job(
+            job_id.clone(),
+            "SYSTEM".to_string(),
+            "Ramadhan Iftar".to_string(),
+            Some(format!("Buka puasa pukul {} WIB", maghrib_time)),
+            None,
+            vec![
+                "#scheduler".to_string(),
+                "#ramadhan".to_string(),
+                "#iftar".to_string(),
+            ],
+        )
+        .await;
+    }
+
+    let logger = JobLogger::new(job_id, log_tx);
+    logger.log(&format!("🕌 Waktunya Buka Puasa! Maghrib: {} WIB", maghrib_time));
+
+    let message = String::from(
+        "🕌 *ALHAMDULILLAH, WAKTUNYA BUKA PUASA!* @all 🕌\n\n\
+        Telah masuk waktu Maghrib untuk wilayah *Dramaga, Bogor* dan sekitarnya.\n\n\
+        _Allahumma laka shumtu wa bika amantu wa 'ala rizqika afthartu. Birahmatika yaa arhamar roohimin._\n\n\
+        Selamat berbuka puasa Ilkomers! 🍉🍹",
+    );
+
+    if let Err(e) = send_to_channels(message, &logger).await {
+        logger.log(&format!("❌ Gagal mengirim reminder iftar: {}", e));
+        logger.set_status(crate::tui::state::JobStatus::Failed);
+        return;
+    }
+
+    // Tandai sudah terkirim hari ini, hanya setelah sukses
+    *last_sent.lock().unwrap() = Some(today);
+    logger.log("✅ Reminder iftar berhasil dikirim.");
+    logger.set_status(crate::tui::state::JobStatus::Completed);
 }
 
 async fn check_personal_reminders(
@@ -631,13 +728,16 @@ async fn run_personal_daily_reminder(
     logger: &JobLogger,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let subscribers = get_daily_subscribers(&pool).await?;
-    
+
     if subscribers.is_empty() {
         logger.log("ℹ️ Tidak ada subscriber daily reminder.");
         return Ok(());
     }
 
-    logger.log(&format!("📨 Mengirim daily summary ke {} user...", subscribers.len()));
+    logger.log(&format!(
+        "📨 Mengirim daily summary ke {} user...",
+        subscribers.len()
+    ));
 
     let client = reqwest::Client::new();
     let waha_url = std::env::var("WAHA_URL").unwrap_or_else(|_| "http://waha:3000".to_string());
@@ -646,57 +746,73 @@ async fn run_personal_daily_reminder(
     for user_phone in subscribers {
         match get_active_assignments_for_user(&pool, &user_phone, None).await {
             Ok((assignments, user_settings)) => {
-                
-                let filtered_assignments: Vec<_> = assignments.into_iter().filter(|a| {
-                    if a.is_completed { return false; }
-                    
-                    if a.parallel_codes.is_empty() || a.parallel_codes.contains(&"all".to_string()) {
-                        return true; 
-                    }
-                    
-                    if let Some(user_codes_str) = user_settings.get(&a.course_name) {
-                        let user_codes: Vec<&str> = user_codes_str.split(',').collect();
-                        for task_code in &a.parallel_codes {
-                            let task_str = task_code.as_str();
-                            if user_codes.contains(&task_str) { return true; }
-                            
-                            // Handle p/r variants
-                            if task_str.starts_with('r') {
-                                let p_variant = format!("p{}", &task_str[1..]);
-                                if user_codes.contains(&p_variant.as_str()) { return true; }
-                            } else if task_str.starts_with('p') {
-                                let r_variant = format!("r{}", &task_str[1..]);
-                                if user_codes.contains(&r_variant.as_str()) { return true; }
-                            }
+                let filtered_assignments: Vec<_> = assignments
+                    .into_iter()
+                    .filter(|a| {
+                        if a.is_completed {
+                            return false;
                         }
-                        return false;
-                    }
-                    true 
-                }).collect();
+
+                        if a.parallel_codes.is_empty()
+                            || a.parallel_codes.contains(&"all".to_string())
+                        {
+                            return true;
+                        }
+
+                        if let Some(user_codes_str) = user_settings.get(&a.course_name) {
+                            let user_codes: Vec<&str> = user_codes_str.split(',').collect();
+                            for task_code in &a.parallel_codes {
+                                let task_str = task_code.as_str();
+                                if user_codes.contains(&task_str) {
+                                    return true;
+                                }
+
+                                // Handle p/r variants
+                                if task_str.starts_with('r') {
+                                    let p_variant = format!("p{}", &task_str[1..]);
+                                    if user_codes.contains(&p_variant.as_str()) {
+                                        return true;
+                                    }
+                                } else if task_str.starts_with('p') {
+                                    let r_variant = format!("r{}", &task_str[1..]);
+                                    if user_codes.contains(&r_variant.as_str()) {
+                                        return true;
+                                    }
+                                }
+                            }
+                            return false;
+                        }
+                        true
+                    })
+                    .collect();
 
                 if filtered_assignments.is_empty() {
-                    continue; 
+                    continue;
                 }
 
                 let mut message = String::new();
-                message.push_str("🌞 *[Daily Reminder]*\n_Semangat pagi! Ini daftar tugas kamu:_\n\n");
+                message.push_str(
+                    "🌞 *[Daily Reminder]*\n_Semangat pagi! Ini daftar tugas kamu:_\n\n",
+                );
 
                 for (i, a) in filtered_assignments.iter().enumerate() {
                     let status_emoji = status_dot(&a.deadline);
                     let due_text = humanize_deadline(&a.deadline);
                     let title = sanitize_wa_md(&a.title);
                     let course = sanitize_wa_md(&a.first_alias);
-                    
+
                     let parallel_display = if !a.parallel_codes.is_empty() {
-                         format!(" {}", a.format_parallel_display())
-                    } else { String::new() };
+                        format!(" {}", a.format_parallel_display())
+                    } else {
+                        String::new()
+                    };
 
                     message.push_str(&format!("{} *[{}]* *{}*\n", status_emoji, i + 1, title));
                     message.push_str(&format!("*├─* {}\n", due_text));
                     message.push_str(&format!("*└─* `#{}{}`\n", course, parallel_display));
                     message.push('\n');
                 }
-                
+
                 message.push_str("\n_#daily 0 untuk berhenti langganan._");
 
                 let payload = SendTextRequest {
@@ -713,7 +829,7 @@ async fn run_personal_daily_reminder(
                     .json(&payload)
                     .send()
                     .await;
-                
+
                 // Delay
                 tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
             }
@@ -724,94 +840,4 @@ async fn run_personal_daily_reminder(
     }
 
     Ok(())
-}
-
-// FITUR SPECIAL RAMADHAN
-async fn run_iftar_reminder(pool: PgPool, logger: &JobLogger) {
-    logger.log("🕌 Waktunya Buka Puasa (Dramaga, Bogor)!");
-    
-    let message = String::from(
-        "🕌 *ALHAMDULILLAH, WAKTUNYA BUKA PUASA!* @all 🕌\n\n\
-        Telah masuk waktu Maghrib untuk wilayah *Dramaga, Bogor* dan sekitarnya.\n\n\
-        _Allahumma laka shumtu wa bika amantu wa 'ala rizqika afthartu. Birahmatika yaa arhamar roohimin._\n\n\
-        Selamat berbuka puasa Ilkomers! 🍉🍹"
-    );
-
-    if let Err(e) = send_to_channels(message, logger).await {
-        logger.log(&format!("❌ Gagal mengirim reminder iftar: {}", e));
-    }
-}
-
-pub async fn schedule_today_iftar(pool: PgPool, log_tx: mpsc::UnboundedSender<LogEntry>) {
-    let job_id = crate::tui::generate_job_id();
-
-    // LOGGER (TEST DULU)
-    if let Some(tui) = crate::TUI_STATE.get() {
-        tui.create_job(
-            job_id.clone(),
-            "SYSTEM".to_string(),
-            "Ramadhan Iftar".to_string(),
-            Some("Pengecekan Jadwal Buka Puasa".to_string()),
-            None,
-            vec!["#scheduler".to_string(), "#ramadhan".to_string(), "#iftar".to_string()],
-        ).await;
-    }
-
-    let logger = JobLogger::new(job_id, log_tx.clone());
-z
-    let wib_offset = chrono::FixedOffset::east_opt(7 * 3600).unwrap();
-    let now_wib = Utc::now().with_timezone(&wib_offset);
-    let today_str = now_wib.format("%Y-%m-%d").to_string();
-
-    let file_content = match std::fs::read_to_string("ramadhan_dramaga.json") {
-        Ok(c) => c,
-        Err(e) => {
-            logger.log(&format!("⚠️ Skip iftar: ramadhan_dramaga.json tidak terbaca ({})", e));
-            logger.set_status(crate::tui::state::JobStatus::Failed);
-            return; 
-        }
-    };
-
-    let schedule: HashMap<String, String> = match serde_json::from_str(&file_content) {
-        Ok(s) => s,
-        Err(_) => {
-            logger.log("⚠️ Gagal parsing ramadhan_dramaga.json");
-            logger.set_status(crate::tui::state::JobStatus::Failed); 
-            return;
-        }
-    };
-
-    if let Some(maghrib_time) = schedule.get(&today_str) {
-        let time_parts: Vec<&str> = maghrib_time.split(':').collect();
-        if time_parts.len() == 2 {
-            let h: u32 = time_parts[0].parse().unwrap_or(0);
-            let m: u32 = time_parts[1].parse().unwrap_or(0);
-
-            let maghrib_dt_wib = now_wib.date_naive().and_hms_opt(h, m, 0).unwrap();
-            let maghrib_utc = maghrib_dt_wib.and_local_timezone(wib_offset).unwrap().with_timezone(&Utc);
-            
-            let now_utc = Utc::now();
-
-            if maghrib_utc > now_utc {
-                let duration_to_sleep = (maghrib_utc - now_utc).to_std().unwrap();
-                
-                logger.log(&format!("🌙 Jadwal Buka Puasa hari ini: {}. Menunggu {:?}...", maghrib_time, duration_to_sleep));
-
-                logger.set_status(crate::tui::state::JobStatus::Completed); 
-
-                tokio::spawn(async move {
-                    tokio::time::sleep(duration_to_sleep).await;
-                    run_iftar_reminder(pool, &logger).await;
-                });
-            } else {
-                logger.log("🌙 Jadwal Buka Puasa hari ini sudah lewat.");
-                logger.set_status(crate::tui::state::JobStatus::Completed); 
-            }
-        } else {
-            logger.set_status(crate::tui::state::JobStatus::Failed); 
-        }
-    } else {
-        logger.log("ℹ️ Tidak ada jadwal Iftar untuk hari ini.");
-        logger.set_status(crate::tui::state::JobStatus::Completed); 
-    }
 }
