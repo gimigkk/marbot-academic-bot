@@ -758,7 +758,7 @@ pub async fn schedule_today_iftar(pool: PgPool, log_tx: mpsc::UnboundedSender<Lo
     }
 
     let logger = JobLogger::new(job_id, log_tx.clone());
-
+z
     let wib_offset = chrono::FixedOffset::east_opt(7 * 3600).unwrap();
     let now_wib = Utc::now().with_timezone(&wib_offset);
     let today_str = now_wib.format("%Y-%m-%d").to_string();
