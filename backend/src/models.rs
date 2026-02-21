@@ -94,6 +94,7 @@ pub struct MessageInfo {
     pub extra: serde_json::Value,
 }
 
+
 #[derive(Debug, Deserialize)]
 pub struct MediaInfo {
     pub url: Option<String>,
