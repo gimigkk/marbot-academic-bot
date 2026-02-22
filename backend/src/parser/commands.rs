@@ -31,6 +31,7 @@ pub enum CommandResponse {
 pub enum AIForceMode {
     Update, 
     NewOnly,
+    Announcement,
 }
 
 /// Get current time in GMT+7 (Indonesian timezone)
@@ -126,6 +127,30 @@ pub async fn handle_command(
                             .to_string()
                     )
                 }
+            }
+        }
+
+        BotCommand::Announcement(message) => {
+            logger.log(&format!("📢 Announcement command from {} in {}", user_phone, chat_id));
+
+            let academic_channels = std::env::var("ACADEMIC_CHANNELS").unwrap_or_default();
+            let is_academic_channel = academic_channels
+                .split(',')
+                .any(|channel| channel.trim() == chat_id);
+
+            if !is_academic_channel {
+                return CommandResponse::Text(
+                    "⛔ *AKSES DITOLAK*\n\n\
+                    Command #announcement hanya boleh digunakan di Grup Akademik.\n\
+                    _Hanya untuk PJ/Admin!_ 👮"
+                        .to_string(),
+                );
+            }
+
+            CommandResponse::ProcessWithAI {
+                message,
+                force_mode: AIForceMode::Announcement,
+                target_assignment: None,
             }
         }
 
@@ -775,7 +800,8 @@ pub async fn handle_command(
                 - #daily <1/0> — aktifkan/matikan reminder #todo harian\n\n\
                 *Perintah Admin:*\n\
                 - #delete <id> — hapus tugas (id dari #tugas)\n\
-                - #update <id> <pesan> — update tugas dengan AI\n\n\
+                - #update <id> <pesan> — update tugas dengan AI\n\
+                - #announcement <pesan> — simpan pengumuman dengan deadline (grup akademik)\n\n\
                 *Penting:* #<id> dan #done selalu pakai nomor dari *#todo*. _Info tugas akan otomatis tersimpan via grup info akademik, tidak dari chat lain._\n\n\
                 *Want to Contribute?*\n\
                 github.com/gimigkk/marbot-academic-bot"
@@ -838,6 +864,15 @@ pub async fn handle_command(
                     - #update 5 judul: Quiz Kalkulus 3\n\n\
                     💡 _Gunakan #tugas untuk lihat nomor assignment_\n\
                     ⚠️ _Command ini hanya untuk Debug Group_"
+                }
+                "announcement" => {
+                    "⚠️ *Cara pakai yang benar:*\n\n\
+                    #announcement <isi pengumuman>\n\n\
+                    *Contoh:*\n\
+                    - #announcement Pendaftaran ISAC ditutup 28 Februari jam 23:59\n\
+                    - #announcement Pembayaran UKT paling lambat 15 Maret\n\n\
+                    💡 _Hanya untuk pengumuman non-akademik yang punya deadline._\n\
+                    ⚠️ _Command ini hanya bisa digunakan di grup akademik._"
                 }
                 _ => {
                     "⚠️ Command ini membutuhkan argumen.\n\n\

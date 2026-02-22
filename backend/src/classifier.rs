@@ -5,22 +5,22 @@ use crate::models::{MessageType, BotCommand};
 pub fn classify_message(text: &str) -> MessageType {
     let trimmed = text.trim();
     
-    if trimmed.starts_with('#') {
-        
-        match parse_command(trimmed) {
-            Some(cmd) => MessageType::Command(cmd),
+    // Strip WhatsApp markdown wrappers (* _ ~ `) that users might apply to commands
+    let stripped = trimmed.trim_matches(|c| c == '*' || c == '_' || c == '~' || c == '`');
     
+    if stripped.starts_with('#') {
+        match parse_command(stripped) {
+            Some(cmd) => MessageType::Command(cmd),
             None => {
-              
-                let cmd_word = trimmed.split_whitespace()
+                let cmd_word = stripped.split_whitespace()
                     .next()
-                    .unwrap_or(trimmed);
-                
+                    .unwrap_or(stripped);
                 MessageType::Command(BotCommand::UnknownCommand(cmd_word.to_string()))
             }
         }
     } else {
-        MessageType::NeedsAI(text.to_string())
+        // pass original text to AI, not stripped
+        MessageType::NeedsAI(text.to_string()) 
     }
 }
 
@@ -146,6 +146,14 @@ fn parse_command(text: &str) -> Option<BotCommand> {
                 Some(BotCommand::MissingArgument("expand".to_string()))
             }
         },
+        "announcement" | "announce" | "ann" => {
+            if parts.len() > 1 {
+                let message = parts[1..].join(" ");
+                Some(BotCommand::Announcement(message))
+            } else {
+                Some(BotCommand::MissingArgument("announcement".to_string()))
+            }
+        }
         _ if command.chars().all(|c| c.is_numeric()) => {
             let id = command.parse().ok()?;
             Some(BotCommand::Expand(id))

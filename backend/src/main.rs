@@ -30,7 +30,7 @@ pub mod tui;
 pub mod dashboard;
 
 use crate::database::crud;
-use crate::parser::commands::CommandResponse;
+use crate::parser::commands::{CommandResponse, AIForceMode};
 use crate::tui::TuiState;
 
 use models::{MessageType, AIClassification, WebhookPayload, SendTextRequest, NewAssignment, UnrecognizedCategory, Assignment};
@@ -606,6 +606,7 @@ async fn webhook(
                 BotCommand::MissingArgument(_) => "error",
                 BotCommand::UnknownCommand(_) => "unknown",
                 BotCommand::Update(_, _) => "ai",
+                BotCommand::Announcement(_) => "announcement",
             };
             tags.push(format!("#{}", cmd_tag));
         }
@@ -697,6 +698,98 @@ async fn webhook(
                     }
                 }
                 
+                CommandResponse::ProcessWithAI { message, force_mode: AIForceMode::Announcement, .. } => {
+                    let image_base64 = if payload.payload.has_media.unwrap_or(false) {
+                        if let Some(ref media) = payload.payload.media {
+                            if media.mimetype.as_ref().map(|m| m.starts_with("image/")).unwrap_or(false) {
+                                if let Some(ref url) = media.url {
+                                    match download_media_from_url(url, &logger).await {
+                                        Ok(base64) => Some(base64),
+                                        Err(e) => {
+                                            logger.log(&format!("❌ Failed to download image: {}", e));
+                                            None
+                                        }
+                                    }
+                                } else { None }
+                            } else { None }
+                        } else { None }
+                    } else { None };
+
+                    let empty_assignments: Vec<Assignment> = Vec::new();
+                    let empty_course_map: HashMap<uuid::Uuid, String> = HashMap::new();
+
+                    match extract_with_ai(
+                        &message, "", &empty_assignments, &empty_course_map,
+                        image_base64.as_deref(),
+                        sender_phone, &state.pool,
+                        quoted_message_text.as_deref(), quoted_message_id.as_deref(),
+                        &logger, None,
+                        true,
+                    ).await {
+                        Ok(AIClassification::AssignmentInfo { title, deadline, description, .. }) => {
+                            let course_id = crud::get_course_by_name(&state.pool, "Announcement")
+                                .await.ok().flatten().map(|c| c.id);
+
+                            let deadline_parsed = deadline.as_ref()
+                                .and_then(|d| crud::parse_deadline(d).ok());
+
+                            let new_assignment = NewAssignment {
+                                course_id,
+                                title: title.clone(),
+                                description: description.unwrap_or_default(),
+                                deadline: deadline_parsed,
+                                parallel_codes: vec!["all".to_string()],
+                                sender_id: Some(sender_phone.to_string()),
+                                message_id: payload.payload.id.clone(),
+                                relating_messages: vec![payload.payload.body.clone()],
+                            };
+
+                            match crud::create_assignment(&state.pool, new_assignment, Some(&logger)).await {
+                                Ok(_) => {
+                                    let deadline_display = deadline_parsed
+                                        .map(|d| {
+                                            let wib = d + ChronoDuration::hours(7);
+                                            wib.format("%d %b %Y, %H:%M WIB").to_string()
+                                        })
+                                        .unwrap_or_else(|| "(belum ditentukan)".to_string());
+
+                                    if let Some(ref debug_id) = debug_group_id {
+                                        let _ = send_reply(debug_id, &format!(
+                                            "📢 *PENGUMUMAN TERSIMPAN*\n\n\
+                                            📝 *{}*\n\
+                                            ⏰ {}\n\
+                                            🧩 Semua kelas",
+                                            title, deadline_display
+                                        )).await;
+                                    }
+                                    logger.set_status(tui::state::JobStatus::Completed);
+                                }
+                                Err(e) => {
+                                    logger.log(&format!("❌ Failed to save: {}", e));
+                                    if let Some(ref debug_id) = debug_group_id {
+                                        let _ = send_reply(debug_id, "❌ Gagal menyimpan pengumuman.").await;
+                                    }
+                                    logger.set_status(tui::state::JobStatus::Failed);
+                                }
+                            }
+                        }
+                        Ok(other) => {
+                            logger.log(&format!("⚠️ Unexpected classification: {:?}", other));
+                            if let Some(ref debug_id) = debug_group_id {
+                                let _ = send_reply(debug_id, "❌ Pastikan pesan mengandung deadline yang jelas.").await;
+                            }
+                            logger.set_status(tui::state::JobStatus::Failed);
+                        }
+                        Err(e) => {
+                            logger.log(&format!("❌ AI failed: {}", e));
+                            if let Some(ref debug_id) = debug_group_id {
+                                let _ = send_reply(debug_id, "❌ AI gagal memproses. Coba lagi.").await;
+                            }
+                            logger.set_status(tui::state::JobStatus::Failed);
+                        }
+                    }
+                }
+
                 CommandResponse::ProcessWithAI { message, force_mode: _, target_assignment } => {
                     let courses_list = crud::get_all_courses_formatted(&state.pool)
                         .await
@@ -728,6 +821,7 @@ async fn webhook(
                         quoted_message_id.as_deref(),
                         &logger,
                         target_assignment.as_ref(), // This triggers update mode
+                        false,
                     ).await {
                         Ok(classification) => {
                             // Type validation (belt-and-suspenders)
@@ -892,6 +986,7 @@ async fn webhook(
                 quoted_message_id.as_deref(),
                 &logger, 
                 None,
+                false,
             ).await {
                 Ok(classification) => {
                     let ai_duration = ai_start.elapsed();
