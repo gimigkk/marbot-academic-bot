@@ -183,37 +183,38 @@ pub async fn extract_with_ai(
             retry_with_countdown(attempt, logger).await;
         }
 
-        // If image present try vision first
+        // ── IMAGE PATH ───────────────────────────────────────────────────
         if let Some(img) = image_base64 {
+            // STEP 1: Try Groq Vision (fast, multimodal)
             match try_groq_vision(&prompt, img, logger).await {
                 Ok(classification) => {
                     match classification {
+                        // Groq Vision succeeded but couldn't make sense of it
                         AIClassification::Unrecognized { reason, .. } => {
                             let reason_display = reason.as_deref().unwrap_or("No reason provided");
-                            logger.log(&format!("│ \x1b[36mℹ️  Vision Result\x1b[0m\t: Unrecognized ({})", reason_display));
-                            logger.log("│ \x1b[36m🔄 Retrying with Gemini text-only...\x1b[0m");
+                            logger.log(&format!(
+                                "│ \x1b[36mℹ️  Vision Result\x1b[0m\t: Unrecognized ({})",
+                                reason_display
+                            ));
+                            logger.log("│ \x1b[36m🔄 Groq Vision unrecognized → trying Gemini Vision...\x1b[0m");
                             logger.log("│");
 
-                            match try_gemini_models(&prompt, logger).await {
-                                Ok(text_result) => {
-                                    match text_result {
-                                        AIClassification::Unrecognized { .. } => {
-                                            logger.log("│ \x1b[33m⚠️  Gemini: Still unrecognized\x1b[0m");
-                                            logger.log("└──────────────────────────\x1b[90m────────────\x1b[2m────\x1b[0m");
-                                            return Ok(AIClassification::Unrecognized { reason: None, category: crate::models::UnrecognizedCategory::Informal });
-                                        }
-                                        _ => {
-                                            log_classification_success(&text_result, logger);
-                                            logger.log("└──────────────────────────\x1b[90m────────────\x1b[2m────\x1b[0m");
-                                            return Ok(text_result);
-                                        }
-                                    }
+                            // STEP 2a: Gemini Vision fallback (still has the image)
+                            match try_gemini_vision(&prompt, img, logger).await {
+                                Ok(result) => {
+                                    log_classification_success(&result, logger);
+                                    logger.log("└──────────────────────────\x1b[90m────────────\x1b[2m────\x1b[0m");
+                                    return Ok(result);
                                 }
                                 Err(_) => {
-                                    // continue to fallback
+                                    // fall through to groq reasoning below
+                                    logger.log("│ \x1b[33m⚠️  Gemini Vision also failed → Groq Reasoning...\x1b[0m");
+                                    logger.log("│");
                                 }
                             }
                         }
+
+                        // Groq Vision returned a real classification — done
                         _ => {
                             log_classification_success(&classification, logger);
                             logger.log("└──────────────────────────\x1b[90m────────────\x1b[2m────\x1b[0m");
@@ -221,20 +222,31 @@ pub async fn extract_with_ai(
                         }
                     }
                 }
+
+                // Groq Vision errored entirely
                 Err(_) => {
-                    // gemini fallback
-                    match try_gemini_models(&prompt, logger).await {
+                    logger.log("│ \x1b[31m❌ Groq Vision failed → trying Gemini Vision...\x1b[0m");
+                    logger.log("│");
+
+                    // STEP 2b: Gemini Vision fallback
+                    match try_gemini_vision(&prompt, img, logger).await {
                         Ok(classification) => {
                             log_classification_success(&classification, logger);
                             logger.log("└──────────────────────────\x1b[90m────────────\x1b[2m────\x1b[0m");
                             return Ok(classification);
                         }
-                        Err(_) => {}
+                        Err(_) => {
+                            // fall through to groq reasoning below
+                            logger.log("│ \x1b[33m⚠️  Gemini Vision also failed → Groq Reasoning...\x1b[0m");
+                            logger.log("│");
+                        }
                     }
                 }
             }
+
+        // ── TEXT-ONLY PATH ───────────────────────────────────────────────
         } else {
-            // No image: try gemini first
+            // No image: try Gemini text first (large context, reliable)
             match try_gemini_models(&prompt, logger).await {
                 Ok(classification) => {
                     log_classification_success(&classification, logger);
@@ -248,7 +260,8 @@ pub async fn extract_with_ai(
             }
         }
 
-        // Groq reasoning fallback
+        // ── FINAL FALLBACK (both paths) ──────────────────────────────────
+        // Groq Reasoning — reached when all vision/text models above failed
         match try_groq_reasoning(&prompt, logger).await {
             Ok(classification) => {
                 log_classification_success(&classification, logger);
@@ -257,7 +270,11 @@ pub async fn extract_with_ai(
             }
             Err(_) => {
                 if attempt < MAX_RETRIES - 1 {
-                    logger.log(&format!("│ \x1b[33m⚠️ All models failed - will retry ({}/{})\x1b[0m", attempt + 1, MAX_RETRIES - 1));
+                    logger.log(&format!(
+                        "│ \x1b[33m⚠️ All models failed - will retry ({}/{})\x1b[0m",
+                        attempt + 1,
+                        MAX_RETRIES - 1
+                    ));
                 }
             }
         }
@@ -620,6 +637,103 @@ async fn try_groq_standard_text(prompt: &str, logger: &JobLogger) -> Result<AICl
     }
 
     Err("All Groq standard models failed".to_string())
+}
+
+// ===== GEMINI VISION =====
+
+async fn try_gemini_vision(prompt: &str, image_base64: &str, logger: &JobLogger) -> Result<AIClassification, String> {
+    let api_key = std::env::var("GEMINI_API_KEY")
+        .map_err(|_| "GEMINI_API_KEY not set".to_string())?;
+
+    for (idx, model) in GEMINI_MODELS.iter().enumerate() {
+        let index = idx + 1;
+        print_trying_line(model, index, GEMINI_MODELS.len(), logger);
+
+        let request_body = json!({
+            "contents": [{
+                "parts": [
+                    {"text": prompt},
+                    {
+                        "inline_data": {
+                            "mime_type": "image/jpeg",
+                            "data": image_base64
+                        }
+                    }
+                ]
+            }],
+            "generationConfig": {
+                "temperature": 0.1,
+                "maxOutputTokens": 8192,
+                "responseMimeType": "application/json"
+            }
+        });
+
+        let url = format!(
+            "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent",
+            model
+        );
+
+        let client = reqwest::Client::new();
+        let response = match client
+            .post(&url)
+            .header("X-Goog-Api-Key", &api_key)
+            .json(&request_body)
+            .send()
+            .await
+        {
+            Ok(r) => r,
+            Err(e) => {
+                clear_trying_line(logger);
+                logger.log(&format!("│ \x1b[31m❌ FAILED\x1b[0m\t: {} - Network error", model));
+                if index < GEMINI_MODELS.len() { continue; } else { return Err(e.to_string()); }
+            }
+        };
+
+        let status = response.status();
+
+        if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
+            clear_trying_line(logger);
+            continue;
+        }
+
+        if status.is_success() {
+            let gemini_response: GeminiResponse = match response.json().await {
+                Ok(r) => r,
+                Err(e) => {
+                    clear_trying_line(logger);
+                    logger.log(&format!("│ \x1b[31m❌ PARSE FAILED\x1b[0m\t: {}", model));
+                    if index < GEMINI_MODELS.len() { continue; } else { return Err(e.to_string()); }
+                }
+            };
+
+            let ai_text = match extract_ai_text(&gemini_response) {
+                Ok(t) => t,
+                Err(e) => {
+                    clear_trying_line(logger);
+                    logger.log(&format!("│ \x1b[31m❌ EXTRACT FAILED\x1b[0m\t: {} - {}", model, e));
+                    if index < GEMINI_MODELS.len() { continue; } else { return Err(e); }
+                }
+            };
+
+            let classification = match parse_classification(ai_text) {
+                Ok(c) => c,
+                Err(e) => {
+                    clear_trying_line(logger);
+                    logger.log(&format!("│ \x1b[31m❌ CLASSIFY FAILED\x1b[0m\t: {}", model));
+                    if index < GEMINI_MODELS.len() { continue; } else { return Err(e); }
+                }
+            };
+
+            clear_trying_line(logger);
+            logger.log(&format!("│ \x1b[32m✅ SUCCESS\x1b[0m\t: {} (Gemini Vision {}/{})", model, index, GEMINI_MODELS.len()));
+            return Ok(classification);
+        }
+
+        clear_trying_line(logger);
+        logger.log(&format!("│ \x1b[31m❌ FAILED\x1b[0m\t: {} - HTTP {}", model, status));
+    }
+
+    Err("All Gemini vision models failed".to_string())
 }
 
 
