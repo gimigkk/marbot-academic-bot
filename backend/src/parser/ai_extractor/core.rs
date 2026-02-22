@@ -37,6 +37,7 @@ pub async fn extract_with_ai(
     quoted_message_id: Option<&str>,
     logger: &JobLogger,
     target_assignment: Option<&AssignmentWithCourse>,
+    is_announcement: bool,
 ) -> Result<AIClassification, String> {
     let current_datetime = get_current_datetime();
     let current_date = get_current_date();
@@ -154,27 +155,19 @@ pub async fn extract_with_ai(
 
     // Choose prompt based on mode
     let prompt = if let Some(target) = target_assignment {
-        logger.log(&format!("│ 🎯 Mode\t: UPDATE (forced)"));
+        logger.log("│ 🎯 Mode\t: UPDATE (forced)");
         logger.log(&format!("│ 📌 Target\t: {} - {}", target.course_name, target.title));
-        
-        build_update_prompt(
-            text,
-            target,
-            &current_datetime,
-            &current_date,
-            context.as_ref()
-        )
+        build_update_prompt(text, target, &current_datetime, &current_date, context.as_ref())
+
+    } else if is_announcement {
+        logger.log("│ 🎯 Mode\t: ANNOUNCEMENT");
+        build_announcement_prompt(text, &current_datetime, &current_date)
+
     } else {
-        logger.log(&format!("│ 🎯 Mode\t: CLASSIFICATION"));
-        
+        logger.log("│ 🎯 Mode\t: CLASSIFICATION");
         build_classification_prompt(
-            text,
-            available_courses,
-            active_assignments,
-            course_map,
-            &current_datetime,
-            &current_date,
-            context.as_ref()
+            text, available_courses, active_assignments, course_map,
+            &current_datetime, &current_date, context.as_ref()
         )
     };
 

@@ -402,6 +402,54 @@ Before outputting, verify:
     )
 }
 
+// force mode announcement
+pub fn build_announcement_prompt(
+    text: &str,
+    current_datetime: &str,
+    current_date: &str,
+) -> String {
+    let gmt7 = FixedOffset::east_opt(7 * 3600).unwrap();
+    let now = Utc::now().with_timezone(&gmt7);
+    let tomorrow_str = (now + Duration::days(1)).format("%Y-%m-%d").to_string();
+    let lusa_str = (now + Duration::days(2)).format("%Y-%m-%d").to_string();
+
+    format!(r#"
+# CRITICAL RESPONSE REQUIREMENTS
+1. You MUST output COMPLETE, VALID JSON
+2. NEVER truncate your response mid-JSON
+3. Close ALL brackets, braces, and quotes
+
+You are extracting structured info from a deadline announcement message. Fill fields in Indonesian.
+
+**Current time:** {} (GMT+7)
+**Today:** {}
+**Message:** "{}"
+
+**Temporal references:**
+- Besok/Tomorrow → {} 23:59
+- Lusa/Day after tomorrow → {} 23:59
+
+## TITLE (2-5 words, specific, never single-word)
+A concise label for this announcement.
+
+## DEADLINE (format: YYYY-MM-DD HH:MM)
+The action deadline. If a date range is given, use the END date as the deadline.
+Use 23:59 if no specific time is mentioned. Return null only if truly no deadline exists.
+
+## DESCRIPTION
+Brief summary of what action is required and who it applies to.
+
+Return valid JSON only. No markdown, no explanations:
+{{"type": "assignment_info", "course_name": "Announcement", "title": string, "deadline": string|null, "description": string, "parallel_codes": ["all"]}}"#,
+        current_datetime,
+        current_date,
+        text,
+        tomorrow_str,
+        lusa_str,
+    )
+}
+
+// force mode update
 pub fn build_update_prompt(
     update_message: &str,
     target_assignment: &AssignmentWithCourse,

@@ -167,7 +167,7 @@ pub enum BotCommand {
     UnknownCommand(String),
     MissingArgument(String),
     Update(u32, String),      
-    //NewAssignment(String),  <- gajadi
+    Announcement(String), // yeayy fitur baru
 }
 
 
