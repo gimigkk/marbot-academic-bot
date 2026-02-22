@@ -753,30 +753,38 @@ async fn webhook(
                                         })
                                         .unwrap_or_else(|| "(belum ditentukan)".to_string());
 
-                                    let _ = send_reply(chat_id, &format!(
-                                        "📢 *PENGUMUMAN TERSIMPAN*\n\n\
-                                        📝 *{}*\n\
-                                        ⏰ {}\n\
-                                        🧩 Semua kelas",
-                                        title, deadline_display
-                                    )).await;
+                                    if let Some(ref debug_id) = debug_group_id {
+                                        let _ = send_reply(debug_id, &format!(
+                                            "📢 *PENGUMUMAN TERSIMPAN*\n\n\
+                                            📝 *{}*\n\
+                                            ⏰ {}\n\
+                                            🧩 Semua kelas",
+                                            title, deadline_display
+                                        )).await;
+                                    }
                                     logger.set_status(tui::state::JobStatus::Completed);
                                 }
                                 Err(e) => {
                                     logger.log(&format!("❌ Failed to save: {}", e));
-                                    let _ = send_reply(chat_id, "❌ Gagal menyimpan pengumuman.").await;
+                                    if let Some(ref debug_id) = debug_group_id {
+                                        let _ = send_reply(debug_id, "❌ Gagal menyimpan pengumuman.").await;
+                                    }
                                     logger.set_status(tui::state::JobStatus::Failed);
                                 }
                             }
                         }
                         Ok(other) => {
                             logger.log(&format!("⚠️ Unexpected classification: {:?}", other));
-                            let _ = send_reply(chat_id, "❌ Pastikan pesan mengandung deadline yang jelas.").await;
+                            if let Some(ref debug_id) = debug_group_id {
+                                let _ = send_reply(debug_id, "❌ Pastikan pesan mengandung deadline yang jelas.").await;
+                            }
                             logger.set_status(tui::state::JobStatus::Failed);
                         }
                         Err(e) => {
                             logger.log(&format!("❌ AI failed: {}", e));
-                            let _ = send_reply(chat_id, "❌ AI gagal memproses. Coba lagi.").await;
+                            if let Some(ref debug_id) = debug_group_id {
+                                let _ = send_reply(debug_id, "❌ AI gagal memproses. Coba lagi.").await;
+                            }
                             logger.set_status(tui::state::JobStatus::Failed);
                         }
                     }
