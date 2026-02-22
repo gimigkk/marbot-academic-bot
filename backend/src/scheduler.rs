@@ -491,11 +491,11 @@ async fn check_urgent_deadlines(
         SELECT 
             a.id, 
             a.title, 
-            COALESCE(c.aliases[1], c.name) as course_name, 
+            COALESCE(c.aliases[1], c.name, 'Umum') as course_name, 
             a.deadline,
             a.parallel_codes
         FROM assignments a
-        JOIN courses c ON a.course_id = c.id
+        LEFT JOIN courses c ON a.course_id = c.id
         WHERE a.deadline > $1 
           AND a.deadline <= $2 
           AND a.reminder_1h_sent = FALSE
@@ -605,12 +605,14 @@ async fn send_to_channels(
 fn status_dot(deadline: &Option<DateTime<Utc>>) -> &'static str {
     match deadline {
         Some(d) => {
-            let days = days_left(d);
-            if days < 1 {
+            let now = Utc::now();
+            let duration = d.signed_duration_since(now).num_minutes();
+            
+            if duration <= 24 * 60 {
                 "🔴"
-            } else if days == 1 {
+            } else if duration <= 48 * 60 {
                 "🟠"
-            } else if days == 2 {
+            } else if duration <= 72 * 60 {
                 "🟡"
             } else {
                 "🟢"
