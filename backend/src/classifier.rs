@@ -147,12 +147,9 @@ fn parse_command(text: &str) -> Option<BotCommand> {
             }
         },
         "announcement" | "announce" | "ann" => {
-            if parts.len() > 1 {
-                let message = parts[1..].join(" ");
-                Some(BotCommand::Announcement(message))
-            } else {
-                Some(BotCommand::MissingArgument("announcement".to_string()))
-            }
+            let after_cmd = without_hash[parts[0].len()..]
+                .trim_start_matches(|c: char| c == ' ' || c == '\t' || c == '\n' || c == '\r');
+            Some(BotCommand::Announcement(after_cmd.to_string()))
         }
         _ if command.chars().all(|c| c.is_numeric()) => {
             let id = command.parse().ok()?;
