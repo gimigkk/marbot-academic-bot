@@ -26,7 +26,7 @@ pub async fn start_scheduler(
     let tui_state_pagi = tui_state.clone();
 
     sched
-        .add(Job::new_async("0 30 20 * * *", move |_uuid, _l| {
+        .add(Job::new_async("0 0 0 * * *", move |_uuid, _l| {
             let pool = pool_pagi.clone();
             let log_tx = log_tx_pagi.clone();
             let tui_state = tui_state_pagi.clone();
@@ -39,7 +39,7 @@ pub async fn start_scheduler(
                         job_id.clone(),
                         "SYSTEM".to_string(),
                         "Morning Routine".to_string(), // Ganti nama biar general
-                        Some("Global & Personal Reminder (03:00 WIB)".to_string()),
+                        Some("Global & Personal Reminder (07:00 WIB)".to_string()),
                         None,
                         vec![
                             "#scheduler".to_string(),
@@ -52,11 +52,11 @@ pub async fn start_scheduler(
 
                 let logger = JobLogger::new(job_id, log_tx);
 
-                logger.log("⏰ MEMULAI SAHUR ROUTINE (03:30 WIB)");
+                logger.log("⏰ MEMULAI MORNING ROUTINE (07:00 WIB)");
 
                 logger.log("📡 Mengirim Reminder Global...");
                 if let Err(e) =
-                    run_reminder_task(pool.clone(), "_Selamat sahur Ilkomers!_", &logger).await
+                    run_reminder_task(pool.clone(), "_Selamat pagi Ilkomers!_", &logger).await
                 {
                     logger.log(&format!("❌ Error reminder global: {}", e));
                 }
