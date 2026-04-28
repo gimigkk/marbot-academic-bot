@@ -173,20 +173,11 @@ pub async fn get_recent_assignments_for_duplicate_check(
     let assignments = sqlx::query_as::<_, Assignment>(
         r#"
         SELECT 
-            id,
-            created_at,
-            course_id,
-            title,
-            description,
-            deadline,
-            parallel_codes,
-            sender_id,
-            message_ids,
-            reminder_1h_sent,
-            relating_messages,
-            personal_reminder_sent
+            id, created_at, course_id, title, description, deadline,
+            parallel_codes, sender_id, message_ids, reminder_1h_sent, relating_messages, personal_reminder_sent
         FROM assignments
-        WHERE created_at > NOW() - INTERVAL '30 days'
+        WHERE created_at > NOW() - INTERVAL '10 days'
+           OR deadline > NOW() - INTERVAL '3 days' 
         ORDER BY created_at DESC
         LIMIT 100
         "#
@@ -219,7 +210,8 @@ pub async fn get_recent_assignments_for_matching(
             relating_messages,
             personal_reminder_sent
         FROM assignments
-        WHERE created_at > NOW() - INTERVAL '30 days'
+        WHERE created_at > NOW() - INTERVAL '10 days'
+           OR deadline > NOW() - INTERVAL '3 days' 
         ORDER BY created_at DESC
         LIMIT 100
         "#
@@ -354,7 +346,14 @@ pub async fn get_assignment_by_title_and_course(
             relating_messages,
             personal_reminder_sent
         FROM assignments
-        WHERE title = $1 AND course_id = $2
+        WHERE title = $1 
+          AND course_id = $2
+          AND (
+              created_at > NOW() - INTERVAL '10 days' 
+              OR deadline > NOW() - INTERVAL '3 days'
+          )
+        ORDER BY created_at DESC
+        LIMIT 1
         "#
     )
     .bind(title)
