@@ -177,7 +177,7 @@ pub async fn get_recent_assignments_for_duplicate_check(
             parallel_codes, sender_id, message_ids, reminder_1h_sent, relating_messages, personal_reminder_sent
         FROM assignments
         WHERE created_at > NOW() - INTERVAL '30 days'
-           OR deadline > NOW() - INTERVAL '3 days' -- Tambahkan ini
+           OR deadline > NOW() - INTERVAL '3 days' 
         ORDER BY created_at DESC
         LIMIT 100
         "#
