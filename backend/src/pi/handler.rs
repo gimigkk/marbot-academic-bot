@@ -3,13 +3,9 @@ use chrono::NaiveDateTime;
 use crate::tui::JobLogger;
 use super::models::{NewPiTask, PiAIExtraction};
 use super::crud::create_pi_task;
-
-// Import prompt builder yang sudah kamu buat (Asumsi ada di src/pi/prompts.rs)
 use super::prompts::build_pi_extraction_prompt;
 
-// -----------------------------------------------------------------g------------
 // HELPER: Kirim Pesan ke WAHA
-// -----------------------------------------------------------------------------
 async fn send_reply(chat_id: &str, text: &str) -> Result<(), String> {
     let waha_url = format!("{}/api/sendText", std::env::var("WAHA_URL").unwrap_or_else(|_| "http://waha:3000".to_string()));
     let api_key = std::env::var("WAHA_API_KEY").unwrap_or_else(|_| "devkey123".to_string());
@@ -31,9 +27,7 @@ async fn send_reply(chat_id: &str, text: &str) -> Result<(), String> {
     if res.status().is_success() { Ok(()) } else { Err("API Error".to_string()) }
 }
 
-// -----------------------------------------------------------------------------
 // HELPER: Panggil AI (Groq API) untuk Ekstraksi JSON
-// -----------------------------------------------------------------------------
 async fn call_ai_extraction(prompt: &str) -> Result<PiAIExtraction, String> {
     let api_key = std::env::var("GROQ_API_KEY")
         .map_err(|_| "GROQ_API_KEY tidak ditemukan di .env".to_string())?;
@@ -44,7 +38,7 @@ async fn call_ai_extraction(prompt: &str) -> Result<PiAIExtraction, String> {
         "model": "llama-3.3-70b-versatile", // Gunakan model Groq yang cepat
         "messages": [{"role": "user", "content": prompt}],
         "temperature": 0.1,
-        "response_format": { "type": "json_object" } // Paksa AI mengembalikan JSON valid
+        "response_format": { "type": "json_object" } 
     });
 
     let client = reqwest::Client::new();
@@ -73,9 +67,8 @@ async fn call_ai_extraction(prompt: &str) -> Result<PiAIExtraction, String> {
     }
 }
 
-// -----------------------------------------------------------------------------
-// MAIN HANDLER: Proses Pesan Pekan Ilkomerz
-// -----------------------------------------------------------------------------
+
+// MAIN HANDLER: Proses Pesan 
 pub async fn process_pi_message(
     pool: &PgPool,
     message_body: &str,
@@ -111,8 +104,7 @@ pub async fn process_pi_message(
     if ai_result.is_task {
         let nama_tugas = ai_result.nama_tugas.unwrap_or_else(|| "Tugas/Agenda Kepanitiaan (Tanpa Judul)".to_string());
         
-        // Parsing String format (YYYY-MM-DD HH:MM:SS) dari AI ke NaiveDateTime
-        // Fallback: Jika AI gagal mendeteksi waktu, set otomatis besok jam 23:59
+        // Parsing String format (YYYY-MM-DD HH:MM:SS) 
         let deadline = ai_result.deadline.and_then(|d_str| {
             NaiveDateTime::parse_from_str(&d_str, "%Y-%m-%d %H:%M:%S").ok()
         }).unwrap_or_else(|| {
@@ -146,7 +138,6 @@ pub async fn process_pi_message(
             }
         }
     } else {
-        // AI mendeteksi #marbot, tapi isi pesannya bukan tugas/agenda spesifik
         logger.log("💬 AI menganggap pesan tidak memiliki action item/tugas spesifik.");
         let _ = send_reply(chat_id, "Bingung euy 😅. Marbot nggak nemu tugas atau jadwal rapat yang spesifik dari pesan tadi.").await;
         logger.set_status(crate::tui::state::JobStatus::Completed);
