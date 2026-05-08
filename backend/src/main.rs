@@ -28,6 +28,7 @@ pub mod database;
 pub mod clarification;
 pub mod tui;
 pub mod dashboard;
+pub mod pi;
 
 use crate::database::crud;
 use crate::parser::commands::{CommandResponse, AIForceMode};
@@ -355,6 +356,32 @@ async fn webhook(
         .unwrap_or_else(|| {
             sender_phone.split('@').next().unwrap_or(sender_phone)
         });
+
+    // ============= [BARU] INTERCEPTOR PEKAN ILKOMERZ =============
+    let pi_group_id = std::env::var("PEKAN_ILKOMERS_GROUP_ID").unwrap_or_default();
+    
+    if chat_id == &pi_group_id {
+        // Buat job logger khusus TUI agar terpantau di dashboard
+        let job_id = tui::generate_job_id();
+        let logger = tui::JobLogger::new(job_id.clone(), state.log_tx.clone());
+        
+        if let Some(tui_state) = TUI_STATE.get() {
+            tui_state.create_job(
+                job_id.clone(),
+                chat_id.to_string(),
+                sender_name.to_string(),
+                Some(payload.payload.body.clone()),
+                None,
+                vec!["#pekan-ilkomerz".to_string()],
+            ).await;
+        }
+
+        // Lempar ke handler khusus PI
+        crate::pi::handler::process_pi_message(&state.pool, &payload.payload.body, chat_id, &logger).await;
+        
+        return StatusCode::OK; 
+    }
+    // ============= END INTERCEPTOR PEKAN ILKOMERZ =============
 
     // ============= EARLY CLARIFICATION HANDLER =============
     // Process BEFORE whitelist so clarification replies work from debug group

@@ -42,3 +42,5 @@ Thumbs.db
 *.tmpbackend/.env.test
 **/.env.test
 backend/.env.test
+
+pekan_ilkomers.sql
