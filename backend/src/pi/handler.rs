@@ -139,7 +139,7 @@ pub async fn process_pi_message(
         }
     } else {
         logger.log("💬 AI menganggap pesan tidak memiliki action item/tugas spesifik.");
-        let _ = send_reply(chat_id, "Bingung euy 😅. Marbot nggak nemu tugas atau jadwal rapat yang spesifik dari pesan tadi.").await;
+        let _ = send_reply(chat_id, "tidak tahu tempe").await;
         logger.set_status(crate::tui::state::JobStatus::Completed);
     }
 }
