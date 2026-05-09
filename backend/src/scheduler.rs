@@ -189,7 +189,7 @@ async fn check_iftar(
     last_sent: Arc<Mutex<Option<NaiveDate>>>,
     log_tx: mpsc::UnboundedSender<LogEntry>,
 ) {
-    static SCHEDULE_JSON: &str = include_str!("../ramadhan_dramaga.json");
+    static SCHEDULE_JSON: &str = include_str!("json/ramadhan_dramaga.json");
 
     let wib_offset = chrono::FixedOffset::east_opt(7 * 3600).unwrap();
     let now_utc = Utc::now();
