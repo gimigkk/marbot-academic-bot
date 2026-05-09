@@ -1,5 +1,5 @@
 use sqlx::PgPool;
-use chrono::NaiveDateTime;
+use chrono::{NaiveDateTime, Datelike};
 use crate::tui::JobLogger;
 use super::models::{NewPiTask, PiAIExtraction};
 use super::crud::create_pi_task;
@@ -25,6 +25,48 @@ async fn send_reply(chat_id: &str, text: &str) -> Result<(), String> {
         .map_err(|e| e.to_string())?;
         
     if res.status().is_success() { Ok(()) } else { Err("API Error".to_string()) }
+}
+
+fn format_pi_tasks(tasks: Vec<super::models::PiTask>) -> String {
+    if tasks.is_empty() {
+        return "*[Daftar Tugas Pekan Ilkomerz]*\n\n📭 Belum ada tugas untuk periode ini.".to_string();
+    }
+
+    let mut response = String::from("*[Daftar Tugas Pekan Ilkomerz]*\n\nKeterangan:\n🔴 Deadline 0–2 hari\n🟢 Deadline > 2 hari\n\n");
+    let gmt7 = chrono::FixedOffset::east_opt(7 * 3600).unwrap();
+    let now = chrono::Utc::now().with_timezone(&gmt7).naive_local();
+
+    for task in tasks {
+        let delta_days = (task.deadline.date() - now.date()).num_days();
+        
+        let status_emoji = if delta_days < 1 {
+            "🔴"
+        } else if delta_days == 1 {
+            "🟠"
+        } else if delta_days == 2 {
+            "🟡"
+        } else {
+            "🟢"
+        };
+
+        // Format tanggal Indonesia
+        let months = ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Ags", "Sep", "Okt", "Nov", "Des"];
+        let month_idx = task.deadline.month0() as usize;
+        let date_str = format!("{} {} {}", task.deadline.day(), months[month_idx], task.deadline.year());
+        let time_str = task.deadline.format("%H:%M").to_string();
+        
+        let due_text = match delta_days {
+            d if d < 0 => format!("Terlewat ({} {})", date_str, time_str),
+            0 => format!("Hari ini jam {}", time_str),
+            1 => format!("Besok jam {}", time_str),
+            _ => format!("{} ({})", date_str, time_str),
+        };
+
+        response.push_str(&format!("{} *{}*\n", status_emoji, task.nama_tugas));
+        response.push_str(&format!("*└─* ⏰ {}\n\n", due_text));
+    }
+
+    response.trim_end().to_string()
 }
 
 // HELPER: Panggil AI (Groq API) untuk Ekstraksi JSON
@@ -75,8 +117,28 @@ pub async fn process_pi_message(
     chat_id: &str,
     logger: &JobLogger,
 ) {
+    let lower_body = message_body.trim().to_lowercase();
+
+    // INTERCEPT: #tugas command
+    if lower_body.starts_with("#tugas") {
+        logger.log("📋 Command #tugas terdeteksi untuk Pekan Ilkomerz!");
+        match super::crud::get_upcoming_pi_tasks(pool).await {
+            Ok(tasks) => {
+                let msg = format_pi_tasks(tasks);
+                let _ = send_reply(chat_id, &msg).await;
+                logger.set_status(crate::tui::state::JobStatus::Completed);
+            }
+            Err(e) => {
+                logger.log(&format!("❌ Gagal mengambil tugas PI: {}", e));
+                let _ = send_reply(chat_id, "❌ Gagal mengambil daftar tugas PI.").await;
+                logger.set_status(crate::tui::state::JobStatus::Failed);
+            }
+        }
+        return;
+    }
+
     // 1. FILTER KETAT: Hanya proses jika ada "#marbot"
-    if !message_body.to_lowercase().contains("#marbot") {
+    if !lower_body.contains("#marbot") {
         logger.log("💬 Pesan PI diabaikan (tidak mengandung #marbot).");
         logger.set_status(crate::tui::state::JobStatus::Completed);
         return;
