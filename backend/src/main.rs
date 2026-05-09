@@ -358,10 +358,9 @@ async fn webhook(
         });
 
     // ============= [BARU] INTERCEPTOR PEKAN ILKOMERZ =============
-    let pi_group_id = std::env::var("PEKAN_ILKOMERS_GROUP_ID").unwrap_or_default();
-    
-    if chat_id == &pi_group_id {
-        // Buat job logger khusus TUI agar terpantau di dashboard
+    let pi_group_id = std::env::var("PEKAN_ILKOMERS_GROUP_ID").unwrap_or_default().trim().to_string();
+
+    if chat_id == &pi_group_id {        // Buat job logger khusus TUI agar terpantau di dashboard
         let job_id = tui::generate_job_id();
         let logger = tui::JobLogger::new(job_id.clone(), state.log_tx.clone());
         
