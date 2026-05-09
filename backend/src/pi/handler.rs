@@ -95,7 +95,7 @@ async fn call_ai_extraction(prompt: &str) -> Result<PiAIExtraction, String> {
         let json_resp: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
         
         // Ambil string JSON dari respon AI
-        let content = json_resp["choices"]["message"]["content"]
+        let content = json_resp["choices"][0]["message"]["content"]
             .as_str()
             .unwrap_or("{}");
             
@@ -156,7 +156,7 @@ pub async fn process_pi_message(
         Ok(result) => result,
         Err(e) => {
             logger.log(&format!("❌ Gagal mengekstrak pesan via AI: {}", e));
-            let _ = send_reply(chat_id, "Waduh, Marbot lagi pusing (AI Error). Coba lagi nanti ya! 🤕").await;
+            let _ = send_reply(chat_id, "AI Error🤕").await;
             logger.set_status(crate::tui::state::JobStatus::Failed);
             return;
         }
