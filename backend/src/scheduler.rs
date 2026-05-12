@@ -63,8 +63,14 @@ pub async fn start_scheduler(
 
                 // REMINDER PERSONAL
                 logger.log("🚀 Menjalankan Personal Daily Reminder...");
-                if let Err(e) = run_personal_daily_reminder(pool, &logger).await {
+                if let Err(e) = run_personal_daily_reminder(pool.clone(), &logger).await {
                     logger.log(&format!("❌ Error personal daily reminder: {}", e));
+                }
+
+                // REMINDER PI
+                logger.log("🚀 Menjalankan PI Daily Reminder...");
+                if let Err(e) = crate::pi::handler::send_daily_reminder(&pool, &logger).await {
+                    logger.log(&format!("❌ Error PI daily reminder: {}", e));
                 }
 
                 logger.set_status(crate::tui::state::JobStatus::Completed);
@@ -129,11 +135,17 @@ pub async fn start_scheduler(
 
                 let logger = JobLogger::new(job_id, log_tx);
 
-                if let Err(e) = check_urgent_deadlines(pool, &logger).await {
+                if let Err(e) = check_urgent_deadlines(pool.clone(), &logger).await {
                     logger.log(&format!("❌ Error checking urgent deadlines: {}", e));
                     logger.set_status(crate::tui::state::JobStatus::Failed);
                 } else {
                     logger.set_status(crate::tui::state::JobStatus::Completed);
+                }
+
+                // REMINDER PI H-1 JAM
+                logger.log("🚀 Checking Urgent PI Deadlines...");
+                if let Err(e) = crate::pi::handler::check_urgent_pi_deadlines(&pool, &logger).await {
+                    logger.log(&format!("❌ Error PI urgent reminder: {}", e));
                 }
             })
         })?)

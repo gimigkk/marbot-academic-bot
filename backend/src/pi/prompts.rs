@@ -39,8 +39,12 @@ Kembalikan JSON valid seperti di bawah ini tanpa markdown atau penjelasan tambah
 
 {{
   "is_task": boolean,
-  "nama_tugas": string | null,
-  "deadline": "YYYY-MM-DD HH:MM:SS" | null
+  "tasks": [
+    {{
+      "nama_tugas": "string",
+      "deadline": "YYYY-MM-DD HH:MM:SS" | null
+    }}
+  ]
 }}
 "#,
         current_datetime,
