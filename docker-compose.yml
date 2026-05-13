@@ -5,7 +5,7 @@ services:
     image: marbot-academic-bot-backend:latest
     build:
       context: ./backend
-      dockerfile: Dockerfile
+      dockerfile: Dockerfile.prebuilt
     container_name: marbot-backend  
     environment:
       - DATABASE_URL=${DATABASE_URL}
