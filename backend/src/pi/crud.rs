@@ -62,7 +62,7 @@ pub async fn delete_pi_task(
 pub async fn get_upcoming_pi_tasks(pool: &PgPool) -> Result<Vec<PiTask>, sqlx::Error> {
     let tasks = sqlx::query_as::<_, PiTask>(
         r#"
-        SELECT id, nama_tugas, deadline 
+        SELECT id, nama_tugas, deadline, reminder_1h_sent 
         FROM pekan_ilkomers 
         WHERE deadline >= NOW() - INTERVAL '24 HOURS'
         ORDER BY deadline ASC

@@ -5,6 +5,7 @@ DROP POLICY IF EXISTS "Enable access to all users" ON public.assignments;
 DROP POLICY IF EXISTS "Enable access to all users" ON public.courses;
 
 -- Hapus Tabel 
+DROP TABLE IF EXISTS public.pekan_ilkomers;
 DROP TABLE IF EXISTS public.user_completions;
 DROP TABLE IF EXISTS public.wa_logs;
 DROP TABLE IF EXISTS public.assignments;

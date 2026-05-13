@@ -99,3 +99,11 @@ BEGIN
     create policy "Enable access to all users" on public.user_completions for all using (true) with check (true);
   END IF;
 END $$;
+
+-- TABEL 7: PEKAN ILKOMERS
+CREATE TABLE IF NOT EXISTS public.pekan_ilkomers (
+    id SERIAL PRIMARY KEY,
+    nama_tugas TEXT NOT NULL,
+    deadline TIMESTAMP WITHOUT TIME ZONE NOT NULL,
+    reminder_1h_sent BOOLEAN NOT NULL DEFAULT FALSE
+);
