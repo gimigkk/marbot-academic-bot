@@ -4,7 +4,7 @@ services:
   backend:
     image: marbot-academic-bot-backend:latest
     build:
-      context: .
+      context: ./backend
       dockerfile: Dockerfile
     container_name: marbot-backend  
     environment:
