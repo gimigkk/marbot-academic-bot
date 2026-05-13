@@ -25,6 +25,10 @@ pub struct PiAIExtraction {
     pub tasks: Vec<PiAITaskData>,
 }
 
+
+
+
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct PiAITaskData {
     pub nama_tugas: String,
