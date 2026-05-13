@@ -584,6 +584,10 @@ pub async fn check_urgent_pi_deadlines(pool: &PgPool, logger: &JobLogger) -> Res
             .map_err(|e| e.to_string())?;
     }
 
+
+
+
+    
     logger.log("✅ Reminder urgent PI berhasil dikirim.");
     Ok(())
 }
