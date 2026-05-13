@@ -100,7 +100,7 @@ fn format_pi_tasks(tasks: Vec<super::models::PiTask>) -> String {
         };
 
         response.push_str(&format!("{} *[{}]* *{}*\n", status_emoji, i + 1, task.nama_tugas));
-        response.push_str(&format!("*├─* {}\n\n", due_text));
+        response.push_str(&format!("*└─* {}\n\n", due_text));
     }
 
     response.trim_end().to_string()
@@ -569,7 +569,7 @@ pub async fn check_urgent_pi_deadlines(pool: &PgPool, logger: &JobLogger) -> Res
     for (i, row) in rows.iter().enumerate() {
         let time_str = row.deadline.format("%H:%M").to_string();
         message.push_str(&format!("🔴 *[{}]* *{}*\n", i + 1, row.nama_tugas));
-        message.push_str(&format!("*├─* Segera deadline pukul {}\n\n", time_str));
+        message.push_str(&format!("*└─* Segera deadline pukul {}\n\n", time_str));
     }
 
     message.push_str("_Segera diselesaikan ya!_ 🔥");
