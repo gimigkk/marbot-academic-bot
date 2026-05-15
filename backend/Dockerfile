@@ -6,7 +6,6 @@ COPY Cargo.toml Cargo.lock ./
 COPY src ./src
 COPY migrations ./migrations
 COPY schedule.json ./schedule.json
-COPY ramadhan_dramaga.json ./ramadhan_dramaga.json  
 
 RUN apt-get update && apt-get install -y screen && rm -rf /var/lib/apt/lists/*
 

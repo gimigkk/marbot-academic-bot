@@ -3,7 +3,10 @@ version: '3.8'
 services:
   backend:
     image: marbot-academic-bot-backend:latest
-    container_name: marbot-backend  # ← Back to hyphen
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.prebuilt
+    container_name: marbot-backend  
     environment:
       - DATABASE_URL=${DATABASE_URL}
       - WAHA_URL=${WAHA_URL}
