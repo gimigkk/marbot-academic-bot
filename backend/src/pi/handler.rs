@@ -312,6 +312,9 @@ pub async fn process_pi_message(
                     update_msg
                 );
 
+
+                
+
                 logger.log("🤖 Menghubungi AI untuk ekstraksi update...");
                 match call_ai_extraction(&prompt).await {
                     Ok(ai_result) => {

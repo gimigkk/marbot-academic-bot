@@ -1,0 +1,46 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT \n            c.name as course_name, \n            a.parallel_codes, \n            COUNT(*) as count,\n            MAX(a.created_at) as last_used,\n            -- Temporal decay: weight by recency (cast to double precision)\n            AVG(\n                CASE \n                    WHEN a.created_at > NOW() - INTERVAL '7 days' THEN 1.0\n                    WHEN a.created_at > NOW() - INTERVAL '14 days' THEN 0.8\n                    WHEN a.created_at > NOW() - INTERVAL '30 days' THEN 0.5\n                    ELSE 0.2\n                END\n            )::double precision as \"recency_weight!\"\n        FROM assignments a\n        JOIN courses c ON a.course_id = c.id\n        WHERE a.sender_id = $1 \n          AND a.parallel_codes IS NOT NULL\n          AND a.created_at > NOW() - INTERVAL '60 days'\n        GROUP BY c.name, a.parallel_codes\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "course_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "parallel_codes",
+        "type_info": "TextArray"
+      },
+      {
+        "ordinal": 2,
+        "name": "count",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 3,
+        "name": "last_used",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 4,
+        "name": "recency_weight!",
+        "type_info": "Float8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "9db8d3a7a293c428661dcc591f25351e82bf75575ff2acffbfd5520e514d2974"
+}

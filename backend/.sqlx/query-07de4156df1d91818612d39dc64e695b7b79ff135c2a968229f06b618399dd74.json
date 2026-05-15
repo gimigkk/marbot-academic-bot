@@ -1,0 +1,35 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT id, nama_tugas, deadline \n        FROM pekan_ilkomers \n        WHERE deadline > $1 \n          AND deadline <= $2 \n          AND reminder_1h_sent = FALSE\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "nama_tugas",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 2,
+        "name": "deadline",
+        "type_info": "Timestamp"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Timestamp",
+        "Timestamp"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "07de4156df1d91818612d39dc64e695b7b79ff135c2a968229f06b618399dd74"
+}
