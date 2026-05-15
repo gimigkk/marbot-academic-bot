@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT \n            a.id,\n            a.title,\n            a.parallel_codes,\n            c.name as course_name\n        FROM assignments a\n        JOIN courses c ON a.course_id = c.id\n        WHERE $1 = ANY(a.message_ids)\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "title",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "parallel_codes",
+        "type_info": "TextArray"
+      },
+      {
+        "ordinal": 3,
+        "name": "course_name",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false
+    ]
+  },
+  "hash": "80db964e13e84e39a29c7be0a45dccdceea5265d5408e8141f1d59968b47dbe9"
+}
