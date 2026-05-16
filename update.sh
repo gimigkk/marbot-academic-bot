@@ -164,7 +164,7 @@ if [ "$DEPLOY_MODE" = "prebuilt" ]; then
     
     log "🔨 Building Docker image with prebuilt binary..."
     # Build directly with docker, specifying the correct Dockerfile
-    if ! docker build -f backend/Dockerfile.prebuilt -t marbot-academic-bot-backend:latest ./backend; then
+    if ! docker build --no-cache -f backend/Dockerfile.prebuilt -t marbot-academic-bot-backend:latest ./backend; then
         log "❌ Docker build failed!"
         rollback
         
@@ -200,7 +200,7 @@ else
     
     log "🔨 Building Docker image on VPS (this may take 10-15 minutes)..."
     # Build directly with docker, specifying the correct Dockerfile
-    if ! docker build -f backend/Dockerfile -t marbot-academic-bot-backend:latest ./backend; then
+    if ! docker build --no-cache -f backend/Dockerfile -t marbot-academic-bot-backend:latest ./backend; then
         log "❌ VPS build failed!"
         rollback
         
@@ -220,7 +220,7 @@ _${COMMIT_MSG}_
 fi
 
 log "🚀 Restarting backend service..."
-docker compose up -d --no-deps backend
+docker compose up -d --force-recreate --build --no-deps backend
 
 log "🔍 Ensuring waha and dozzle are running..."
 docker compose up -d --no-recreate waha dozzle
@@ -291,6 +291,9 @@ ${BUILD_INFO}"
 
 log "📱 Sending success notification to WhatsApp..."
 send_whatsapp_message "$SUCCESS_MSG" "$DEBUG_GROUP_ID" "$WAHA_URL" "$WAHA_API_KEY"
+
+log "🧹 Cleaning up old docker images..."
+docker image prune -f
 
 log "✅ Deployment complete!"
 
