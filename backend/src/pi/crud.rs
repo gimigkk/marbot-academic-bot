@@ -9,7 +9,7 @@ pub async fn create_pi_task(
         r#"
         INSERT INTO pekan_ilkomers (nama_tugas, deadline)
         VALUES ($1, $2)
-        RETURNING id, nama_tugas, deadline
+        RETURNING id, nama_tugas, deadline, reminder_1h_sent
         "#
     )
     .bind(&task.nama_tugas)
