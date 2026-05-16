@@ -153,7 +153,7 @@ jobs:
               apt-get update -qq && apt-get install -y -qq pkg-config libssl-dev > /dev/null 2>&1
               
               echo -e '\033[0;36m🔨 Building release binary (with incremental compilation)...\033[0m'
-              export CARGO_INCREMENTAL=1
+              export CARGO_INCREMENTAL=0
               cargo build --release --color=always
               
               echo -e '\033[0;32m✅ Build complete!\033[0m'
