@@ -29,6 +29,7 @@ pub mod clarification;
 pub mod tui;
 pub mod dashboard;
 pub mod pi;
+pub mod api;
 
 use crate::database::crud;
 use crate::parser::commands::{CommandResponse, AIForceMode};
@@ -73,6 +74,7 @@ pub struct AppState {
     pub pool: PgPool,
     pub log_tx: mpsc::UnboundedSender<tui::state::LogEntry>,
     pub tui_state: Arc<TuiState>,
+    pub api_key_cache: crate::api::auth::ApiKeyCache,
 }
 
 /// Health check endpoint for Docker
@@ -203,6 +205,22 @@ async fn main() {
         Ok(p) => {
             print!("\r    ├─ 💾 Database\t: \x1b[32m✅ CONNECTED\x1b[0m\x1b[K\n");
             std::io::stdout().flush().unwrap();
+            
+            print!("    ├─ 📦 Migrations\t: 🏃 Running...");
+            std::io::stdout().flush().unwrap();
+            
+            match sqlx::migrate!("./migrations").run(&p).await {
+                Ok(_) => {
+                    print!("\r    ├─ 📦 Migrations\t: \x1b[32m✅ UP-TO-DATE\x1b[0m\x1b[K\n");
+                }
+                Err(e) => {
+                    print!("\r    ├─ 📦 Migrations\t: \x1b[31m❌ FAILED\x1b[0m\x1b[K\n");
+                    eprintln!("       └─ Error: {}", e);
+                    return;
+                }
+            }
+            std::io::stdout().flush().unwrap();
+            
             p
         }
         Err(e) => {
@@ -259,13 +277,16 @@ async fn main() {
     });
     println!("    └─ ⏰ Scheduler\t: \x1b[32m✅ RUNNING\x1b[0m");
 
+    let api_key_cache = crate::api::auth::new_api_key_cache();
+
     let state = AppState { 
         cache,
         spam_tracker, 
         whitelist, 
-        pool,
+        pool: pool.clone(),
         log_tx,
-        tui_state: tui_state.clone(),  
+        tui_state: tui_state.clone(),
+        api_key_cache: api_key_cache.clone(),
     };
     
   
@@ -278,6 +299,7 @@ async fn main() {
     let app = Router::new()
         .route("/webhook", post(webhook))
         .route("/health", get(health_check))
+        .nest("/api/v1", api::api_router(pool.clone(), api_key_cache))
         .merge(dashboard_routes)
         .with_state(state);
 
@@ -638,6 +660,8 @@ async fn webhook(
                 BotCommand::UnknownCommand(_) => "unknown",
                 BotCommand::Update(_, _) => "ai",
                 BotCommand::Announcement(_) => "announcement",
+                BotCommand::ApiKey(_) => "apikey",
+                BotCommand::ApiDocs => "apidocs",
             };
             tags.push(format!("#{}", cmd_tag));
         }
@@ -695,7 +719,7 @@ async fn webhook(
     match message_type {
         MessageType::Command(cmd) => {
             logger.log(&format!("⚙️ Processing command: {:?}", cmd));
-            let response = handle_command(cmd, sender_phone, sender_name, chat_id, &state.pool, &logger).await;
+            let response = handle_command(cmd, sender_phone, sender_name, chat_id, &state.pool, &logger, Some(&*state.api_key_cache)).await;
             
             match response {
                 CommandResponse::Text(text) => {
@@ -2078,4 +2102,3 @@ async fn download_media_from_url(media_url: &str, logger: &tui::JobLogger) -> Re
         return Ok(general_purpose::STANDARD.encode(&bytes));
     }
 }
-

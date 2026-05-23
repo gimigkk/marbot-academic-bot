@@ -10,11 +10,17 @@ use crate::database::crud::{
     set_user_course_parallel,
     get_user_course_statuses,
     set_user_daily_preference,
+    create_api_key, list_api_keys_for_user,
+    delete_api_key_by_name,
+    get_course_by_name_or_alias,
+    get_all_courses_formatted, get_courses_map,
+    get_assignment_with_course_by_id,
 };
 
 use crate::models::{BotCommand, AssignmentWithCourse};
 use crate::tui::JobLogger;
 use chrono::{DateTime, Duration, FixedOffset, Datelike, NaiveDate, Utc};
+use moka::future::Cache;
 use sqlx::PgPool;
 
 pub enum CommandResponse {
@@ -32,6 +38,7 @@ pub enum AIForceMode {
     Update, 
     NewOnly,
     Announcement,
+    None,
 }
 
 /// Get current time in GMT+7 (Indonesian timezone)
@@ -49,6 +56,7 @@ pub async fn handle_command(
     chat_id: &str,
     pool: &PgPool,
     logger: &JobLogger,
+    api_key_cache: Option<&Cache<String, String>>,
 ) -> CommandResponse {
     match cmd {
         BotCommand::Ping => {
@@ -774,8 +782,8 @@ pub async fn handle_command(
                 }
             }
         }
-
         
+
         BotCommand::Help => {
             logger.log(&format!("❓ Help command received from {}", user_phone));
             CommandResponse::Text(
@@ -798,6 +806,12 @@ pub async fn handle_command(
                 - #setkelas <matkul> <kode1> <kode2> — atur kode pararel untuk matkul\n\
                 - #mykelas — lihat settings kode parallel kamu\n\
                 - #daily <1/0> — aktifkan/matikan reminder #todo harian\n\n\
+                *Perintah Developer (Umum):*\n\
+                - #apikey new <nama> — buat API key baru\n\
+                - #apikey remove <nama> — hapus API key tertentu\n\
+                - #apikey list — lihat daftar nama API key\n\
+                - #apikey check <nama> — cek detail API key\n\
+                - #apidocs — dokumentasi REST API Marbot\n\n\
                 *Perintah Admin:*\n\
                 - #delete <id> — hapus tugas (id dari #tugas)\n\
                 - #update <id> <pesan> — update tugas dengan AI\n\
@@ -807,6 +821,184 @@ pub async fn handle_command(
                 github.com/gimigkk/marbot-academic-bot"
                 .to_string(),
             )
+        }
+
+        BotCommand::ApiKey(args) => {
+            logger.log(&format!("🔑 ApiKey command received from {}", user_phone));
+
+            let mut parts = args.split_whitespace();
+            let subcommand = parts.next();
+
+            match subcommand {
+                Some("new") => {
+                    let key_name = match parts.next() {
+                        Some(name) if parts.next().is_none() => name.trim(),
+                        _ => return CommandResponse::Text(build_api_key_usage_message()),
+                    };
+
+                    if key_name.is_empty() {
+                        return CommandResponse::Text(build_api_key_usage_message());
+                    }
+
+                    match crate::database::crud::get_api_key_by_name(pool, user_phone, key_name).await {
+                        Ok(Some(_)) => CommandResponse::Text(format!(
+                            "🔑 *API KEY SUDAH ADA*\n\n\
+                            Nama *{}* sudah dipakai.\n\
+                            Gunakan nama lain atau hapus key itu dulu dengan `#apikey remove {}`.",
+                            sanitize_wa_md(key_name),
+                            sanitize_wa_md(key_name)
+                        )),
+                        Ok(None) => {
+                            let new_api_key = generate_api_key_secret();
+
+                            match crate::database::crud::create_api_key(pool, user_phone, key_name, &new_api_key).await {
+                                Ok(_) => CommandResponse::Text(format!(
+                                    "🔑 *API KEY BARU DIBUAT*\n\n\
+                                    Nama: *{}*\n\
+                                    Key:\n`{}`\n\n\
+                                    ⚠️ *RAHASIA:* Jangan bagikan key ini ke siapa pun!\n\
+                                    _Key ini hanya ditampilkan sekali._\n\n\
+                                    📚 *Cara Pakai API:* Ketik `#apidocs`",
+                                    sanitize_wa_md(key_name),
+                                    new_api_key
+                                )),
+                                Err(e) => {
+                                    logger.log(&format!("❌ Gagal create api key: {}", e));
+                                    CommandResponse::Text("❌ Terjadi kesalahan sistem saat membuat API key.".to_string())
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            logger.log(&format!("❌ Gagal cek api key: {}", e));
+                            CommandResponse::Text("❌ Terjadi kesalahan sistem saat mengecek API key.".to_string())
+                        }
+                    }
+                }
+                Some("remove") => {
+                    let key_name = match parts.next() {
+                        Some(name) if parts.next().is_none() => name.trim(),
+                        _ => return CommandResponse::Text(build_api_key_usage_message()),
+                    };
+
+                    if key_name.is_empty() {
+                        return CommandResponse::Text(build_api_key_usage_message());
+                    }
+
+                    match crate::database::crud::delete_api_key_by_name(pool, user_phone, key_name).await {
+                        Ok(Some(removed_key)) => {
+                            if let Some(cache) = api_key_cache {
+                                cache.invalidate(&removed_key).await;
+                            }
+
+                            CommandResponse::Text(format!(
+                                "🗑️ *API KEY DIHAPUS*\n\n\
+                                Nama: *{}*\n\n\
+                                Key sudah tidak bisa dipakai lagi.",
+                                sanitize_wa_md(key_name)
+                            ))
+                        }
+                        Ok(None) => CommandResponse::Text(format!(
+                            "❌ *API KEY TIDAK DITEMUKAN*\n\n\
+                            Tidak ada API key bernama *{}* milik akun ini.",
+                            sanitize_wa_md(key_name)
+                        )),
+                        Err(e) => {
+                            logger.log(&format!("❌ Gagal hapus api key: {}", e));
+                            CommandResponse::Text("❌ Terjadi kesalahan sistem saat menghapus API key.".to_string())
+                        }
+                    }
+                }
+                Some("list") => {
+                    match crate::database::crud::list_api_keys_for_user(pool, user_phone).await {
+                        Ok(keys) => {
+                            if keys.is_empty() {
+                                return CommandResponse::Text(
+                                    "🔑 *DAFTAR API KEY*\n\nBelum ada API key.\n\nGunakan `#apikey new <nama>` untuk membuat key baru.".to_string(),
+                                );
+                            }
+
+                            let mut response = String::from("🔑 *DAFTAR API KEY*\n\n");
+                            for (index, key) in keys.iter().enumerate() {
+                                response.push_str(&format!(
+                                    "{}. *{}*\n   dibuat: {}\n   dipakai: {}\n\n",
+                                    index + 1,
+                                    sanitize_wa_md(&key.key_name),
+                                    format_api_key_timestamp(key.created_at),
+                                    format_optional_api_key_timestamp(key.last_used_at),
+                                ));
+                            }
+                            response.push_str("_Gunakan `#apikey check <nama>` untuk detail satu key._");
+
+                            CommandResponse::Text(response)
+                        }
+                        Err(e) => {
+                            logger.log(&format!("❌ Gagal list api keys: {}", e));
+                            CommandResponse::Text("❌ Terjadi kesalahan sistem saat mengambil daftar API key.".to_string())
+                        }
+                    }
+                }
+                Some("check") => {
+                    let key_name = match parts.next() {
+                        Some(name) if parts.next().is_none() => name.trim(),
+                        _ => return CommandResponse::Text(build_api_key_usage_message()),
+                    };
+
+                    if key_name.is_empty() {
+                        return CommandResponse::Text(build_api_key_usage_message());
+                    }
+
+                    match crate::database::crud::get_api_key_by_name(pool, user_phone, key_name).await {
+                        Ok(Some(key)) => CommandResponse::Text(format!(
+                            "🔎 *DETAIL API KEY*\n\n\
+                            Nama: *{}*\n\
+                            Dibuat: {}\n\
+                            Dipakai terakhir: {}\n\n\
+                            _Secret key tidak ditampilkan demi keamanan._",
+                            sanitize_wa_md(&key.key_name),
+                            format_api_key_timestamp(key.created_at),
+                            format_optional_api_key_timestamp(key.last_used_at),
+                        )),
+                        Ok(None) => CommandResponse::Text(format!(
+                            "❌ *API KEY TIDAK DITEMUKAN*\n\n\
+                            Tidak ada API key bernama *{}* milik akun ini.",
+                            sanitize_wa_md(key_name)
+                        )),
+                        Err(e) => {
+                            logger.log(&format!("❌ Gagal check api key: {}", e));
+                            CommandResponse::Text("❌ Terjadi kesalahan sistem saat mengecek API key.".to_string())
+                        }
+                    }
+                }
+                Some(_) | None => CommandResponse::Text(build_api_key_usage_message()),
+            }
+        }
+
+        BotCommand::ApiDocs => {
+            logger.log(&format!("📚 ApiDocs command received from {}", user_phone));
+            
+            let base_url = std::env::var("APP_URL").unwrap_or_else(|_| "https://marbot.up.railway.app".to_string());
+            
+            let docs = format!(
+                "📚 *MARBOT REST API DOCS*\n\n\
+                *Endpoint:*\n`GET {}/api/v1/assignments`\n\n\
+                *Headers:*\n\
+                `Authorization: Bearer <api_key>`\n\n\
+                *Query Params (Opsional):*\n\
+                - `timeframe`: Filter waktu (`today` | `week` | `all`)\n\
+                - `course`: Cari matkul berdasarkan nama/alias\n\
+                - `parallel`: Filter spesifik kelas paralel\n\n\
+                *Contoh Penggunaan (cURL):*\n\
+                ```bash\n\
+                curl -H \"Authorization: Bearer marbot_sk_...\" \\\n\
+                       \"{}/api/v1/assignments?course=pemrog&parallel=p2\"\n\
+                ```\n\n\
+                *Rate Limit:*\n\
+                60 request / menit\n\n\
+                _API Marbot bersifat read-only. Integrasikan tugas-tugas kamu ke Notion, Google Calendar, atau bot kamu sendiri!_",
+                base_url, base_url
+            );
+            
+            CommandResponse::Text(docs)
         }
 
         BotCommand::MissingArgument(cmd) => {
@@ -891,6 +1083,23 @@ pub async fn handle_command(
             ))
         }
     }
+}
+
+fn build_api_key_usage_message() -> String {
+    "🔑 *API KEY HELP*\n\nCommands:\n- #apikey new <name>  — create key\n- #apikey remove <name> — remove key\n- #apikey list — list keys\n- #apikey check <name> — show metadata\n\nUse #apidocs for REST usage.".to_string()
+}
+
+fn generate_api_key_secret() -> String {
+    format!("marbot_sk_{}", uuid::Uuid::new_v4().simple())
+}
+
+fn format_api_key_timestamp(dt: DateTime<Utc>) -> String {
+    let gmt7 = FixedOffset::east_opt(7 * 3600).unwrap();
+    dt.with_timezone(&gmt7).format("%Y-%m-%d %H:%M").to_string()
+}
+
+fn format_optional_api_key_timestamp(opt: Option<DateTime<Utc>>) -> String {
+    opt.map(|d| format_api_key_timestamp(d)).unwrap_or_else(|| "(never)".to_string())
 }
 
 fn format_assignments_list(
