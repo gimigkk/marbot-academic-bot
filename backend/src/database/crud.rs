@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use strsim::jaro_winkler;
 use crate::tui::JobLogger;
 
-use crate::models::{Assignment, NewAssignment, Course, AssignmentWithCourse};
+use crate::models::{Assignment, NewAssignment, Course, AssignmentWithCourse, ApiKeyRecord};
 
 #[allow(unused_macros)]
 macro_rules! log {
@@ -1072,4 +1072,97 @@ pub async fn get_daily_subscribers(pool: &sqlx::PgPool) -> Result<Vec<String>, s
     .fetch_all(pool)
     .await?;
     Ok(users)
+}
+
+// API KEY OPERATIONS
+
+pub async fn list_api_keys_for_user(pool: &PgPool, user_id: &str) -> Result<Vec<ApiKeyRecord>, sqlx::Error> {
+    sqlx::query_as::<_, ApiKeyRecord>(
+        r#"
+        SELECT key_name, created_at, last_used_at
+        FROM user_api_keys
+        WHERE user_id = $1
+        ORDER BY created_at DESC, key_name ASC
+        "#
+    )
+    .bind(user_id)
+    .fetch_all(pool)
+    .await
+}
+
+pub async fn get_api_key_by_name(
+    pool: &PgPool,
+    user_id: &str,
+    key_name: &str,
+) -> Result<Option<ApiKeyRecord>, sqlx::Error> {
+    sqlx::query_as::<_, ApiKeyRecord>(
+        r#"
+        SELECT key_name, created_at, last_used_at
+        FROM user_api_keys
+        WHERE user_id = $1 AND key_name = $2
+        LIMIT 1
+        "#
+    )
+    .bind(user_id)
+    .bind(key_name)
+    .fetch_optional(pool)
+    .await
+}
+
+pub async fn create_api_key(
+    pool: &PgPool,
+    user_id: &str,
+    key_name: &str,
+    api_key: &str,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        r#"
+        INSERT INTO user_api_keys (user_id, key_name, api_key)
+        VALUES ($1, $2, $3)
+        "#
+    )
+    .bind(user_id)
+    .bind(key_name)
+    .bind(api_key)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+pub async fn delete_api_key_by_name(
+    pool: &PgPool,
+    user_id: &str,
+    key_name: &str,
+) -> Result<Option<String>, sqlx::Error> {
+    sqlx::query_scalar::<_, String>(
+        r#"
+        DELETE FROM user_api_keys
+        WHERE user_id = $1 AND key_name = $2
+        RETURNING api_key
+        "#
+    )
+    .bind(user_id)
+    .bind(key_name)
+    .fetch_optional(pool)
+    .await
+}
+
+pub async fn get_user_by_api_key(pool: &PgPool, api_key: &str) -> Result<Option<String>, sqlx::Error> {
+    sqlx::query_scalar::<_, String>(
+        "SELECT user_id FROM user_api_keys WHERE api_key = $1"
+    )
+    .bind(api_key)
+    .fetch_optional(pool)
+    .await
+}
+
+/// Atomically validate key and update last_used_at in one round-trip.
+/// Called only on cache miss (at most once per 5 min per key).
+pub async fn get_and_touch_api_key(pool: &PgPool, api_key: &str) -> Result<Option<String>, sqlx::Error> {
+    sqlx::query_scalar::<_, String>(
+        "UPDATE user_api_keys SET last_used_at = NOW() WHERE api_key = $1 RETURNING user_id"
+    )
+    .bind(api_key)
+    .fetch_optional(pool)
+    .await
 }

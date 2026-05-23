@@ -151,6 +151,12 @@ fn parse_command(text: &str) -> Option<BotCommand> {
                 .trim_start_matches(|c: char| c == ' ' || c == '\t' || c == '\n' || c == '\r');
             Some(BotCommand::Announcement(after_cmd.to_string()))
         }
+        "apikey" | "api" => {
+            let after_cmd = without_hash[parts[0].len()..]
+                .trim_start_matches(|c: char| c == ' ' || c == '\t' || c == '\n' || c == '\r');
+            Some(BotCommand::ApiKey(after_cmd.to_string()))
+        }
+        "apidocs" | "apidoc" => Some(BotCommand::ApiDocs),
         _ if command.chars().all(|c| c.is_numeric()) => {
             let id = command.parse().ok()?;
             Some(BotCommand::Expand(id))

@@ -169,6 +169,16 @@ pub enum BotCommand {
     MissingArgument(String),
     Update(u32, String),      
     Announcement(String), // yeayy fitur baru
+    ApiKey(String),
+    ApiDocs,
+}
+
+
+#[derive(Debug, sqlx::FromRow, Clone)]
+pub struct ApiKeyRecord {
+    pub key_name: String,
+    pub created_at: DateTime<Utc>,
+    pub last_used_at: Option<DateTime<Utc>>,
 }
 
 
