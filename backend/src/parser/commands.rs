@@ -976,7 +976,7 @@ pub async fn handle_command(
         BotCommand::ApiDocs => {
             logger.log(&format!("📚 ApiDocs command received from {}", user_phone));
             
-            let base_url = std::env::var("APP_URL").unwrap_or_else(|_| "https://marbot.up.railway.app".to_string());
+            let base_url = std::env::var("APP_URL").unwrap_or_else(|_| "http://43.133.129.209:3000".to_string());
             
             let docs = format!(
                 "📚 *MARBOT REST API DOCS*\n\n\
