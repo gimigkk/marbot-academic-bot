@@ -398,6 +398,8 @@ fn resolve_next_meeting(assignment: &AssignmentWithCourse) -> Option<NaiveDateTi
     earliest
 }
 
+
+
 // ===== GEMINI CLARIFICATION =====
 
 async fn try_gemini_clarification(
