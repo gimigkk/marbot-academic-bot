@@ -30,6 +30,7 @@ pub mod tui;
 pub mod dashboard;
 pub mod pi;
 pub mod api;
+pub mod agriinfo;
 
 use crate::database::crud;
 use crate::parser::commands::{CommandResponse, AIForceMode};
@@ -40,6 +41,7 @@ use classifier::classify_message;
 use parser::commands::handle_command;
 use parser::ai_extractor::{extract_with_ai, check_duplicate_assignment}; 
 use whitelist::Whitelist;
+use crate::agriinfo::handler::process_agriinfo_message;
 
 static TUI_STATE: OnceCell<Arc<tui::state::TuiState>> = OnceCell::new();
 
@@ -408,6 +410,36 @@ async fn webhook(
         return StatusCode::OK; 
     }
     // ============= END INTERCEPTOR PEKAN ILKOMERZ =============
+
+    // ============= [BARU] INTERCEPTOR AGRIINFORMATICS =============
+    let agriinfo_group_id = std::env::var("KADIV_AGRIINFOMATICS_GROUP").unwrap_or_default().trim().to_string();
+    let ipeng_numbers_env = std::env::var("IPENG_NUMBERS").unwrap_or_default();
+    let is_ipeng = ipeng_numbers_env.split(',').any(|num| {
+        let num = num.trim();
+        !num.is_empty() && (num == chat_id || num == sender_phone)
+    });
+
+    if (!agriinfo_group_id.is_empty() && chat_id == &agriinfo_group_id) || is_ipeng {
+        let job_id = tui::generate_job_id();
+        let logger = tui::JobLogger::new(job_id.clone(), state.log_tx.clone());
+        
+        if let Some(tui_state) = TUI_STATE.get() {
+            tui_state.create_job(
+                job_id.clone(),
+                chat_id.to_string(),
+                sender_name.to_string(),
+                Some(payload.payload.body.clone()),
+                None,
+                vec!["#agriinformatics".to_string()],
+            ).await;
+        }
+
+        // Process message via Agriinformatics handler
+        process_agriinfo_message(&state.pool, &payload.payload.body, chat_id, &logger).await;
+        
+        return StatusCode::OK; 
+    }
+    // ============= END INTERCEPTOR AGRIINFORMATICS =============
 
     // ============= EARLY CLARIFICATION HANDLER =============
     // Process BEFORE whitelist so clarification replies work from debug group
