@@ -413,13 +413,8 @@ async fn webhook(
 
     // ============= [BARU] INTERCEPTOR AGRIINFORMATICS =============
     let agriinfo_group_id = std::env::var("KADIV_AGRIINFOMATICS_GROUP").unwrap_or_default().trim().to_string();
-    let ipeng_numbers_env = std::env::var("IPENG_NUMBERS").unwrap_or_default();
-    let is_ipeng = ipeng_numbers_env.split(',').any(|num| {
-        let num = num.trim();
-        !num.is_empty() && (num == chat_id || num == sender_phone)
-    });
 
-    if (!agriinfo_group_id.is_empty() && chat_id == &agriinfo_group_id) || is_ipeng {
+    if !agriinfo_group_id.is_empty() && chat_id == &agriinfo_group_id {
         let job_id = tui::generate_job_id();
         let logger = tui::JobLogger::new(job_id.clone(), state.log_tx.clone());
         
