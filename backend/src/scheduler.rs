@@ -73,6 +73,12 @@ pub async fn start_scheduler(
                     logger.log(&format!("❌ Error PI daily reminder: {}", e));
                 }
 
+                // REMINDER AGRIINFO
+                logger.log("🚀 Menjalankan Agriinformatics Daily Reminder...");
+                if let Err(e) = crate::agriinfo::handler::send_daily_reminder(&pool, &logger).await {
+                    logger.log(&format!("❌ Error Agriinformatics daily reminder: {}", e));
+                }
+
                 logger.set_status(crate::tui::state::JobStatus::Completed);
             })
         })?)
@@ -146,6 +152,12 @@ pub async fn start_scheduler(
                 logger.log("🚀 Checking Urgent PI Deadlines...");
                 if let Err(e) = crate::pi::handler::check_urgent_pi_deadlines(&pool, &logger).await {
                     logger.log(&format!("❌ Error PI urgent reminder: {}", e));
+                }
+
+                // REMINDER AGRIINFO H-1 JAM
+                logger.log("🚀 Checking Urgent Agriinformatics Deadlines...");
+                if let Err(e) = crate::agriinfo::handler::check_urgent_agriinfo_deadlines(&pool, &logger).await {
+                    logger.log(&format!("❌ Error Agriinformatics urgent reminder: {}", e));
                 }
             })
         })?)
