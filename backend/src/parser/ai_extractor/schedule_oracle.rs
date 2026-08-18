@@ -30,7 +30,6 @@ pub struct ScheduleOracle {
 }
 
 impl ScheduleOracle {
-  
     pub fn load_from_file(path: &str) -> Result<Self, String> {
         let content = std::fs::read_to_string(path)
             .map_err(|e| format!("Failed to read schedule file: {}", e))?;
@@ -56,13 +55,12 @@ impl ScheduleOracle {
         weekday: Weekday,
     ) {
         for schedule in day_schedules {
-      
-            let course_code = schedule.course
+            let course_name = schedule.course
                 .split(" - ")
-                .next()
+                .last()
                 .unwrap_or(&schedule.course)
                 .trim()
-                .to_string();
+                .to_lowercase();
           
             let start_time = schedule.schedule
                 .split('-')
@@ -71,7 +69,7 @@ impl ScheduleOracle {
                 .trim()
                 .to_string();
             
-            let key = (course_code, schedule.parallel.to_lowercase());
+            let key = (course_name, schedule.parallel.to_lowercase());
             schedules
                 .entry(key)
                 .or_insert_with(Vec::new)
@@ -85,14 +83,13 @@ impl ScheduleOracle {
         parallel_code: &str,
         from_date: NaiveDate,
     ) -> Option<(NaiveDate, String)> {
-      
         let parallel_lower = parallel_code.to_lowercase();
         
         let matching_schedule = self.schedules
             .iter()
-            .find(|((code, parallel), _)| {
+            .find(|((stored_name, parallel), _)| {
                 parallel == &parallel_lower && 
-                Self::course_matches(code, course_name)
+                Self::course_matches(stored_name, course_name)
             })?;
         
         let schedule_times = matching_schedule.1;
@@ -113,7 +110,6 @@ impl ScheduleOracle {
         next_meetings.into_iter().next()
     }
     
-  
     pub fn get_next_meeting(
         &self,
         course_name: &str,
@@ -124,28 +120,27 @@ impl ScheduleOracle {
             .map(|(date, _time)| date)
     }
     
-    
-    fn course_matches(course_code: &str, course_name: &str) -> bool {
-        let name_lower = course_name.to_lowercase();
+    fn course_matches(stored_course: &str, query_course: &str) -> bool {
+        let stored_lower = stored_course.to_lowercase();
+        let query_lower = query_course.to_lowercase();
         
-     
+        if stored_lower == query_lower || stored_lower.contains(&query_lower) || query_lower.contains(&stored_lower) {
+            return true;
+        }
+
         let mapping = [
-            ("kom1221", vec!["metode kuantitatif", "metkuan", "mk"]),
-            ("kom120d", vec!["matematika komputasi", "matkom", "pengantar matematika"]),
-            ("kom120c", vec!["pemrograman", "pemrog"]),
-            ("kom120g", vec!["organisasi dan arsitektur komputer", "orkom", "oaak"]),
-            ("kom120h", vec!["struktur data", "sd", "strukdat"]),
-            ("kom1231", vec!["rekayasa perangkat lunak", "rpl"]),
-            ("kom1232", vec!["desain pengalaman pengguna", "ux", "uxd", "dpp"]),
-            ("kom1304", vec!["grafika komputer dan visualisasi", "grafkom", "gkv"]),
+            ("analisis algoritme", vec!["analisis algoritme", "analisis algoritma", "analgor", "aa", "algoritme", "algoritma"]),
+            ("komunikasi data dan jaringan komputer", vec!["komunikasi data dan jaringan komputer", "komunikasi data", "komdat", "jarkom", "kj", "kdj", "jaringan komputer"]),
+            ("kecerdasan buatan", vec!["kecerdasan buatan", "ai", "kb"]),
+            ("keamanan informasi", vec!["keamanan informasi", "keamanan info", "kemin", "ki", "kaminfo"]),
+            ("sistem operasi", vec!["sistem operasi", "so", "os"]),
+            ("sistem informasi", vec!["sistem informasi", "si", "is"]),
         ];
         
-        let code_lower = course_code.to_lowercase();
-        
-        for (code, aliases) in &mapping {
-            if code_lower.contains(code) {
+        for (canonical, aliases) in &mapping {
+            if stored_lower.contains(canonical) {
                 for alias in aliases {
-                    if name_lower.contains(alias) {
+                    if query_lower == *alias || query_lower.contains(alias) {
                         return true;
                     }
                 }
@@ -168,7 +163,6 @@ impl ScheduleOracle {
         }
     }
     
-
     pub fn get_schedule_for_course(
         &self,
         course_name: &str,
@@ -178,9 +172,9 @@ impl ScheduleOracle {
         
         self.schedules
             .iter()
-            .find(|((code, parallel), _)| {
+            .find(|((stored_name, parallel), _)| {
                 parallel == &parallel_lower && 
-                Self::course_matches(code, course_name)
+                Self::course_matches(stored_name, course_name)
             })
             .map(|(_, schedule)| schedule.clone())
     }

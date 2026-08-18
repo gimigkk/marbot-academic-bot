@@ -886,11 +886,10 @@ pub async fn set_user_course_parallel(
             let course_name_lower = c.name.to_lowercase();
             
             let special_courses = vec![
-                "pemrograman", 
-                "struktur data", 
-                "metode kuantitatif", 
-                "rekayasa perangkat lunak", 
-                "desain pengalaman pengguna"
+                "analisis algoritme", 
+                "komunikasi data dan jaringan komputer", 
+                "kecerdasan buatan", 
+                "sistem operasi"
             ];
 
             let is_special_course = special_courses.iter().any(|k| course_name_lower.contains(k));
