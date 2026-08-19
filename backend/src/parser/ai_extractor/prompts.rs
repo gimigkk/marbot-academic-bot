@@ -773,17 +773,15 @@ Think step-by-step:
 3. **TITLE SIMILARITY:** Does the title match the update context?
    - Generic titles ("Tugas RPL") often reference the only recent assignment
    - Specific identifiers (numbers) must match exactly
-   - Semantic similarity (quiz vs quiz, lab vs lab)
-
 4. **PARALLEL OVERLAP:** If parallels mentioned, do they overlap?
    - Empty parallels = match anything
    - [k1, k2] matches [k1] or [k2] or [k1, k2]
    - [k1] does NOT match [k3]
 
-5. **CONFIDENCE:** How certain are you?
-   - HIGH: Clear match (course + title + recent + parallels match)
-   - MEDIUM: Probable match (course matches, similar title)
-   - LOW: Uncertain (multiple candidates or weak signals)
+5. **CONFIDENCE & COURSE MATCHING:**
+   - HIGH: Clear match (course + title or quoted assignment + recent + parallels match)
+   - MEDIUM: Course matches (e.g. "Asah 2026"), and update applies to candidate assignment(s) of that course
+   - LOW: No matching course, or completely unrelated message
 
 ---
 
@@ -800,8 +798,9 @@ Return JSON with reasoning:
 ```
 
 **Rules:**
-- Only return ID with "high" confidence
-- If "medium" or "low" → return null (safer to not match)
+- Return the assignment_id for "high" or "medium" confidence matches (if candidate belongs to the specified course).
+- If an update applies to a course (e.g. "Asah 2026") with multiple assignments, match the most recent active candidate assignment for that course with "high" or "medium" confidence.
+- Only return "low" (with assignment_id: null) if no candidate matches the course or context.
 - Include your reasoning for transparency in a single line
 
 Think through the steps above, then provide your answer."#,
