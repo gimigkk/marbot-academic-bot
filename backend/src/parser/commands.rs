@@ -804,6 +804,7 @@ pub async fn handle_command(
                 - #undo — batalkan #done terakhir\n\n\
                 *Perintah Pengaturan:*\n\
                 - #setkelas <matkul> <kode1> <kode2> — atur kode pararel untuk matkul\n\
+                - #setkelas asah <track> — atur track Asah 2026 Dicoding (AI / FS / DS / NONE)\n\
                 - #mykelas — lihat settings kode parallel kamu\n\
                 - #daily <1/0> — aktifkan/matikan reminder #todo harian\n\n\
                 *Perintah Developer (Umum):*\n\
@@ -1037,7 +1038,8 @@ pub async fn handle_command(
                     *Contoh:*\n\
                     - #setkelas pmk k1\n\
                     - #setkelas algorithm c3\n\
-                    - #setkelas pemrog k1 p2\n\n\
+                    - #setkelas pemrog k1 p2\n\
+                    - #setkelas asah AI (pilihan track: AI, FS, DS, NONE)\n\n\
                     💡 _Gunakan nama matkul yang benar (lihat di #tugas)_"
                 }
                 "daily" => {
