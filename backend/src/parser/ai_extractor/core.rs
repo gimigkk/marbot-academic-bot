@@ -410,8 +410,10 @@ async fn try_gemini_models(prompt: &str, logger: &JobLogger) -> Result<AIClassif
         }
 
         all_rate_limited = false;
+        let err_body = response.text().await.unwrap_or_default();
+        let short_err = if err_body.len() > 120 { &err_body[..120] } else { &err_body };
         clear_trying_line(logger);
-        logger.log(&format!("│ \x1b[31m❌ FAILED\x1b[0m : {} - HTTP {}", model, status));
+        logger.log(&format!("│ \x1b[31m❌ FAILED\x1b[0m : {} - HTTP {}: {}", model, status, short_err));
         if index < GEMINI_MODELS.len() { continue; }
     }
 

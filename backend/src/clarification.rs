@@ -508,8 +508,10 @@ async fn try_gemini_clarification(
         }
         
         all_rate_limited = false;
+        let err_body = response.text().await.unwrap_or_default();
+        let short_err = if err_body.len() > 120 { &err_body[..120] } else { &err_body };
         if logger.is_none() { clear_previous_trying_stdout(&mut last_trying); }
-        logger_log(logger, &format!("│ \x1b[31m❌ FAILED\x1b[0m\t: {} - HTTP {}", model, status));
+        logger_log(logger, &format!("│ \x1b[31m❌ FAILED\x1b[0m\t: {} - HTTP {}: {}", model, status, short_err));
     }
     
     if all_rate_limited {
