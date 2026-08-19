@@ -310,7 +310,7 @@ Single-word titles are prohibited. Every title must have a distinguishing elemen
 
 ## PARALLEL CODES (array: ["k1", "k2", ...])
 
-Valid codes: k1-k4, p1-p4, r1-r4, all
+Valid codes: k1-k4, p1-p4, r1-r4, ai, fs, ds, none, all
 
 **Decision tree:**
 1. Does message contain "all"/"semua"/"everyone"? → Return ["all"], STOP
@@ -322,6 +322,10 @@ Valid codes: k1-k4, p1-p4, r1-r4, all
 - "K2 P2" → ["k2", "p2"]
 - "untuk k1" → ["k1"]
 - "semua" → ["all"]
+- "Asah AI" / "Jalur AI" → ["ai"]
+- "Asah FS" / "Fullstack" → ["fs"]
+- "Asah DS" / "Data Science" → ["ds"]
+- "Non-Asah" / "Reguler" → ["none"]
 - Course abbreviation: "GRAFKOM K2" → ["k2"]
 
 ## DESCRIPTION (MANDATORY, never null)
@@ -603,7 +607,7 @@ Only set `new_title` if user explicitly changes the title.
 
 ## PARALLEL CODES (array: ["k1", "k2", ...])
 
-Valid codes: k1-k4, p1-p4, r1-r4, all
+Valid codes: k1-k4, p1-p4, r1-r4, ai, fs, ds, none, all
 
 **CRITICAL: Extract from UPDATE MESSAGE, NOT from existing assignment**
 
@@ -618,6 +622,9 @@ Valid codes: k1-k4, p1-p4, r1-r4, all
 - "paralel K1" → ["k1"]
 - "semua kelas" → ["all"]
 - "diubah ke k3" → ["k3"]
+- "diubah ke AI" → ["ai"]
+- "diubah ke FS" → ["fs"]
+- "diubah ke DS" → ["ds"]
 
 **IMPORTANT:** Empty array means "no change to parallels", NOT "use existing parallels"
 

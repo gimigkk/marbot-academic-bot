@@ -73,7 +73,7 @@ fn parse_command(text: &str) -> Option<BotCommand> {
             
                 for i in (2..parts.len()).rev() {
                     let token = parts[i];
-                    let is_code = token.eq_ignore_ascii_case("all") || token.len() <= 3;
+                    let is_code = token.eq_ignore_ascii_case("all") || token.eq_ignore_ascii_case("none") || token.eq_ignore_ascii_case("non_asah") || token.len() <= 3;
                     
                     if is_code {
                         split_idx = i;

@@ -755,7 +755,7 @@ MAPPINGS:
 - Dates: "besok"=+1d, "lusa"=+2d, "minggu depan"=+7d.
 - Times: "pagi"=08:00, "siang"=12:00, "sore"=15:00, "malam"=20:00.
 - Keywords: "pertemuan berikutnya", "sesuai jadwal" => Use NEXT CLASS MEETING date/time.
-- Codes: "K1", "K2", "All".
+- Codes: "K1", "K2", "AI", "FS", "DS", "None", "All".
 
 RESPONSE FORMAT (JSON only):
 {{
@@ -764,7 +764,7 @@ RESPONSE FORMAT (JSON only):
   "course_name": "string" or null,
   "title": "string" or null,
   "description": "string" or null,
-  "parallel_codes": ["K1", "K2"] or null,
+  "parallel_codes": ["K1", "K2", "AI"] or null,
   "is_cancellation": false,
   "is_unrecognized": false
 }}
@@ -1012,11 +1012,19 @@ fn extract_description_part(text: &str) -> Option<String> {
 
 fn detect_parallel_codes(text: &str) -> Vec<String> {
     let mut codes = Vec::new();
-    if text.contains("semua") || text.contains("all") { return vec!["ALL".to_string()]; }
+    let lower = text.to_lowercase();
+    if lower.contains("semua") || lower.contains("all") { return vec!["ALL".to_string()]; }
+    if lower.contains("none") || lower.contains("non_asah") || lower.contains("reguler") { return vec!["NONE".to_string()]; }
+    if lower.contains("ai") { codes.push("AI".to_string()); }
+    if lower.contains("fs") || lower.contains("fullstack") { codes.push("FS".to_string()); }
+    if lower.contains("ds") || lower.contains("data science") { codes.push("DS".to_string()); }
     
-    static RE_CODE: Lazy<Regex> = Lazy::new(|| Regex::new(r"\b([KPR][1-4])\b").unwrap());
+    static RE_CODE: Lazy<Regex> = Lazy::new(|| Regex::new(r"(?i)\b([KPRS][1-4])\b").unwrap());
     for caps in RE_CODE.captures_iter(text) {
-        codes.push(caps[1].to_uppercase());
+        let code = caps[1].to_uppercase();
+        if !codes.contains(&code) {
+            codes.push(code);
+        }
     }
     codes
 }
