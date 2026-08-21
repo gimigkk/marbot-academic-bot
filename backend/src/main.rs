@@ -31,12 +31,13 @@ pub mod dashboard;
 pub mod pi;
 pub mod api;
 pub mod agriinfo;
+pub mod waha;
 
 use crate::database::crud;
 use crate::parser::commands::{CommandResponse, AIForceMode};
 use crate::tui::TuiState;
 
-use models::{MessageType, AIClassification, WebhookPayload, SendTextRequest, NewAssignment, UnrecognizedCategory, Assignment};
+use models::{MessageType, AIClassification, WebhookPayload, NewAssignment, UnrecognizedCategory, Assignment};
 use classifier::classify_message;
 use parser::commands::handle_command;
 use parser::ai_extractor::{extract_with_ai, check_duplicate_assignment}; 
@@ -1796,55 +1797,17 @@ async fn handle_single_assignment(
 }
 
 
-// FITUR : FUNGSI HELPER DENGAN KIRIM REPLY DENGAN ID PESAN
+// FITUR : FUNGSI HELPER DENGAN KIRIM REPLY DENGAN ID PESAN, TYPING STATE & ARTIFICIAL DELAY
 async fn send_reply_with_id(chat_id: &str, text: &str, reply_to: Option<String>) -> Result<(), String> {
-    let waha_url = format!("{}/api/sendText", std::env::var("WAHA_URL").unwrap_or_else(|_| "http://waha:3000".to_string()));
-    let api_key = std::env::var("WAHA_API_KEY").unwrap_or_else(|_| "devkey123".to_string());
-    
-    let payload = SendTextRequest { 
-        chat_id: chat_id.to_string(), 
-        text: text.to_string(), 
-        session: "default".to_string(),
-        reply_to: reply_to,
-        mentions: None
-    };
-    
-    let client = reqwest::Client::new();
-    let res = client.post(waha_url)
-        .header("X-Api-Key", api_key)
-        .json(&payload)
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
-        
-    if res.status().is_success() { Ok(()) } else { Err(format!("API Error")) }
+    crate::waha::send_reply_with_id(chat_id, text, reply_to).await
 }
 
 async fn send_reply_with_mentions(chat_id: &str, text: &str, mentions: Vec<String>) -> Result<(), String> {
-    let waha_url = format!("{}/api/sendText", std::env::var("WAHA_URL").unwrap_or_else(|_| "http://waha:3000".to_string()));
-    let api_key = std::env::var("WAHA_API_KEY").unwrap_or_else(|_| "devkey123".to_string());
-    
-    let payload = SendTextRequest { 
-        chat_id: chat_id.to_string(), 
-        text: text.to_string(), 
-        session: "default".to_string(),
-        reply_to: None,
-        mentions: Some(mentions), 
-    };
-    
-    let client = reqwest::Client::new();
-    let res = client.post(waha_url)
-        .header("X-Api-Key", api_key)
-        .json(&payload)
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
-        
-    if res.status().is_success() { Ok(()) } else { Err(format!("API Error")) }
+    crate::waha::send_reply_with_mentions(chat_id, text, mentions).await
 }
 
 async fn send_reply(chat_id: &str, text: &str) -> Result<(), String> {
-    send_reply_with_id(chat_id, text, None).await
+    crate::waha::send_reply(chat_id, text).await
 }
 
 
