@@ -24,6 +24,10 @@ pub fn classify_message(text: &str) -> MessageType {
     }
 }
 
+
+
+
+
 fn parse_command(text: &str) -> Option<BotCommand> {
     let trimmed = text.trim();
     
