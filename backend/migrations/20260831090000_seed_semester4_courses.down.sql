@@ -1,0 +1,1 @@
+-- Down migration: do not remove courses to preserve relational integrity with existing assignments

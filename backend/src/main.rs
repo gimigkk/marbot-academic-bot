@@ -684,6 +684,7 @@ async fn webhook(
                 BotCommand::Delete(_) => "delete",
                 BotCommand::Expand(_) => "expand",
                 BotCommand::SetKelas(_, _) => "setkelas",
+                BotCommand::SetKelasPaket(_) => "setkelas",
                 BotCommand::MyKelas => "mykelas",
                 BotCommand::Daily(_) => "daily",
                 BotCommand::MissingArgument(_) => "error",
