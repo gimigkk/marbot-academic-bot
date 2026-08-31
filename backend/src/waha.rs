@@ -99,6 +99,10 @@ pub async fn apply_typing_delay() {
     tokio::time::sleep(Duration::from_millis(delay_ms)).await;
 }
 
+
+
+
+
 /// Custom random artificial delay between min_ms and max_ms
 pub async fn apply_custom_delay(min_ms: u64, max_ms: u64) {
     let delay_ms = rand::thread_rng().gen_range(min_ms..=max_ms);
