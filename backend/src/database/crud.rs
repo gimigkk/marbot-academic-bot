@@ -1063,8 +1063,18 @@ pub fn get_package_list_message() -> String {
     • Komunikasi Data dan Jaringan Komputer: *K3, P3*\n\
     • Sistem Informasi: *K2*\n\n\
     💡 *Cara pilih paket:*\n\
-    Ketik `#setkelas paket1` sampai `#setkelas paket5`"
+    Ketik `#setkelas paket1` sampai `#setkelas paket5`\n\n\
+    ℹ️ _Catatan: Keamanan Informasi (KI) tidak masuk paket karena bersifat opsional. Jika mengambil KI, atur terpisah dengan #setkelas ki <kode>_"
         .to_string()
+}
+
+pub fn is_keamanan_informasi(course_name: &str) -> bool {
+    let lower = course_name.trim().to_lowercase();
+    lower == "keamanan informasi" 
+        || lower == "ki" 
+        || lower == "kemin" 
+        || lower == "kaminfo" 
+        || lower == "kom1326"
 }
 
 pub async fn set_user_course_package(
@@ -1135,7 +1145,8 @@ pub async fn set_user_course_package(
         "✅ *BERHASIL MENGATUR PAKET {}*\n\n\
         Daftar kelas kamu telah diperbarui:\n\
         {}\n\n\
-        💡 _Ketik #mykelas untuk melihat seluruh status kelasmu._",
+        💡 _Ketik #mykelas untuk melihat seluruh status kelasmu._\n\
+        _ℹ️ Keamanan Informasi (KI) di luar paket. Atur terpisah jika ambil: #setkelas ki <kode>_",
         package_num,
         updated_courses.join("\n")
     );
@@ -1323,4 +1334,53 @@ pub async fn get_and_touch_api_key(pool: &PgPool, api_key: &str) -> Result<Optio
     .bind(api_key)
     .fetch_optional(pool)
     .await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_is_keamanan_informasi() {
+        assert!(is_keamanan_informasi("Keamanan Informasi"));
+        assert!(is_keamanan_informasi("keamanan informasi"));
+        assert!(is_keamanan_informasi("KI"));
+        assert!(is_keamanan_informasi("ki"));
+        assert!(is_keamanan_informasi("kemin"));
+        assert!(is_keamanan_informasi("kaminfo"));
+        assert!(is_keamanan_informasi("kom1326"));
+        assert!(is_keamanan_informasi("  Keamanan Informasi  "));
+
+        // Non-KI courses
+        assert!(!is_keamanan_informasi("Analisis Algoritme"));
+        assert!(!is_keamanan_informasi("Kecerdasan Buatan"));
+        assert!(!is_keamanan_informasi("Sistem Operasi"));
+        assert!(!is_keamanan_informasi("Sistem Informasi"));
+        assert!(!is_keamanan_informasi("Komunikasi Data dan Jaringan Komputer"));
+    }
+
+    #[test]
+    fn test_ki_todo_filtering_logic() {
+        let mut user_settings_without_ki = HashMap::new();
+        user_settings_without_ki.insert("Analisis Algoritme".to_string(), "k1,r1".to_string());
+        user_settings_without_ki.insert("Sistem Operasi".to_string(), "k1,p1".to_string());
+
+        let is_ki = is_keamanan_informasi("Keamanan Informasi");
+        let user_has_ki = user_settings_without_ki.keys().any(|k| is_keamanan_informasi(k));
+
+        // When user has NOT set KI, KI task must be hidden (false)
+        assert!(is_ki);
+        assert!(!user_has_ki);
+        let should_show_when_unset = !(is_ki && !user_has_ki);
+        assert!(!should_show_when_unset);
+
+        // When user HAS set KI, KI task must not be filtered out by the KI rule
+        let mut user_settings_with_ki = user_settings_without_ki.clone();
+        user_settings_with_ki.insert("Keamanan Informasi".to_string(), "k1".to_string());
+
+        let user_has_ki_now = user_settings_with_ki.keys().any(|k| is_keamanan_informasi(k));
+        assert!(user_has_ki_now);
+        let should_show_when_set = !(is_ki && !user_has_ki_now);
+        assert!(should_show_when_set);
+    }
 }

@@ -12,6 +12,7 @@ use crate::database::crud::{
     get_package_list_message,
     get_user_course_statuses,
     set_user_daily_preference,
+    is_keamanan_informasi,
 };
 
 use crate::models::{BotCommand, AssignmentWithCourse};
@@ -190,29 +191,43 @@ pub async fn handle_command(
                         )
                     } else {
                         let mut body = String::new();
+                        let mut ki_is_set = false;
                         
                         for status in statuses {
                             let matkul = sanitize_wa_md(&status.course_name);
+                            let is_ki = is_keamanan_informasi(&status.course_name);
 
                             match &status.parallel_code {
                                 Some(code) if !code.is_empty() => {
-                                  
+                                    if is_ki {
+                                        ki_is_set = true;
+                                    }
                                     body.push_str(&format!("✅ {}\n", matkul));
                                     body.push_str(&format!("*└─* Kelas: *{}*\n", code.to_uppercase()));
                                 }
                                 _ => {
-            
-                                    body.push_str(&format!("❌ {}\n", matkul));
-                                    body.push_str("*└─* Kelas: _(belum diset)_\n");
+                                    if is_ki {
+                                        body.push_str(&format!("⚪ {} _(Opsional)_\n", matkul));
+                                        body.push_str("*└─* Kelas: _(belum diset)_\n");
+                                    } else {
+                                        body.push_str(&format!("❌ {}\n", matkul));
+                                        body.push_str("*└─* Kelas: _(belum diset)_\n");
+                                    }
                                 }
                             }
             
                             body.push('\n');
                         }
 
+                        let ki_info = if ki_is_set {
+                            "ℹ️ *Keamanan Informasi (KI):* Kelas telah diatur. Tugas KI akan muncul di `#todo`.\n\n"
+                        } else {
+                            "ℹ️ *Keamanan Informasi (KI):* Matkul ini opsional (di luar paket KRS). Karena belum diset, tugas KI *tidak* muncul di `#todo`. Jika ambil, ketik: `#setkelas ki <kode>` (misal: `#setkelas ki k1`)\n\n"
+                        };
+
                         let response = format!(
-                            "⚙️ *SETTING KELAS* _{}_\n\n{}Ubah: `#setkelas paket<1-5>` atau `#setkelas <matkul> <kode>`",
-                            clean_name, body
+                            "⚙️ *SETTING KELAS* _{}_\n\n{}{}Ubah: `#setkelas paket<1-5>` atau `#setkelas <matkul> <kode>`",
+                            clean_name, body, ki_info
                         );
 
                         CommandResponse::Text(response)
@@ -277,9 +292,17 @@ pub async fn handle_command(
                     
             
                     let filtered_assignments: Vec<_> = assignments.into_iter().filter(|a| {
-                      
                         if a.is_completed { return false; }
-                   
+
+                        // Pengecualian Keamanan Informasi:
+                        // Matkul KI bersifat opsional & di luar paket KRS. Jika user belum mengatur kelas KI,
+                        // jangan tampilkan tugas KI di #todo.
+                        let is_ki = is_keamanan_informasi(&a.course_name);
+                        let user_has_ki = user_settings.keys().any(|k| is_keamanan_informasi(k));
+                        if is_ki && !user_has_ki {
+                            return false;
+                        }
+
                         if a.parallel_codes.is_empty() || a.parallel_codes.contains(&"all".to_string()) {
                             return true; 
                         }

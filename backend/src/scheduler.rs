@@ -727,6 +727,13 @@ async fn run_personal_daily_reminder(
                             return false;
                         }
 
+                        // Pengecualian Keamanan Informasi: jangan ingatkan jika belum diset
+                        let is_ki = crud::is_keamanan_informasi(&a.course_name);
+                        let user_has_ki = user_settings.keys().any(|k| crud::is_keamanan_informasi(k));
+                        if is_ki && !user_has_ki {
+                            return false;
+                        }
+
                         if a.parallel_codes.is_empty()
                             || a.parallel_codes.contains(&"all".to_string())
                         {
