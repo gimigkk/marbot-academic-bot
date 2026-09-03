@@ -32,7 +32,6 @@ pub mod pi;
 pub mod api;
 pub mod agriinfo;
 pub mod waha;
-pub mod lid_resolver;
 
 use crate::database::crud;
 use crate::parser::commands::{CommandResponse, AIForceMode};
@@ -361,19 +360,15 @@ async fn webhook(
 
     // ============= EXTRACT SENDER INFO =============
     let debug_group_id = std::env::var("DEBUG_GROUP_ID").ok();
-    let raw_chat_id = &payload.payload.from;
-    let resolved_chat_id = crate::lid_resolver::resolve_lid(raw_chat_id).await;
-    let chat_id = &resolved_chat_id;
+    let chat_id = &payload.payload.from;  
     
-    let raw_sender_phone = if raw_chat_id.ends_with("@g.us") {
+    let sender_phone = if chat_id.ends_with("@g.us") {
         payload.payload.participant
-            .as_deref()
-            .unwrap_or(raw_chat_id)
+            .as_ref()
+            .unwrap_or(chat_id)
     } else {
-        raw_chat_id
+        chat_id
     };
-    let resolved_sender_phone = crate::lid_resolver::resolve_lid(raw_sender_phone).await;
-    let sender_phone = &resolved_sender_phone;
     
     let sender_name = payload.payload.data
         .as_ref()
@@ -392,7 +387,7 @@ async fn webhook(
     let ipeng_numbers_env = std::env::var("IPENG_NUMBERS").unwrap_or_default();
     let is_ipeng = ipeng_numbers_env.split(',').any(|num| {
         let num = num.trim();
-        !num.is_empty() && (num == chat_id || num == sender_phone || num == raw_chat_id || num == raw_sender_phone)
+        !num.is_empty() && (num == chat_id || num == sender_phone)
     });
 
 

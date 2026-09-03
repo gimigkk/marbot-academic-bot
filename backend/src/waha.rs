@@ -15,13 +15,12 @@ pub struct ChatActionRequest {
 
 /// Send POST /api/sendSeen to WAHA to mark incoming message/chat as read
 pub async fn send_seen(chat_id: &str, message_id: Option<&str>) {
-    let resolved_chat_id = crate::lid_resolver::resolve_lid(chat_id).await;
     let waha_url = format!("{}/api/sendSeen", std::env::var("WAHA_URL").unwrap_or_else(|_| "http://waha:3000".to_string()));
     let api_key = std::env::var("WAHA_API_KEY").unwrap_or_else(|_| "devkey123".to_string());
     
     let payload = ChatActionRequest {
         session: "default".to_string(),
-        chat_id: resolved_chat_id,
+        chat_id: chat_id.to_string(),
         message_id: message_id.map(|s| s.to_string()),
     };
     
@@ -39,13 +38,12 @@ pub async fn send_seen(chat_id: &str, message_id: Option<&str>) {
 
 /// Send POST /api/startTyping to WAHA (best-effort, non-blocking on failure)
 pub async fn start_typing(chat_id: &str) {
-    let resolved_chat_id = crate::lid_resolver::resolve_lid(chat_id).await;
     let waha_url = format!("{}/api/startTyping", std::env::var("WAHA_URL").unwrap_or_else(|_| "http://waha:3000".to_string()));
     let api_key = std::env::var("WAHA_API_KEY").unwrap_or_else(|_| "devkey123".to_string());
     
     let payload = ChatActionRequest {
         session: "default".to_string(),
-        chat_id: resolved_chat_id,
+        chat_id: chat_id.to_string(),
         message_id: None,
     };
     
@@ -63,13 +61,12 @@ pub async fn start_typing(chat_id: &str) {
 
 /// Send POST /api/stopTyping to WAHA (best-effort)
 pub async fn stop_typing(chat_id: &str) {
-    let resolved_chat_id = crate::lid_resolver::resolve_lid(chat_id).await;
     let waha_url = format!("{}/api/stopTyping", std::env::var("WAHA_URL").unwrap_or_else(|_| "http://waha:3000".to_string()));
     let api_key = std::env::var("WAHA_API_KEY").unwrap_or_else(|_| "devkey123".to_string());
     
     let payload = ChatActionRequest {
         session: "default".to_string(),
-        chat_id: resolved_chat_id,
+        chat_id: chat_id.to_string(),
         message_id: None,
     };
     
@@ -116,26 +113,15 @@ pub async fn send_raw_text(
     reply_to: Option<String>, 
     mentions: Option<Vec<String>>
 ) -> Result<(), String> {
-    let resolved_chat_id = crate::lid_resolver::resolve_lid(chat_id).await;
-    let resolved_mentions = if let Some(mention_list) = mentions {
-        let mut list = Vec::new();
-        for m in mention_list {
-            list.push(crate::lid_resolver::resolve_lid(&m).await);
-        }
-        Some(list)
-    } else {
-        None
-    };
-
     let waha_url = format!("{}/api/sendText", std::env::var("WAHA_URL").unwrap_or_else(|_| "http://waha:3000".to_string()));
     let api_key = std::env::var("WAHA_API_KEY").unwrap_or_else(|_| "devkey123".to_string());
     
     let payload = SendTextRequest { 
-        chat_id: resolved_chat_id, 
+        chat_id: chat_id.to_string(), 
         text: text.to_string(), 
         session: "default".to_string(),
         reply_to,
-        mentions: resolved_mentions,
+        mentions,
     };
     
     let client = reqwest::Client::new();
