@@ -32,6 +32,7 @@ pub mod pi;
 pub mod api;
 pub mod agriinfo;
 pub mod waha;
+pub mod attendance;
 
 use crate::database::crud;
 use crate::parser::commands::{CommandResponse, AIForceMode};
@@ -306,14 +307,15 @@ async fn main() {
         .merge(dashboard_routes)
         .with_state(state);
 
-    let port = 3000;
-    let addr = SocketAddr::from(([0, 0, 0, 0], port));
+    let addr: SocketAddr = std::env::var("BIND_ADDR")
+        .unwrap_or_else(|_| "0.0.0.0:3000".to_string())
+        .parse().expect("BIND_ADDR must be an IP:port socket address");
 
     println!("\x1b[1;30m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\x1b[0m");
     println!(" 🚀 \x1b[1;32mMARBOT IS ONLINE!\x1b[0m");
-    println!("    📡 Listening on\t: \x1b[36mhttp://0.0.0.0:{}\x1b[0m", port);
-    println!("    📍 Webhook URL\t: \x1b[36mhttp://localhost:{}/webhook\x1b[0m", port);
-    println!("    🎨 Dashboard\t: \x1b[36mhttp://43.133.129.209:{}/tui\x1b[0m", port);
+    println!("    📡 Listening on\t: \x1b[36mhttp://{}\x1b[0m", addr);
+    println!("    📍 Webhook URL\t: \x1b[36mhttp://{}/webhook\x1b[0m", addr);
+    println!("    🎨 Dashboard\t: \x1b[36mhttp://{}/tui\x1b[0m", addr);
     println!("\x1b[1;30m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\x1b[0m");
     println!("\nWaiting for incoming messages...\n");
 
@@ -687,6 +689,7 @@ async fn webhook(
                 BotCommand::SetKelasPaket(_) => "setkelas",
                 BotCommand::MyKelas => "mykelas",
                 BotCommand::Daily(_) => "daily",
+                BotCommand::RemindAbsen(_) => "remind-absen",
                 BotCommand::MissingArgument(_) => "error",
                 BotCommand::UnknownCommand(_) => "unknown",
                 BotCommand::Update(_, _) => "ai",

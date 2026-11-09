@@ -1,15 +1,15 @@
 use axum::{
     extract::Request,
-    http::{StatusCode, HeaderValue},
+    http::{HeaderValue, StatusCode},
     middleware::Next,
     response::{IntoResponse, Response},
 };
 use dashmap::DashMap;
 use std::sync::Arc;
-use std::time::{Instant, Duration};
+use std::time::{Duration, Instant};
 
 const MAX_REQUESTS: u32 = 60; // requests per window
-const WINDOW_SECS: u64 = 60;  // 1 minute sliding window
+const WINDOW_SECS: u64 = 60; // 1 minute fixed window per verified user
 
 /// Lock-free concurrent rate limit map: user_id → (count, window_reset_instant)
 pub type ApiRateLimiter = Arc<DashMap<String, (u32, Instant)>>;
@@ -54,7 +54,7 @@ pub async fn rate_limit_middleware(
             *count = 1;
             *reset_time = now + window;
         } else {
-            *count += 1;
+            *count = count.saturating_add(1);
         }
 
         let remaining = MAX_REQUESTS.saturating_sub(*count);
@@ -69,11 +69,22 @@ pub async fn rate_limit_middleware(
         if let Ok(v) = HeaderValue::from_str(&reset_secs.to_string()) {
             headers.insert("X-RateLimit-Reset", v);
         }
-        return Ok((StatusCode::TOO_MANY_REQUESTS, headers, "Rate limit exceeded.").into_response());
+        headers.insert(
+            "Retry-After",
+            HeaderValue::from_str(&reset_secs.max(1).to_string()).unwrap(),
+        );
+        headers.insert("Cache-Control", HeaderValue::from_static("no-store"));
+        return Ok((
+            StatusCode::TOO_MANY_REQUESTS,
+            headers,
+            "Rate limit exceeded.",
+        )
+            .into_response());
     }
 
     let mut res = next.run(req).await;
-    res.headers_mut().insert("X-RateLimit-Limit", HeaderValue::from_static("60"));
+    res.headers_mut()
+        .insert("X-RateLimit-Limit", HeaderValue::from_static("60"));
     if let Ok(v) = HeaderValue::from_str(&remaining.to_string()) {
         res.headers_mut().insert("X-RateLimit-Remaining", v);
     }
