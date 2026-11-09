@@ -470,8 +470,10 @@ per batch. Busy periods or outages can delay checks. Notifications name the
 course and prompt the user to check/submit attendance without showing counters.
 
 For each course code, class type and parallel class, an increase in
-`JumlahTidakHadir` produces one private reminder. Unchanged counts produce no
-further messages. Corrections/decreases become the next baseline; a later
+both `JumlahTidakHadir` and `JumlahPertemuan` produces one private reminder.
+Corrections to old meetings without an increased meeting total stay silent.
+Unchanged counts produce no further messages.
+Corrections/decreases become the next baseline; a later
 increase can trigger another reminder. New classes establish a silent baseline.
 Missing classes and empty/error responses do not erase existing baselines.
 A decrease in the meeting total is treated as a reset and does not trigger an

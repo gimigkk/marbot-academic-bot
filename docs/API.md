@@ -106,8 +106,9 @@ Without a subscription, the response is still HTTP 200:
 `missed` mirrors `JumlahTidakHadir`: it includes both recorded absences and
 unrecorded attendance. It does not establish physical absence or forgetting to
 submit. First enrollment and new classes are silent; increases trigger one
-private reminder, corrections lower the baseline, and unchanged counts do not
-repeat messages. Delivery gets at most one attempt, so an uncertain/failed send
+private reminder only when both missed attendance and meeting totals increase.
+Corrections to existing meetings update the baseline silently. Unchanged counts
+do not repeat messages. Delivery gets at most one attempt, so an uncertain/failed send
 can lose a reminder. `#remind-absen off` deletes your subscription and stored
 reminders; already claimed sends may complete.
 

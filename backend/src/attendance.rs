@@ -139,7 +139,7 @@ pub fn compare(previous: &Snapshot, current: &Snapshot) -> Vec<Change> {
         .iter()
         .filter_map(|(key, now)| {
             let old = previous.get(key)?; // A new class establishes a silent baseline.
-            (now.missed > old.missed && now.meetings >= old.meetings).then(|| Change {
+            (now.missed > old.missed && now.meetings > old.meetings).then(|| Change {
                 course: now.course.clone(),
                 class: now.class.clone(),
                 previous: old.missed,

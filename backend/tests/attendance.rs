@@ -36,9 +36,14 @@ fn nim_slots_are_stable_spread_out_and_adapt_at_boundaries() {
         next_poll_at(377902, next) - next,
         chrono::Duration::minutes(15)
     );
-    let night = chrono::DateTime::parse_from_rfc3339("2026-11-09T19:00:00+07:00").unwrap().to_utc();
+    let night = chrono::DateTime::parse_from_rfc3339("2026-11-09T19:00:00+07:00")
+        .unwrap()
+        .to_utc();
     let next = next_poll_at(377902, night);
-    assert_eq!(next_poll_at(377902, next) - next, chrono::Duration::hours(1));
+    assert_eq!(
+        next_poll_at(377902, next) - next,
+        chrono::Duration::hours(1)
+    );
     let slots: std::collections::BTreeSet<_> = (1..=100).map(|id| next_poll_at(id, now)).collect();
     assert!(slots.len() > 50);
     for time in ["07:59:59", "11:59:59", "12:59:59", "16:59:59", "23:59:59"] {
@@ -59,6 +64,23 @@ fn recap(missed: u32, parallel: &str) -> serde_json::Value {
         "JenisKelas":"K","KelasParalel":parallel,"JumlahHadir":5,
         "JumlahTidakHadir":missed,"JumlahPertemuan":5+missed
     }]}])
+}
+
+#[test]
+fn correcting_an_old_meeting_is_silent_but_a_later_new_meeting_can_notify() {
+    let previous = parse_snapshot(recap(1, "1")).unwrap();
+    let mut correction = recap(2, "1");
+    correction[0]["DetailRekap"][0]["JumlahHadir"] = json!(4);
+    correction[0]["DetailRekap"][0]["JumlahPertemuan"] = json!(6);
+    let corrected = parse_snapshot(correction).unwrap();
+    assert!(compare(&previous, &corrected).is_empty());
+
+    let mut next_meeting = recap(3, "1");
+    next_meeting[0]["DetailRekap"][0]["JumlahHadir"] = json!(4);
+    next_meeting[0]["DetailRekap"][0]["JumlahPertemuan"] = json!(7);
+    let changes = compare(&corrected, &parse_snapshot(next_meeting).unwrap());
+    assert_eq!(changes.len(), 1);
+    assert_eq!((changes[0].previous, changes[0].current), (2, 3));
 }
 
 #[test]
