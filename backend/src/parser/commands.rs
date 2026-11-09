@@ -866,9 +866,6 @@ pub async fn handle_command(
         }
 
         BotCommand::ApiKey(args) => {
-            if user_phone != chat_id || !(chat_id.ends_with("@c.us") || chat_id.ends_with("@s.whatsapp.net") || chat_id.ends_with("@lid")) {
-                return CommandResponse::Text("🔒 *API Key Bersifat Rahasia*\n\nKirim #apikey lewat chat pribadi Maarbot ya, jangan di grup.".to_string());
-            }
             logger.log(&format!("🔑 ApiKey command received from {}", user_phone));
 
             let mut parts = args.split_whitespace();
@@ -1026,32 +1023,34 @@ pub async fn handle_command(
             
             let docs = format!(
                 "📚 *MARBOT REST API DOCS*\n\n\
-                *Header wajib:*\n\
-                `Authorization: Bearer <api_key_marbot>`\n\
-                _Buat key lewat chat pribadi: #apikey new <nama>._\n\n\
-                *1. Tugas pribadi*\n\
-                `GET {0}/api/v1/assignments`\n\
-                Query opsional: timeframe=today|week|all, course=<nama/alias>, parallel=<kelas>. Maksimal 100 karakter per nilai. Timeframe lain dianggap all; week berarti hari ini sampai 7 hari ke depan (WIB).\n\n\
-                *2. Rekap absensi tersimpan*\n\
-                `GET {0}/api/v1/attendance`\n\
-                Tidak menerima query, NIM, mahasiswaId, atau userId. Identitas selalu dari pemilik key.\n\
-                Aktifkan dulu lewat chat pribadi: #remind-absen <NIM sendiri>. Dicek tiap 15 menit pada 08.00–12.00 dan 13.00–17.00 WIB, di luar itu tiap 1 jam. Waktu cek tiap NIM disebar; API membaca data tersimpan, bukan melakukan cek langsung ke IPB.\n\
-                Data: enabled, nim, last_checked_at (UTC), classes. Tiap kelas: course, class, missed, meetings. Jika belum aktif: enabled=false, nim/last_checked_at=null, classes=[].\n\n\
-                *Format respons:*\n\
-                Sukses: {{\"success\":true,\"data\":...}}\n\
-                Error absensi: {{\"success\":false,\"data\":null,\"error\":\"...\"}}. Error tugas memakai data: [].\n\n\
-                *Contoh cURL:*\n\
-                curl -H \"Authorization: Bearer marbot_sk_...\" \"{0}/api/v1/attendance\"\n\n\
-                *Status & batas:*\n\
-                200 sukses; 400 query tidak valid; 401 key salah/tidak ada; 405 metode tidak didukung; 429 terlalu banyak request; 500 gangguan database. Error middleware dapat berupa body kosong/teks.\n\
-                60 request/menit per pengguna untuk semua endpoint dan semua key miliknya, per proses bot. Header X-RateLimit-Limit/Remaining/Reset (detik tersisa); 429 menyertakan Retry-After.\n\n\
-                *Keamanan:*\n\
-                API read-only dan hanya data milik pemegang key. Simpan key secara rahasia, gunakan HTTPS, dan jangan cache respons. Hapus key lewat #apikey remove <nama>.\n\
-                Tidak ada API untuk submit absen atau memilih mahasiswa lain. Nilai missed tidak membedakan lupa isi dengan tercatat tidak hadir.\n\n\
+                *Endpoint:*\n`GET {}/api/v1/assignments`\n\n\
+                *Headers:*\n\
+                `Authorization: Bearer <api_key>`\n\n\
+                *Query Params (Opsional):*\n\
+                - `timeframe`: Filter waktu (`today` | `week` | `all`)\n\
+                - `course`: Cari matkul berdasarkan nama/alias\n\
+                - `parallel`: Filter spesifik kelas paralel\n\n\
+                *Contoh Penggunaan (cURL):*\n\
+                ```bash\n\
+                curl -H \"Authorization: Bearer marbot_sk_...\" \\\n\
+                       \"{}/api/v1/assignments?course=pemrog&parallel=p2\"\n\
+                ```\n\n\
+                *Rate Limit:*\n\
+                60 request / menit\n\n\
+                _API Marbot bersifat read-only. Integrasikan tugas-tugas kamu ke Notion, Google Calendar, atau bot kamu sendiri!_\n\n\
+                *Absensi pribadi:*\n\
+                `GET {}/api/v1/attendance`\n\
+                Aktifkan lewat chat pribadi: #remind-absen <NIM sendiri>. Endpoint membaca rekap tersimpan milik pemegang key; tidak menerima query NIM, mahasiswaId, atau userId.\n\
+                Polling 15 menit pada 08.00–12.00 dan 13.00–17.00 WIB, di luar itu 1 jam; waktu tiap NIM disebar. API tidak memicu polling langsung.\n\
+                Data: enabled, nim, last_checked_at (UTC), classes. Tiap kelas: course, class, missed, meetings. Jika belum aktif: enabled=false, nim/last_checked_at=null, classes=[].\n\
+                Sukses: {{\"success\":true,\"data\":...}}. Error absensi: {{\"success\":false,\"data\":null,\"error\":\"...\"}}.\n\
+                Status: 200 sukses, 400 query ditolak, 401 key tidak valid, 405 metode tidak didukung, 429 limit tercapai, 500 gangguan server. Error middleware dapat berupa teks/body kosong.\n\
+                Mengikuti rate limit API yang sudah ada: 60 request/menit per pengguna, gabungan seluruh key dan endpoint per proses. X-RateLimit-Reset berisi detik sampai reset.\n\
+                Respons absensi memakai Cache-Control: no-store; simpan key dengan aman dan gunakan HTTPS. Nilai missed tidak membedakan lupa isi dengan tercatat tidak hadir.\n\
                 _#remind-absen off untuk berhenti dan hapus data pengingat._",
-                base_url
+                base_url, base_url, base_url
             );
-
+            
             CommandResponse::Text(docs)
         }
 
@@ -1149,7 +1148,7 @@ pub async fn handle_command(
 }
 
 fn build_api_key_usage_message() -> String {
-    "🔑 *API KEY HELP*\n\n- #apikey new <nama> — buat key\n- #apikey remove <nama> — hapus key\n- #apikey list — lihat daftar key\n- #apikey check <nama> — cek metadata\n\nKey bisa membaca tugas dan rekap absensi tersimpan milik kamu sendiri.\n_Aktifkan absensi lewat chat pribadi: #remind-absen <NIM>._\n_Ketik #apidocs untuk endpoint, contoh respons, dan rate limit._".to_string()
+    "🔑 *API KEY HELP*\n\nCommands:\n- #apikey new <name>  — create key\n- #apikey remove <name> — remove key\n- #apikey list — list keys\n- #apikey check <name> — show metadata\n\nUse #apidocs for REST usage.\n\nKey juga bisa membaca rekap absensi tersimpan milik kamu sendiri. Aktifkan lewat chat pribadi: #remind-absen <NIM>.".to_string()
 }
 
 fn generate_api_key_secret() -> String {

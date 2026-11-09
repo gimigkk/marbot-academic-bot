@@ -250,22 +250,6 @@ async fn durable_opt_in_polling_and_single_delivery() {
         .await
         .unwrap();
     assert_eq!(count, 1); // group command cannot disable a private subscription
-    let (logs, _rx) = tokio::sync::mpsc::unbounded_channel();
-    let logger = marbot::tui::JobLogger::new("fixture".to_string(), logs);
-    let reply = marbot::parser::commands::handle_command(
-        marbot::models::BotCommand::ApiKey("new fixture".to_string()),
-        user,
-        "Fixture",
-        "group@g.us",
-        &pool,
-        &logger,
-        None,
-    )
-    .await;
-    assert!(
-        matches!(reply, marbot::parser::commands::CommandResponse::Text(text) if text.contains("chat pribadi") && !text.contains("marbot_sk_"))
-    );
-
     // Exercise the real key-auth and rate-limit middleware over local HTTP.
     let keys = auth::new_api_key_cache();
     keys.insert("fixture-key".into(), user.into()).await;
@@ -372,7 +356,8 @@ async fn durable_opt_in_polling_and_single_delivery() {
         blocked.status().as_u16(),
         StatusCode::TOO_MANY_REQUESTS.as_u16()
     );
-    assert!(blocked.headers().contains_key("retry-after"));
+    assert_eq!(blocked.headers()["x-ratelimit-limit"], "60");
+    assert_eq!(blocked.headers()["x-ratelimit-remaining"], "0");
     api_server.abort();
 
     // Scheduled polls honor persisted due times, deduplicate NIMs, and cannot

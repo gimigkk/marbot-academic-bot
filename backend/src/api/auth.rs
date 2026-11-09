@@ -1,8 +1,13 @@
-use axum::{extract::Request, http::StatusCode, middleware::Next, response::Response};
-use moka::future::Cache;
-use sqlx::PgPool;
+use axum::{
+    extract::Request,
+    http::StatusCode,
+    middleware::Next,
+    response::Response,
+};
 use std::sync::Arc;
 use std::time::Duration;
+use moka::future::Cache;
+use sqlx::PgPool;
 
 /// In-memory cache: api_key → user_id (5 min TTL)
 /// This means last_used_at is effectively updated at most once per 5 min per key (on cache miss),
@@ -56,10 +61,5 @@ pub async fn auth_middleware(
 
     // 3. Inject validated user_id into request extensions for downstream handlers
     req.extensions_mut().insert(user_id);
-    let mut response = next.run(req).await;
-    response.headers_mut().insert(
-        "Cache-Control",
-        axum::http::HeaderValue::from_static("no-store"),
-    );
-    Ok(response)
+    Ok(next.run(req).await)
 }

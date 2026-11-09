@@ -4,10 +4,6 @@ Base URL: `https://<your-bot-host>/api/v1`. Use HTTPS outside local development.
 All endpoints are read-only (`GET`; `HEAD` is also supported). This is the
 **Marbot API**, not the university's API.
 
-For a loopback-only local process, set `BIND_ADDR=127.0.0.1:3300` and
-`APP_URL=http://127.0.0.1:3300`. Without `BIND_ADDR`, the existing deployment
-default remains `0.0.0.0:3000`.
-
 ## API keys
 
 Manage keys in a private WhatsApp chat with Maarbot:
@@ -20,8 +16,8 @@ Manage keys in a private WhatsApp chat with Maarbot:
 | `#apikey remove <name>` | Delete your named key |
 | `#apidocs` | Show the API guide in chat |
 
-Send `Authorization: Bearer <marbot_sk_...>` on every request. Key management is
-blocked in groups/channels so secrets are not sent there. Keep keys out of URLs,
+Send `Authorization: Bearer <marbot_sk_...>` on every request. Manage keys in
+private chat to avoid exposing them. Keep keys out of URLs,
 client-side public code, screenshots, and shared logs.
 
 Each key resolves to its owner. Different keys from the same owner access the
@@ -120,10 +116,10 @@ replicas have independent counters. Authentication happens before this limit.
 WhatsApp commands also retain the bot's existing 5-commands/30-seconds limit.
 
 Authenticated responses include `X-RateLimit-Limit`, `X-RateLimit-Remaining`, and
-`X-RateLimit-Reset` (seconds until reset, not an epoch timestamp). HTTP 429 also
-includes `Retry-After`; wait that many seconds before trying again.
+`X-RateLimit-Reset` (seconds until reset, not an epoch timestamp). After HTTP 429,
+wait for that window to reset before trying again.
 
-Authenticated responses use `Cache-Control: no-store`. Do not put responses in a
+Attendance responses use `Cache-Control: no-store`. Do not put responses in a
 shared cache or log their private contents. Attendance responses vary by
 Authorization.
 
