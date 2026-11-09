@@ -886,11 +886,10 @@ pub async fn set_user_course_parallel(
             let course_name_lower = c.name.to_lowercase();
             
             let special_courses = vec![
-                "pemrograman", 
-                "struktur data", 
-                "metode kuantitatif", 
-                "rekayasa perangkat lunak", 
-                "desain pengalaman pengguna"
+                "analisis algoritme", 
+                "komunikasi data dan jaringan komputer", 
+                "kecerdasan buatan", 
+                "sistem operasi"
             ];
 
             let is_special_course = special_courses.iter().any(|k| course_name_lower.contains(k));
@@ -983,6 +982,176 @@ pub async fn set_user_course_parallel(
             ))
         }
     }
+}
+
+pub struct CoursePackageItem {
+    pub course_name: &'static str,
+    pub parallel_code: &'static str,
+}
+
+pub fn get_courses_for_package(package_num: u8) -> Option<&'static [CoursePackageItem]> {
+    match package_num {
+        1 => Some(&[
+            CoursePackageItem { course_name: "Analisis Algoritme", parallel_code: "k1,r1" },
+            CoursePackageItem { course_name: "Kecerdasan Buatan", parallel_code: "k1,p1" },
+            CoursePackageItem { course_name: "Sistem Operasi", parallel_code: "k1,p1" },
+            CoursePackageItem { course_name: "Komunikasi Data dan Jaringan Komputer", parallel_code: "k1,p1" },
+            CoursePackageItem { course_name: "Sistem Informasi", parallel_code: "k1" },
+        ]),
+        2 => Some(&[
+            CoursePackageItem { course_name: "Analisis Algoritme", parallel_code: "k2,r2" },
+            CoursePackageItem { course_name: "Kecerdasan Buatan", parallel_code: "k2,p2" },
+            CoursePackageItem { course_name: "Sistem Operasi", parallel_code: "k2,p2" },
+            CoursePackageItem { course_name: "Komunikasi Data dan Jaringan Komputer", parallel_code: "k2,p2" },
+            CoursePackageItem { course_name: "Sistem Informasi", parallel_code: "k1" },
+        ]),
+        3 => Some(&[
+            CoursePackageItem { course_name: "Analisis Algoritme", parallel_code: "k2,r2" },
+            CoursePackageItem { course_name: "Kecerdasan Buatan", parallel_code: "k2,p2" },
+            CoursePackageItem { course_name: "Sistem Operasi", parallel_code: "k2,p2" },
+            CoursePackageItem { course_name: "Komunikasi Data dan Jaringan Komputer", parallel_code: "k2,p2" },
+            CoursePackageItem { course_name: "Sistem Informasi", parallel_code: "k2" },
+        ]),
+        4 => Some(&[
+            CoursePackageItem { course_name: "Analisis Algoritme", parallel_code: "k1,r1" },
+            CoursePackageItem { course_name: "Kecerdasan Buatan", parallel_code: "k1,p3" },
+            CoursePackageItem { course_name: "Sistem Operasi", parallel_code: "k3,p3" },
+            CoursePackageItem { course_name: "Komunikasi Data dan Jaringan Komputer", parallel_code: "k3,p3" },
+            CoursePackageItem { course_name: "Sistem Informasi", parallel_code: "k2" },
+        ]),
+        5 => Some(&[
+            CoursePackageItem { course_name: "Analisis Algoritme", parallel_code: "k2,r2" },
+            CoursePackageItem { course_name: "Kecerdasan Buatan", parallel_code: "k2,p3" },
+            CoursePackageItem { course_name: "Sistem Operasi", parallel_code: "k3,p3" },
+            CoursePackageItem { course_name: "Komunikasi Data dan Jaringan Komputer", parallel_code: "k3,p3" },
+            CoursePackageItem { course_name: "Sistem Informasi", parallel_code: "k2" },
+        ]),
+        _ => None,
+    }
+}
+
+pub fn get_package_list_message() -> String {
+    "📦 *DAFTAR PAKET KELAS (KRS)*\n\n\
+    1️⃣ *Paket 1*\n\
+    • Analisis Algoritme: *K1, R1*\n\
+    • Kecerdasan Buatan: *K1, P1*\n\
+    • Sistem Operasi: *K1, P1*\n\
+    • Komunikasi Data dan Jaringan Komputer: *K1, P1*\n\
+    • Sistem Informasi: *K1*\n\n\
+    2️⃣ *Paket 2*\n\
+    • Analisis Algoritme: *K2, R2*\n\
+    • Kecerdasan Buatan: *K2, P2*\n\
+    • Sistem Operasi: *K2, P2*\n\
+    • Komunikasi Data dan Jaringan Komputer: *K2, P2*\n\
+    • Sistem Informasi: *K1*\n\n\
+    3️⃣ *Paket 3*\n\
+    • Analisis Algoritme: *K2, R2*\n\
+    • Kecerdasan Buatan: *K2, P2*\n\
+    • Sistem Operasi: *K2, P2*\n\
+    • Komunikasi Data dan Jaringan Komputer: *K2, P2*\n\
+    • Sistem Informasi: *K2*\n\n\
+    4️⃣ *Paket 4*\n\
+    • Analisis Algoritme: *K1, R1*\n\
+    • Kecerdasan Buatan: *K1, P3*\n\
+    • Sistem Operasi: *K3, P3*\n\
+    • Komunikasi Data dan Jaringan Komputer: *K3, P3*\n\
+    • Sistem Informasi: *K2*\n\n\
+    5️⃣ *Paket 5*\n\
+    • Analisis Algoritme: *K2, R2*\n\
+    • Kecerdasan Buatan: *K2, P3*\n\
+    • Sistem Operasi: *K3, P3*\n\
+    • Komunikasi Data dan Jaringan Komputer: *K3, P3*\n\
+    • Sistem Informasi: *K2*\n\n\
+    💡 *Cara pilih paket:*\n\
+    Ketik `#setkelas paket1` sampai `#setkelas paket5`\n\n\
+    ℹ️ _Catatan: Keamanan Informasi (KI) tidak masuk paket karena bersifat opsional. Jika mengambil KI, atur terpisah dengan #setkelas ki <kode>_"
+        .to_string()
+}
+
+pub fn is_keamanan_informasi(course_name: &str) -> bool {
+    let lower = course_name.trim().to_lowercase();
+    lower == "keamanan informasi" 
+        || lower == "ki" 
+        || lower == "kemin" 
+        || lower == "kaminfo" 
+        || lower == "kom1326"
+}
+
+pub async fn set_user_course_package(
+    pool: &PgPool,
+    user_id: &str,
+    package_num: u8,
+) -> Result<String, sqlx::Error> {
+    let package_items = match get_courses_for_package(package_num) {
+        Some(items) => items,
+        None => {
+            return Ok(format!(
+                "❌ *Paket {} tidak valid!*\n\nPilihan paket yang tersedia adalah *Paket 1* s.d. *Paket 5*.\n\n{}",
+                package_num,
+                get_package_list_message()
+            ));
+        }
+    };
+
+    let mut tx = pool.begin().await?;
+    let mut updated_courses = Vec::new();
+
+    for item in package_items {
+        let course = get_course_by_name_or_alias(pool, item.course_name).await?;
+        let course_id = match course {
+            Some(c) => c.id,
+            None => {
+                let new_id = uuid::Uuid::new_v4();
+                sqlx::query(
+                    "INSERT INTO courses (id, name) VALUES ($1, $2) ON CONFLICT (name) DO NOTHING"
+                )
+                .bind(new_id)
+                .bind(item.course_name)
+                .execute(&mut *tx)
+                .await?;
+
+                let fetched: (uuid::Uuid,) = sqlx::query_as(
+                    "SELECT id FROM courses WHERE LOWER(name) = LOWER($1) LIMIT 1"
+                )
+                .bind(item.course_name)
+                .fetch_one(&mut *tx)
+                .await?;
+                
+                fetched.0
+            }
+        };
+
+        sqlx::query(
+            r#"
+            INSERT INTO user_course_settings (user_id, course_id, parallel_code)
+            VALUES ($1, $2, $3)
+            ON CONFLICT (user_id, course_id) 
+            DO UPDATE SET parallel_code = $3, created_at = NOW()
+            "#
+        )
+        .bind(user_id)
+        .bind(course_id)
+        .bind(item.parallel_code)
+        .execute(&mut *tx)
+        .await?;
+
+        let display_code = item.parallel_code.to_uppercase();
+        updated_courses.push(format!("• *{}* : *{}*", item.course_name, display_code));
+    }
+
+    tx.commit().await?;
+
+    let response = format!(
+        "✅ *BERHASIL MENGATUR PAKET {}*\n\n\
+        Daftar kelas kamu telah diperbarui:\n\
+        {}\n\n\
+        💡 _Ketik #mykelas untuk melihat seluruh status kelasmu._\n\
+        _ℹ️ Keamanan Informasi (KI) di luar paket. Atur terpisah jika ambil: #setkelas ki <kode>_",
+        package_num,
+        updated_courses.join("\n")
+    );
+
+    Ok(response)
 }
 
 pub async fn get_user_course_statuses(
@@ -1165,4 +1334,53 @@ pub async fn get_and_touch_api_key(pool: &PgPool, api_key: &str) -> Result<Optio
     .bind(api_key)
     .fetch_optional(pool)
     .await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_is_keamanan_informasi() {
+        assert!(is_keamanan_informasi("Keamanan Informasi"));
+        assert!(is_keamanan_informasi("keamanan informasi"));
+        assert!(is_keamanan_informasi("KI"));
+        assert!(is_keamanan_informasi("ki"));
+        assert!(is_keamanan_informasi("kemin"));
+        assert!(is_keamanan_informasi("kaminfo"));
+        assert!(is_keamanan_informasi("kom1326"));
+        assert!(is_keamanan_informasi("  Keamanan Informasi  "));
+
+        // Non-KI courses
+        assert!(!is_keamanan_informasi("Analisis Algoritme"));
+        assert!(!is_keamanan_informasi("Kecerdasan Buatan"));
+        assert!(!is_keamanan_informasi("Sistem Operasi"));
+        assert!(!is_keamanan_informasi("Sistem Informasi"));
+        assert!(!is_keamanan_informasi("Komunikasi Data dan Jaringan Komputer"));
+    }
+
+    #[test]
+    fn test_ki_todo_filtering_logic() {
+        let mut user_settings_without_ki = HashMap::new();
+        user_settings_without_ki.insert("Analisis Algoritme".to_string(), "k1,r1".to_string());
+        user_settings_without_ki.insert("Sistem Operasi".to_string(), "k1,p1".to_string());
+
+        let is_ki = is_keamanan_informasi("Keamanan Informasi");
+        let user_has_ki = user_settings_without_ki.keys().any(|k| is_keamanan_informasi(k));
+
+        // When user has NOT set KI, KI task must be hidden (false)
+        assert!(is_ki);
+        assert!(!user_has_ki);
+        let should_show_when_unset = !(is_ki && !user_has_ki);
+        assert!(!should_show_when_unset);
+
+        // When user HAS set KI, KI task must not be filtered out by the KI rule
+        let mut user_settings_with_ki = user_settings_without_ki.clone();
+        user_settings_with_ki.insert("Keamanan Informasi".to_string(), "k1".to_string());
+
+        let user_has_ki_now = user_settings_with_ki.keys().any(|k| is_keamanan_informasi(k));
+        assert!(user_has_ki_now);
+        let should_show_when_set = !(is_ki && !user_has_ki_now);
+        assert!(should_show_when_set);
+    }
 }

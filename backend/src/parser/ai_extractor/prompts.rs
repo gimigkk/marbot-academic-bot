@@ -310,7 +310,7 @@ Single-word titles are prohibited. Every title must have a distinguishing elemen
 
 ## PARALLEL CODES (array: ["k1", "k2", ...])
 
-Valid codes: k1-k4, p1-p4, r1-r4, all
+Valid codes: k1-k4, p1-p4, r1-r4, ai, fs, ds, none, all
 
 **Decision tree:**
 1. Does message contain "all"/"semua"/"everyone"? → Return ["all"], STOP
@@ -322,6 +322,10 @@ Valid codes: k1-k4, p1-p4, r1-r4, all
 - "K2 P2" → ["k2", "p2"]
 - "untuk k1" → ["k1"]
 - "semua" → ["all"]
+- "Asah AI" / "Jalur AI" → ["ai"]
+- "Asah FS" / "Fullstack" → ["fs"]
+- "Asah DS" / "Data Science" → ["ds"]
+- "Non-Asah" / "Reguler" → ["none"]
 - Course abbreviation: "GRAFKOM K2" → ["k2"]
 
 ## DESCRIPTION (MANDATORY, never null)
@@ -603,7 +607,7 @@ Only set `new_title` if user explicitly changes the title.
 
 ## PARALLEL CODES (array: ["k1", "k2", ...])
 
-Valid codes: k1-k4, p1-p4, r1-r4, all
+Valid codes: k1-k4, p1-p4, r1-r4, ai, fs, ds, none, all
 
 **CRITICAL: Extract from UPDATE MESSAGE, NOT from existing assignment**
 
@@ -618,6 +622,9 @@ Valid codes: k1-k4, p1-p4, r1-r4, all
 - "paralel K1" → ["k1"]
 - "semua kelas" → ["all"]
 - "diubah ke k3" → ["k3"]
+- "diubah ke AI" → ["ai"]
+- "diubah ke FS" → ["fs"]
+- "diubah ke DS" → ["ds"]
 
 **IMPORTANT:** Empty array means "no change to parallels", NOT "use existing parallels"
 
@@ -766,17 +773,15 @@ Think step-by-step:
 3. **TITLE SIMILARITY:** Does the title match the update context?
    - Generic titles ("Tugas RPL") often reference the only recent assignment
    - Specific identifiers (numbers) must match exactly
-   - Semantic similarity (quiz vs quiz, lab vs lab)
-
 4. **PARALLEL OVERLAP:** If parallels mentioned, do they overlap?
    - Empty parallels = match anything
    - [k1, k2] matches [k1] or [k2] or [k1, k2]
    - [k1] does NOT match [k3]
 
-5. **CONFIDENCE:** How certain are you?
-   - HIGH: Clear match (course + title + recent + parallels match)
-   - MEDIUM: Probable match (course matches, similar title)
-   - LOW: Uncertain (multiple candidates or weak signals)
+5. **CONFIDENCE & COURSE MATCHING:**
+   - HIGH: Clear match (course + title or quoted assignment + recent + parallels match)
+   - MEDIUM: Course matches (e.g. "Asah 2026"), and update applies to candidate assignment(s) of that course
+   - LOW: No matching course, or completely unrelated message
 
 ---
 
@@ -793,8 +798,9 @@ Return JSON with reasoning:
 ```
 
 **Rules:**
-- Only return ID with "high" confidence
-- If "medium" or "low" → return null (safer to not match)
+- Return the assignment_id for "high" or "medium" confidence matches (if candidate belongs to the specified course).
+- If an update applies to a course (e.g. "Asah 2026") with multiple assignments, match the most recent active candidate assignment for that course with "high" or "medium" confidence.
+- Only return "low" (with assignment_id: null) if no candidate matches the course or context.
 - Include your reasoning for transparency in a single line
 
 Think through the steps above, then provide your answer."#,

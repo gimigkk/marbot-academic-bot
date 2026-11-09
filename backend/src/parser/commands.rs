@@ -8,13 +8,11 @@ use crate::database::crud::{
     get_last_completed_assignment,
     delete_assignment,
     set_user_course_parallel,
+    set_user_course_package,
+    get_package_list_message,
     get_user_course_statuses,
     set_user_daily_preference,
-    create_api_key, list_api_keys_for_user,
-    delete_api_key_by_name,
-    get_course_by_name_or_alias,
-    get_all_courses_formatted, get_courses_map,
-    get_assignment_with_course_by_id,
+    is_keamanan_informasi,
 };
 
 use crate::models::{BotCommand, AssignmentWithCourse};
@@ -187,35 +185,49 @@ pub async fn handle_command(
                     if statuses.is_empty() {
                         CommandResponse::Text(
                             format!(
-                                "⚙️ *SETTING KELAS* _{}_\n\n_Belum ada data mata kuliah._\n\n_Tambah: #setkelas <matkul> <kode>_", 
+                                "⚙️ *SETTING KELAS* _{}_\n\n_Belum ada data mata kuliah._\n\n_Set paket: #setkelas paket1 s.d. paket5_\n_Set per matkul: #setkelas <matkul> <kode>_", 
                                 clean_name
                             )
                         )
                     } else {
                         let mut body = String::new();
+                        let mut ki_is_set = false;
                         
                         for status in statuses {
                             let matkul = sanitize_wa_md(&status.course_name);
+                            let is_ki = is_keamanan_informasi(&status.course_name);
 
                             match &status.parallel_code {
                                 Some(code) if !code.is_empty() => {
-                                  
+                                    if is_ki {
+                                        ki_is_set = true;
+                                    }
                                     body.push_str(&format!("✅ {}\n", matkul));
                                     body.push_str(&format!("*└─* Kelas: *{}*\n", code.to_uppercase()));
                                 }
                                 _ => {
-            
-                                    body.push_str(&format!("❌ {}\n", matkul));
-                                    body.push_str("*└─* Kelas: _(belum diset)_\n");
+                                    if is_ki {
+                                        body.push_str(&format!("⚪ {} _(Opsional)_\n", matkul));
+                                        body.push_str("*└─* Kelas: _(belum diset)_\n");
+                                    } else {
+                                        body.push_str(&format!("❌ {}\n", matkul));
+                                        body.push_str("*└─* Kelas: _(belum diset)_\n");
+                                    }
                                 }
                             }
             
                             body.push('\n');
                         }
 
+                        let ki_info = if ki_is_set {
+                            "ℹ️ *Keamanan Informasi (KI):* Kelas telah diatur. Tugas KI akan muncul di `#todo`.\n\n"
+                        } else {
+                            "ℹ️ *Keamanan Informasi (KI):* Matkul ini opsional (di luar paket KRS). Karena belum diset, tugas KI *tidak* muncul di `#todo`. Jika ambil, ketik: `#setkelas ki <kode>` (misal: `#setkelas ki k1`)\n\n"
+                        };
+
                         let response = format!(
-                            "⚙️ *SETTING KELAS* _{}_\n\n{}Ubah: `#setkelas <matkul> <kode>`",
-                            clean_name, body
+                            "⚙️ *SETTING KELAS* _{}_\n\n{}{}Ubah: `#setkelas paket<1-5>` atau `#setkelas <matkul> <kode>`",
+                            clean_name, body, ki_info
                         );
 
                         CommandResponse::Text(response)
@@ -230,12 +242,26 @@ pub async fn handle_command(
             }
         }
 
+        BotCommand::SetKelasPaket(package_num) => {
+            logger.log(&format!("⚙️ SetKelasPaket command: Paket {} from {}", package_num, user_phone));
+            
+            if (1..=5).contains(&package_num) {
+                match set_user_course_package(pool, user_phone, package_num).await {
+                    Ok(msg) => CommandResponse::Text(msg),
+                    Err(e) => {
+                        logger.log(&format!("❌ Error set kelas paket: {}", e));
+                        CommandResponse::Text("❌ Gagal mengatur paket kelas. Terjadi kesalahan server.".to_string())
+                    }
+                }
+            } else {
+                CommandResponse::Text(get_package_list_message())
+            }
+        }
+
         BotCommand::SetKelas(matkul, codes) => {
-         
             let codes_display = codes.join(" ");
             logger.log(&format!("⚙️ SetKelas command: {} [{}] from {}", matkul, codes_display, user_phone));
             
-           
             match set_user_course_parallel(pool, user_phone, &matkul, &codes).await {
                 Ok(msg) => CommandResponse::Text(msg),
                 Err(e) => {
@@ -266,9 +292,17 @@ pub async fn handle_command(
                     
             
                     let filtered_assignments: Vec<_> = assignments.into_iter().filter(|a| {
-                      
                         if a.is_completed { return false; }
-                   
+
+                        // Pengecualian Keamanan Informasi:
+                        // Matkul KI bersifat opsional & di luar paket KRS. Jika user belum mengatur kelas KI,
+                        // jangan tampilkan tugas KI di #todo.
+                        let is_ki = is_keamanan_informasi(&a.course_name);
+                        let user_has_ki = user_settings.keys().any(|k| is_keamanan_informasi(k));
+                        if is_ki && !user_has_ki {
+                            return false;
+                        }
+
                         if a.parallel_codes.is_empty() || a.parallel_codes.contains(&"all".to_string()) {
                             return true; 
                         }
@@ -803,7 +837,10 @@ pub async fn handle_command(
                 - #done <id> — tandai selesai\n\
                 - #undo — batalkan #done terakhir\n\n\
                 *Perintah Pengaturan:*\n\
+                - #setkelas paket<1-5> — atur kelas otomatis sesuai paket KRS (1-5)\n\
+                - #setkelas paket — lihat daftar detail isi paket 1-5\n\
                 - #setkelas <matkul> <kode1> <kode2> — atur kode pararel untuk matkul\n\
+                - #setkelas asah <track> — atur track Asah 2026 Dicoding (AI / FS / DS / NONE)\n\
                 - #mykelas — lihat settings kode parallel kamu\n\
                 - #daily <1/0> — aktifkan/matikan reminder #todo harian\n\n\
                 *Perintah Developer (Umum):*\n\
@@ -1033,12 +1070,18 @@ pub async fn handle_command(
                 }
                 "setkelas" => {
                     "⚠️ *Cara pakai yang benar:*\n\n\
-                    #setkelas <matkul> <kode1> [kode2]...\n\n\
+                    1. *Atur Paket KRS (Otomatis 5 Matkul):*\n\
+                    `#setkelas paket1` s.d. `#setkelas paket5`\n\
+                    _Ketik `#setkelas paket` untuk lihat daftar isi paket._\n\n\
+                    2. *Atur Per Mata Kuliah:*\n\
+                    `#setkelas <matkul> <kode1> [kode2]`\n\n\
                     *Contoh:*\n\
-                    - #setkelas pmk k1\n\
-                    - #setkelas algorithm c3\n\
-                    - #setkelas pemrog k1 p2\n\n\
-                    💡 _Gunakan nama matkul yang benar (lihat di #tugas)_"
+                    - #setkelas paket1\n\
+                    - #setkelas so k1 p1\n\
+                    - #setkelas analgor k1 r1\n\
+                    - #setkelas si k1\n\
+                    - #setkelas asah AI (pilihan track: AI, FS, DS, NONE)\n\n\
+                    💡 _Gunakan nama matkul yang benar (lihat di #mykelas)_"
                 }
                 "daily" => {
                     "⚠️ *Cara pakai yang benar:*\n\n\

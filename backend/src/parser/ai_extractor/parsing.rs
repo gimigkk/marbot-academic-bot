@@ -170,7 +170,7 @@ pub(super) fn parse_match_result(ai_text: &str, logger: &JobLogger) -> Result<Op
             logger.log(&format!("│ 🔍 Confidence : {}", confidence));
             logger.log(&format!("│ 📝 Reason     : {}", truncate_for_log(&reason_text, 60)));
             
-            if confidence == "high" {
+            if confidence == "high" || confidence == "medium" {
                 if let Some(id_str) = assignment_id {
                     match Uuid::parse_str(&id_str) {
                         Ok(uuid) => Ok(Some((uuid, reason_text))),
@@ -180,7 +180,7 @@ pub(super) fn parse_match_result(ai_text: &str, logger: &JobLogger) -> Result<Op
                         }
                     }
                 } else {
-                    logger.log("│ ⚠️ High confidence but no assignment_id provided");
+                    logger.log("│ ⚠️ Matched confidence but no assignment_id provided");
                     Ok(None)
                 }
             } else {

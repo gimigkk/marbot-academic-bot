@@ -30,16 +30,19 @@ pub mod tui;
 pub mod dashboard;
 pub mod pi;
 pub mod api;
+pub mod agriinfo;
+pub mod waha;
 
 use crate::database::crud;
 use crate::parser::commands::{CommandResponse, AIForceMode};
 use crate::tui::TuiState;
 
-use models::{MessageType, AIClassification, WebhookPayload, SendTextRequest, NewAssignment, UnrecognizedCategory, Assignment};
+use models::{MessageType, AIClassification, WebhookPayload, NewAssignment, UnrecognizedCategory, Assignment};
 use classifier::classify_message;
 use parser::commands::handle_command;
 use parser::ai_extractor::{extract_with_ai, check_duplicate_assignment}; 
 use whitelist::Whitelist;
+use crate::agriinfo::handler::process_agriinfo_message;
 
 static TUI_STATE: OnceCell<Arc<tui::state::TuiState>> = OnceCell::new();
 
@@ -387,6 +390,8 @@ async fn webhook(
         !num.is_empty() && (num == chat_id || num == sender_phone)
     });
 
+
+    
     if chat_id == &pi_group_id || is_ipeng {        // Buat job logger khusus TUI agar terpantau di dashboard
         let job_id = tui::generate_job_id();
         let logger = tui::JobLogger::new(job_id.clone(), state.log_tx.clone());
@@ -408,6 +413,31 @@ async fn webhook(
         return StatusCode::OK; 
     }
     // ============= END INTERCEPTOR PEKAN ILKOMERZ =============
+
+    // ============= [BARU] INTERCEPTOR AGRIINFORMATICS =============
+    let agriinfo_group_id = std::env::var("KADIV_AGRIINFOMATICS_GROUP").unwrap_or_default().trim().to_string();
+
+    if !agriinfo_group_id.is_empty() && chat_id == &agriinfo_group_id {
+        let job_id = tui::generate_job_id();
+        let logger = tui::JobLogger::new(job_id.clone(), state.log_tx.clone());
+        
+        if let Some(tui_state) = TUI_STATE.get() {
+            tui_state.create_job(
+                job_id.clone(),
+                chat_id.to_string(),
+                sender_name.to_string(),
+                Some(payload.payload.body.clone()),
+                None,
+                vec!["#agriinformatics".to_string()],
+            ).await;
+        }
+
+        // Process message via Agriinformatics handler
+        process_agriinfo_message(&state.pool, &payload.payload.body, chat_id, &logger).await;
+        
+        return StatusCode::OK; 
+    }
+    // ============= END INTERCEPTOR AGRIINFORMATICS =============
 
     // ============= EARLY CLARIFICATION HANDLER =============
     // Process BEFORE whitelist so clarification replies work from debug group
@@ -654,6 +684,7 @@ async fn webhook(
                 BotCommand::Delete(_) => "delete",
                 BotCommand::Expand(_) => "expand",
                 BotCommand::SetKelas(_, _) => "setkelas",
+                BotCommand::SetKelasPaket(_) => "setkelas",
                 BotCommand::MyKelas => "mykelas",
                 BotCommand::Daily(_) => "daily",
                 BotCommand::MissingArgument(_) => "error",
@@ -1767,55 +1798,17 @@ async fn handle_single_assignment(
 }
 
 
-// FITUR : FUNGSI HELPER DENGAN KIRIM REPLY DENGAN ID PESAN
+// FITUR : FUNGSI HELPER DENGAN KIRIM REPLY DENGAN ID PESAN, TYPING STATE & ARTIFICIAL DELAY
 async fn send_reply_with_id(chat_id: &str, text: &str, reply_to: Option<String>) -> Result<(), String> {
-    let waha_url = format!("{}/api/sendText", std::env::var("WAHA_URL").unwrap_or_else(|_| "http://waha:3000".to_string()));
-    let api_key = std::env::var("WAHA_API_KEY").unwrap_or_else(|_| "devkey123".to_string());
-    
-    let payload = SendTextRequest { 
-        chat_id: chat_id.to_string(), 
-        text: text.to_string(), 
-        session: "default".to_string(),
-        reply_to: reply_to,
-        mentions: None
-    };
-    
-    let client = reqwest::Client::new();
-    let res = client.post(waha_url)
-        .header("X-Api-Key", api_key)
-        .json(&payload)
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
-        
-    if res.status().is_success() { Ok(()) } else { Err(format!("API Error")) }
+    crate::waha::send_reply_with_id(chat_id, text, reply_to).await
 }
 
 async fn send_reply_with_mentions(chat_id: &str, text: &str, mentions: Vec<String>) -> Result<(), String> {
-    let waha_url = format!("{}/api/sendText", std::env::var("WAHA_URL").unwrap_or_else(|_| "http://waha:3000".to_string()));
-    let api_key = std::env::var("WAHA_API_KEY").unwrap_or_else(|_| "devkey123".to_string());
-    
-    let payload = SendTextRequest { 
-        chat_id: chat_id.to_string(), 
-        text: text.to_string(), 
-        session: "default".to_string(),
-        reply_to: None,
-        mentions: Some(mentions), 
-    };
-    
-    let client = reqwest::Client::new();
-    let res = client.post(waha_url)
-        .header("X-Api-Key", api_key)
-        .json(&payload)
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
-        
-    if res.status().is_success() { Ok(()) } else { Err(format!("API Error")) }
+    crate::waha::send_reply_with_mentions(chat_id, text, mentions).await
 }
 
 async fn send_reply(chat_id: &str, text: &str) -> Result<(), String> {
-    send_reply_with_id(chat_id, text, None).await
+    crate::waha::send_reply(chat_id, text).await
 }
 
 

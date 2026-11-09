@@ -1,5 +1,4 @@
 use crate::database::crud::{self, get_active_assignments_for_user, get_daily_subscribers};
-use crate::models::SendTextRequest;
 use crate::tui::{state::LogEntry, JobLogger};
 use chrono::{DateTime, Datelike, NaiveDate, Utc};
 use sqlx::PgPool;
@@ -71,6 +70,12 @@ pub async fn start_scheduler(
                 logger.log("🚀 Menjalankan PI Daily Reminder...");
                 if let Err(e) = crate::pi::handler::send_daily_reminder(&pool, &logger).await {
                     logger.log(&format!("❌ Error PI daily reminder: {}", e));
+                }
+
+                // REMINDER AGRIINFO
+                logger.log("🚀 Menjalankan Agriinformatics Daily Reminder...");
+                if let Err(e) = crate::agriinfo::handler::send_daily_reminder(&pool, &logger).await {
+                    logger.log(&format!("❌ Error Agriinformatics daily reminder: {}", e));
                 }
 
                 logger.set_status(crate::tui::state::JobStatus::Completed);
@@ -146,6 +151,12 @@ pub async fn start_scheduler(
                 logger.log("🚀 Checking Urgent PI Deadlines...");
                 if let Err(e) = crate::pi::handler::check_urgent_pi_deadlines(&pool, &logger).await {
                     logger.log(&format!("❌ Error PI urgent reminder: {}", e));
+                }
+
+                // REMINDER AGRIINFO H-1 JAM
+                logger.log("🚀 Checking Urgent Agriinformatics Deadlines...");
+                if let Err(e) = crate::agriinfo::handler::check_urgent_agriinfo_deadlines(&pool, &logger).await {
+                    logger.log(&format!("❌ Error Agriinformatics urgent reminder: {}", e));
                 }
             })
         })?)
@@ -315,12 +326,6 @@ async fn check_personal_reminders(
         tasks.len()
     ));
 
-    use futures::stream::{self, StreamExt};
-
-    let client = reqwest::Client::new();
-    let waha_url = std::env::var("WAHA_URL").unwrap_or_else(|_| "http://waha:3000".to_string());
-    let api_key = std::env::var("WAHA_API_KEY").unwrap_or_else(|_| "devkey123".to_string());
-
     for task in tasks {
         let course_name: String = sqlx::query_scalar("SELECT name FROM courses WHERE id = $1")
             .bind(task.course_id)
@@ -401,32 +406,9 @@ async fn check_personal_reminders(
                 time_str
             );
 
-            let client_ref = &client;
-            let waha_url_ref = &waha_url;
-            let api_key_ref = &api_key;
-            let message_ref = &message;
-
-            stream::iter(recipients)
-                .for_each_concurrent(10, |user_id| async move {
-                    let payload = SendTextRequest {
-                        chat_id: user_id,
-                        text: message_ref.clone(),
-                        session: "default".to_string(),
-                        reply_to: None,
-                        mentions: None,
-                    };
-
-                    let _ = client_ref
-                        .post(format!("{}/api/sendText", waha_url_ref))
-                        .header("X-Api-Key", api_key_ref)
-                        .json(&payload)
-                        .send()
-                        .await;
-
-                    // DELAYYY
-                    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
-                })
-                .await;
+            for user_id in recipients {
+                let _ = crate::waha::send_reply(&user_id, &message).await;
+            }
         }
 
         // 4. Update status
@@ -592,23 +574,7 @@ async fn send_to_channels(
         return Ok(());
     }
 
-    let client = reqwest::Client::new();
-    let waha_url = std::env::var("WAHA_URL").unwrap_or_else(|_| "http://waha:3000".to_string());
-    let api_key = std::env::var("WAHA_API_KEY").unwrap_or_else(|_| "devkey123".to_string());
-    let payload = SendTextRequest {
-        chat_id: target_channels[0].to_string(),
-        text: message.clone(),
-        session: "default".to_string(),
-        reply_to: None,
-        mentions: None,
-    };
-
-    let _ = client
-        .post(format!("{}/api/sendText", waha_url))
-        .header("X-Api-Key", &api_key)
-        .json(&payload)
-        .send()
-        .await;
+    let _ = crate::waha::send_reply(&target_channels[0], &message).await;
 
     Ok(())
 }
@@ -751,10 +717,6 @@ async fn run_personal_daily_reminder(
         subscribers.len()
     ));
 
-    let client = reqwest::Client::new();
-    let waha_url = std::env::var("WAHA_URL").unwrap_or_else(|_| "http://waha:3000".to_string());
-    let api_key = std::env::var("WAHA_API_KEY").unwrap_or_else(|_| "devkey123".to_string());
-
     for user_phone in subscribers {
         match get_active_assignments_for_user(&pool, &user_phone, None).await {
             Ok((assignments, user_settings)) => {
@@ -762,6 +724,13 @@ async fn run_personal_daily_reminder(
                     .into_iter()
                     .filter(|a| {
                         if a.is_completed {
+                            return false;
+                        }
+
+                        // Pengecualian Keamanan Informasi: jangan ingatkan jika belum diset
+                        let is_ki = crud::is_keamanan_informasi(&a.course_name);
+                        let user_has_ki = user_settings.keys().any(|k| crud::is_keamanan_informasi(k));
+                        if is_ki && !user_has_ki {
                             return false;
                         }
 
@@ -827,32 +796,16 @@ async fn run_personal_daily_reminder(
 
                 message.push_str("\n_#daily 0 untuk berhenti langganan._");
 
-                let payload = SendTextRequest {
-                    chat_id: user_phone.clone(),
-                    text: message,
-                    session: "default".to_string(),
-                    reply_to: None,
-                    mentions: None,
-                };
+                let _ = crate::waha::send_reply(&user_phone, &message).await;
 
-                let _ = client
-                    .post(format!("{}/api/sendText", waha_url))
-                    .header("X-Api-Key", &api_key)
-                    .json(&payload)
-                    .send()
-                    .await;
-
-                // Delay
-                tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+                // Human-like pacing delay between subscribers (2.0 - 3.5s)
+                crate::waha::apply_custom_delay(2000, 3500).await;
             }
             Err(e) => {
                 logger.log(&format!("⚠️ Error fetch todo user {}: {}", user_phone, e));
             }
         }
     }
-
-
-
 
     Ok(())
 }

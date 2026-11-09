@@ -8,30 +8,34 @@ mod context_builder;
 // ===== MODEL CONFIGURATION =====
 
 // Groq reasoning models (PRIORITY - best for complex logic)
-pub const GROQ_REASONING_MODELS: &[&str; 3] = &[
-    "openai/gpt-oss-120b",            // Rank 1: Flagship reasoning (Replace DeepSeek R1)
-    "llama-3.3-70b-versatile",        // Rank 2: The most reliable 70B (300k TPM limit)
-    "qwen/qwen3-32b",                 // Rank 3: Dense logic model, punches above weight, limited to 32k context which is really bad
+pub const GROQ_REASONING_MODELS: &[&str; 4] = &[
+    "openai/gpt-oss-120b",            // Rank 1: Flagship reasoning
+    "qwen/qwen3.6-27b",               // Rank 2: High capacity reasoning model
+    "groq/compound",                  // Rank 3: Compound logic engine
+    "openai/gpt-oss-20b",             // Rank 4: Dense text fallback
 ];
 
 // Groq vision models (multimodal - for image processing)
 pub const GROQ_VISION_MODELS: &[&str; 2] = &[
-    "meta-llama/llama-4-maverick-17b-128e-instruct",  // Rank 1: High fidelity (New architecture)
-    "meta-llama/llama-4-scout-17b-16e-instruct",      // Rank 2: High speed multimodal
+    "qwen/qwen3.6-27b",               // Rank 1: Multimodal vision model
+    "groq/compound",                  // Rank 2: Compound engine fallback
 ];
 
 // Groq standard text models (fallback - non-reasoning)
-pub const GROQ_TEXT_MODELS: &[&str; 2] = &[
-    "openai/gpt-oss-20b",       // Primary text cruncher
-    "llama-3.1-8b-instant",     // Ultimate fallback (Fastest/Cheapest)
+pub const GROQ_TEXT_MODELS: &[&str; 4] = &[
+    "openai/gpt-oss-20b",             // Rank 1: Primary fast text model
+    "groq/compound-mini",             // Rank 2: Fast compound mini
+    "allam-2-7b",                     // Rank 3: Lightweight text model
+    "openai/gpt-oss-safeguard-20b",   // Rank 4: Safeguard fallback
 ];
 
-// Gemini models (final fallback - reliable, 1M context window)
-pub const GEMINI_MODELS: &[&str; 4] = &[
-    "gemini-3-flash-preview",     // Preview - latest balanced model
-    "gemini-3-pro-preview",       // Preview - most intelligent
-    "gemini-2.5-flash",           // Stable - best price-performance (RECOMMENDED)
-    "gemini-2.5-pro",             // Stable - advanced thinking model
+// Gemini models (final fallback - 100% verified working live)
+pub const GEMINI_MODELS: &[&str; 5] = &[
+    "gemini-3.7-flash",               // Rank 1: Flagship 3.7 Flash model
+    "gemini-3.5-flash",               // Rank 2: 3.5 Flash engine
+    "gemini-3.1-flash-lite",          // Rank 3: Lightweight 3.1 Flash
+    "gemini-2.5-flash",               // Rank 4: 2.5 Flash model
+    "gemini-2.5-flash-lite",          // Rank 5: 2.5 Flash Lite fallback
 ];
 
 // ===== PUBLIC API =====

@@ -1,0 +1,35 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT id, nama_tugas, deadline \n        FROM agriinformatics \n        WHERE deadline > $1 \n          AND deadline <= $2 \n          AND reminder_1h_sent = FALSE\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "nama_tugas",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "deadline",
+        "type_info": "Timestamp"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Timestamp",
+        "Timestamp"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "6b1b7d91a0b227392c3632bbb4726af286d2065777724f255f7c98f73570eaf3"
+}

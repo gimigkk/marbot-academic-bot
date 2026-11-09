@@ -15,7 +15,7 @@ use crate::tui::JobLogger;
 // ===== CONSTANTS & STATICS =====
 
 static PARALLEL_CODE_REGEX: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"(?i)\b([kprs][1-4])\b").unwrap()
+    Regex::new(r"(?i)\b([kprs][1-4]|ai|fs|ds|all|none)\b").unwrap()
 });
 
 const MAX_HISTORY_PATTERNS: usize = 3;
@@ -916,12 +916,13 @@ COURSE IDENTIFICATION (per assignment):
 - If QUOTED ASSIGNMENT present → use that course name EXACTLY
 
 PARALLEL CLASS CODES (per assignment) - CRITICAL:
-- Valid codes: k1-k4, p1-p4, r1-r4, or "all"
+- Valid codes: k1-k4, p1-p4, r1-r4, ai, fs, ds, none, or "all"
 - Format: Array, can contain multiple codes
 - THESE ARE PER-ASSIGNMENT, NOT PER-COURSE
 
 Recognition patterns:
   - Course abbreviations: "GRAFKOM K2" → ["k2"]
+  - Asah Tracks: "Asah AI" → ["ai"], "Asah FS" → ["fs"], "Asah DS" → ["ds"], "Non-Asah / Reguler" → ["none"]
   - Explicit lists: "untuk k1, k2" → ["k1", "k2"]
   - Explicit lists: "paralel untuk K2 P2" → ["k2", "p2"]
   - "untuk K2 dan P2" → ["k2", "p2"]
