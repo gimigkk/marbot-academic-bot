@@ -200,6 +200,28 @@ pub async fn start_scheduler(
         })?)
         .await?;
 
+    // Hourly at minute zero (UTC and WIB hour boundaries coincide).
+    let attendance_pool = pool.clone();
+    let attendance_logs = log_tx.clone();
+    sched.add(Job::new_async("0 0 * * * *", move |_uuid, _lock| {
+        let pool = attendance_pool.clone();
+        let logs = attendance_logs.clone();
+        Box::pin(async move {
+            let logger = JobLogger::new(crate::tui::generate_job_id(), logs);
+            let Ok(api) = crate::attendance::AttendanceApi::from_env() else { return; };
+            match crate::attendance::check_subscriptions(&pool, &api).await {
+                Ok(0) => {},
+                Ok(count) => logger.log(&format!("⚠️ Absensi: {} pemeriksaan gagal; baseline dipertahankan", count)),
+                Err(_) => logger.log("⚠️ Absensi: gagal membaca langganan"),
+            }
+            match crate::attendance::dispatch_pending(&pool, &crate::attendance::WhatsAppSender).await {
+                Ok(0) => {},
+                Ok(count) => logger.log(&format!("⚠️ Absensi: {} pengiriman gagal/tidak pasti; tidak diulang", count)),
+                Err(_) => logger.log("⚠️ Absensi: gagal memproses pengiriman"),
+            }
+        })
+    })?).await?;
+
     sched.start().await?;
     Ok(())
 }

@@ -166,6 +166,7 @@ pub enum BotCommand {
     SetKelasPaket(u8),
     MyKelas,
     Daily(i32),
+    RemindAbsen(crate::attendance::ReminderAction),
     UnknownCommand(String),
     MissingArgument(String),
     Update(u32, String),      

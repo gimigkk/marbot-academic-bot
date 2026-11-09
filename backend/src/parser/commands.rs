@@ -57,6 +57,9 @@ pub async fn handle_command(
     api_key_cache: Option<&Cache<String, String>>,
 ) -> CommandResponse {
     match cmd {
+        BotCommand::RemindAbsen(action) => CommandResponse::Text(
+            crate::attendance::handle_command(action, user_phone, chat_id, pool).await,
+        ),
         BotCommand::Ping => {
             logger.log(&format!("🏓 Ping command received from {}", user_phone));
             
@@ -842,7 +845,9 @@ pub async fn handle_command(
                 - #setkelas <matkul> <kode1> <kode2> — atur kode pararel untuk matkul\n\
                 - #setkelas asah <track> — atur track Asah 2026 Dicoding (AI / FS / DS / NONE)\n\
                 - #mykelas — lihat settings kode parallel kamu\n\
-                - #daily <1/0> — aktifkan/matikan reminder #todo harian\n\n\
+                - #daily <1/0> — aktifkan/matikan reminder #todo harian\n\
+                - #remind-absen <NIM> — pengingat kenaikan tidak hadir tiap jam (chat pribadi)\n\
+                - #remind-absen off — berhenti dan hapus data pengingat absensi\n\n\
                 *Perintah Developer (Umum):*\n\
                 - #apikey new <nama> — buat API key baru\n\
                 - #apikey remove <nama> — hapus API key tertentu\n\
@@ -1039,6 +1044,9 @@ pub async fn handle_command(
         }
 
         BotCommand::MissingArgument(cmd) => {
+            if cmd == "remind-absen" {
+                return CommandResponse::Text(crate::attendance::USAGE.to_string());
+            }
             logger.log(&format!("⚠️ Missing argument for command '{}' from {}", cmd, user_phone));
             
             let usage_msg = match cmd.as_str() {

@@ -451,3 +451,47 @@ This avoids GLIBC version mismatches that occur when building on newer Ubuntu an
 Developer: Gilang MW. & Arya F.
 
 Pen Tester: Ilham Edgar
+
+## Attendance count reminders
+
+In a private chat with the bot, send `#remind-absen <NIM>` using your own NIM.
+The bot saves an initial baseline silently, then checks opted-in users every
+hour at minute zero. `#remind-absen off` unsubscribes and deletes the stored
+subscription and its reminder history. Repeating the same enable command does
+not reset the baseline. Switching NIM establishes a new baseline.
+
+For each course code, class type and parallel class, an increase in
+`JumlahTidakHadir` produces one private reminder. Unchanged counts produce no
+further messages. Corrections/decreases become the next baseline; a later
+increase can trigger another reminder. New classes establish a silent baseline.
+Missing classes and empty/error responses do not erase existing baselines.
+A decrease in the meeting total is treated as a reset and does not trigger an
+alert. The API exposes no semester identifier here, so resets cannot always be
+identified perfectly.
+
+This reports a count change, **not proof that someone forgot to submit attendance**.
+The upstream recap counts both explicit absences and unrecorded attendance.
+NIM entry is self-declared; the bot does not independently verify university
+account ownership. Do not subscribe other people without their consent.
+
+Deployment: configure `IPB_API_TOKEN` with the complete approved
+`X-IPBAPI-Token` header value (including `Bearer ` if applicable). The bot uses
+`GET /v1/Mahasiswa/StatusMahasiswa?NIM=...` to resolve an exact NIM and
+`GET /v1/Kehadiran/Mahasiswa/RekapKuliah?MahasiswaId=...` for polling. It does
+not store a Student JWT, enumerate students, submit attendance, or automatically
+fall back to random credentials. If the university changes access requirements,
+polls fail without changing the baseline.
+
+The new PostgreSQL migration runs through the existing startup migration flow.
+Baselines and queued reminders survive restarts. Each reminder is claimed in
+PostgreSQL before a single WhatsApp send attempt, preventing retries after an
+uncertain result. A crash after claiming, a timeout, or a failed delivery can
+therefore lose a reminder; delivery is **at most once**, not guaranteed exactly
+once. Unsubscribing cancels unclaimed reminders; an already claimed send may
+still complete. Pending messages are processed at the next hourly run.
+
+Verification: `SQLX_OFFLINE=true cargo test --locked` in `backend/`.
+Database/HTTP fixture tests additionally use `ATTENDANCE_TEST_DATABASE_URL`
+pointing to a **dedicated disposable PostgreSQL database**; they never call the
+university API or WhatsApp. Without that variable those integration tests are
+ignored and must be run explicitly as documented in `backend/tests/attendance_db.rs`.

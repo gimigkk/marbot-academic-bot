@@ -21,6 +21,7 @@ services:
       - RUST_LOG=${RUST_LOG:-info}
       - DASHBOARD_USER=${DASHBOARD_USER:-admin}
       - DASHBOARD_PASS=${DASHBOARD_PASS:-changeme}
+      - IPB_API_TOKEN=${IPB_API_TOKEN:-}
     ports:
       - "3000:3000"
     restart: unless-stopped
