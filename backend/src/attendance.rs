@@ -1,10 +1,40 @@
 //! Opt-in attendance-count reminders. No user JWTs or attendance writes.
 use anyhow::{anyhow, bail, ensure, Context, Result};
+use chrono::{DateTime, FixedOffset, Timelike, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sqlx::{types::Json, PgPool};
 use std::{collections::BTreeMap, future::Future, time::Duration};
 use uuid::Uuid;
+
+pub fn poll_interval_seconds(now: DateTime<Utc>) -> i64 {
+    let hour = now
+        .with_timezone(&FixedOffset::east_opt(7 * 3600).unwrap())
+        .hour();
+    if (8..12).contains(&hour) || (13..17).contains(&hour) {
+        900
+    } else {
+        3600
+    }
+}
+
+/// Stable per-student slots; checking each candidate's tier handles WIB boundaries.
+pub fn next_poll_at(student_id: i64, now: DateTime<Utc>) -> DateTime<Utc> {
+    // 37 is coprime to both slot counts (900/3600), spreading adjacent IDs.
+    let seed = (student_id as u64).wrapping_mul(37);
+    let minute = now.timestamp().div_euclid(60);
+    for offset in 0..=60 {
+        let candidate =
+            DateTime::from_timestamp((minute + offset) * 60 + (seed % 60) as i64, 0).unwrap();
+        let period = poll_interval_seconds(candidate) / 60;
+        if candidate > now
+            && (minute + offset).rem_euclid(period) == (seed / 60 % period as u64) as i64
+        {
+            return candidate;
+        }
+    }
+    unreachable!("A polling slot exists within the next hour")
+}
 
 #[derive(Debug)]
 pub enum ReminderAction {
@@ -257,10 +287,10 @@ pub async fn subscribe(
     let baseline = api.snapshot(student_id).await?;
     let mut tx = pool.begin().await?;
     let changed: Option<String> = sqlx::query_scalar(
-        "INSERT INTO attendance_subscriptions (user_id,chat_id,nim,student_id,generation,baseline)
-         VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT(user_id) DO UPDATE
+        "INSERT INTO attendance_subscriptions (user_id,chat_id,nim,student_id,generation,baseline,next_check_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(user_id) DO UPDATE
          SET chat_id=EXCLUDED.chat_id,nim=EXCLUDED.nim,student_id=EXCLUDED.student_id,
-             generation=EXCLUDED.generation,baseline=EXCLUDED.baseline,last_checked_at=now()
+             generation=EXCLUDED.generation,baseline=EXCLUDED.baseline,last_checked_at=now(),next_check_at=EXCLUDED.next_check_at
          WHERE attendance_subscriptions.nim != EXCLUDED.nim RETURNING user_id",
     )
     .bind(user)
@@ -269,6 +299,7 @@ pub async fn subscribe(
     .bind(student_id)
     .bind(Uuid::new_v4())
     .bind(Json(baseline))
+    .bind(next_poll_at(student_id, Utc::now()))
     .fetch_optional(&mut *tx)
     .await?;
     sqlx::query(
@@ -308,7 +339,7 @@ pub async fn handle_command(
         ReminderAction::Enable(nim) => match AttendanceApi::random() {
             Ok(api) => subscribe(pool, &api, user, chat, &nim).await.map(|created| {
                 if created {
-                    "✅ *Pengingat Absensi Aktif!*\n\n🕐 Maarbot cek setiap jam. Kalau jumlah tidak hadir/belum tercatat naik, kamu dapat satu pengingat.\n📚 Data awal sudah disimpan; absensi lama tidak dikirim ulang.\n\n_Kamu juga bisa lihat rekap tersimpan lewat API key sendiri. Ketik #apidocs untuk caranya._\n_#remind-absen off untuk berhenti langganan._".to_string()
+                    "✅ *Pengingat Absensi Aktif!*\n\n🕐 Maarbot cek tiap 15 menit pada 08.00–12.00 dan 13.00–17.00 WIB; di luar itu tiap 1 jam. Waktu cek tiap NIM disebar. Kalau jumlah tidak hadir/belum tercatat naik, kamu dapat satu pengingat.\n📚 Data awal sudah disimpan; absensi lama tidak dikirim ulang.\n\n_Kamu juga bisa lihat rekap tersimpan lewat API key sendiri. Ketik #apidocs untuk caranya._\n_#remind-absen off untuk berhenti langganan._".to_string()
                 } else { "✅ *Pengingat Absensi Sudah Aktif*\n\nSetting NIM dan data pembanding kamu tetap tersimpan.\n_#remind-absen off untuk berhenti langganan._".to_string() }
             }),
             Err(_) => return "❌ Pengingat absensi sedang tidak tersedia.\n_Coba lagi sebentar ya._".to_string(),
@@ -335,11 +366,11 @@ fn reminder_message(changes: &[Change]) -> String {
             .take(20)
             .collect();
         text.push_str(&format!(
-            "📚 *{}* ({})\n*└─* Tidak hadir/belum tercatat: *{} → {}*\n\n",
-            course, class, change.previous, change.current
+            "📚 *{}* ({})\n*└─* Ada perubahan presensi. Kalau belum absen, ayo segera isi di IPB Mobile!\n\n",
+            course, class
         ));
     }
-    text.push_str("_Angka ini bisa berarti belum isi presensi atau tercatat tidak hadir. Cek dulu ya!_\n\n_#remind-absen off untuk berhenti langganan._");
+    text.push_str("_#remind-absen off untuk berhenti langganan._");
     text
 }
 
@@ -408,31 +439,89 @@ async fn get_attendance(
 /// Each subscriber is locked independently. A failed API request leaves their
 /// baseline unchanged, while other subscribers continue to be checked.
 pub async fn check_subscriptions(pool: &PgPool, api: &AttendanceApi) -> Result<usize> {
-    let users: Vec<String> =
-        sqlx::query_scalar("SELECT user_id FROM attendance_subscriptions ORDER BY user_id")
-            .fetch_all(pool)
+    check_batch(pool, api, false).await
+}
+
+pub async fn check_due_subscriptions(pool: &PgPool, api: &AttendanceApi) -> Result<usize> {
+    check_batch(pool, api, true).await
+}
+
+async fn check_batch(pool: &PgPool, api: &AttendanceApi, scheduled: bool) -> Result<usize> {
+    // A transaction lock serializes scheduled polling across processes/replicas.
+    let gate = if scheduled {
+        let mut tx = pool.begin().await?;
+        let locked: bool = sqlx::query_scalar("SELECT pg_try_advisory_xact_lock($1)")
+            .bind(0x4d4152424f54_i64)
+            .fetch_one(&mut *tx)
             .await?;
+        if !locked {
+            return Ok(0);
+        }
+        Some(tx)
+    } else {
+        None
+    };
+    let query = if scheduled {
+        "SELECT user_id FROM attendance_subscriptions WHERE next_check_at<=now() ORDER BY next_check_at,user_id"
+    } else {
+        "SELECT user_id FROM attendance_subscriptions ORDER BY user_id"
+    };
+    let users: Vec<String> = sqlx::query_scalar(query).fetch_all(pool).await?;
+    let mut snapshots: BTreeMap<i64, Option<Snapshot>> = BTreeMap::new();
     let mut failures = 0;
     for user in users {
-        if check_one(pool, api, &user).await.is_err() {
+        if !check_one(pool, api, &user, scheduled, &mut snapshots)
+            .await
+            .unwrap_or(false)
+        {
             failures += 1;
         }
+    }
+    if let Some(tx) = gate {
+        tx.commit().await?;
     }
     Ok(failures)
 }
 
-async fn check_one(pool: &PgPool, api: &AttendanceApi, user: &str) -> Result<()> {
+async fn check_one(
+    pool: &PgPool,
+    api: &AttendanceApi,
+    user: &str,
+    scheduled: bool,
+    snapshots: &mut BTreeMap<i64, Option<Snapshot>>,
+) -> Result<bool> {
     let mut tx = pool.begin().await?;
     let row: Option<(i64, Uuid, Json<Snapshot>)> = sqlx::query_as(
-        "SELECT student_id,generation,baseline FROM attendance_subscriptions WHERE user_id=$1 FOR UPDATE SKIP LOCKED")
-        .bind(user).fetch_optional(&mut *tx).await?;
+        "SELECT student_id,generation,baseline FROM attendance_subscriptions WHERE user_id=$1
+         AND (NOT $2 OR next_check_at<=now()) FOR UPDATE SKIP LOCKED",
+    )
+    .bind(user)
+    .bind(scheduled)
+    .fetch_optional(&mut *tx)
+    .await?;
     if let Some((id, generation, Json(mut baseline))) = row {
-        let current = api.snapshot(id).await?;
+        if !snapshots.contains_key(&id) {
+            // Also space the first request, so consecutive batches cannot burst.
+            if scheduled {
+                tokio::time::sleep(Duration::from_secs(2)).await;
+            }
+            snapshots.insert(id, api.snapshot(id).await.ok());
+        }
+        let next = next_poll_at(id, Utc::now());
+        let Some(current) = snapshots.get(&id).and_then(Option::as_ref) else {
+            sqlx::query("UPDATE attendance_subscriptions SET next_check_at=$2 WHERE user_id=$1")
+                .bind(user)
+                .bind(next)
+                .execute(&mut *tx)
+                .await?;
+            tx.commit().await?;
+            return Ok(false);
+        };
         let changes = compare(&baseline, &current);
         // Preserve missing classes on empty/partial replies; decreases are saved.
-        baseline.extend(current);
-        sqlx::query("UPDATE attendance_subscriptions SET baseline=$2,last_checked_at=now() WHERE user_id=$1")
-            .bind(user).bind(Json(baseline)).execute(&mut *tx).await?;
+        baseline.extend(current.clone());
+        sqlx::query("UPDATE attendance_subscriptions SET baseline=$2,last_checked_at=now(),next_check_at=$3 WHERE user_id=$1")
+            .bind(user).bind(Json(baseline)).bind(next).execute(&mut *tx).await?;
         if !changes.is_empty() {
             sqlx::query("INSERT INTO attendance_reminders(id,user_id,generation,message) VALUES($1,$2,$3,$4)")
                 .bind(Uuid::new_v4()).bind(user).bind(generation).bind(reminder_message(&changes))
@@ -440,7 +529,7 @@ async fn check_one(pool: &PgPool, api: &AttendanceApi, user: &str) -> Result<()>
         }
     }
     tx.commit().await?;
-    Ok(())
+    Ok(true)
 }
 
 pub trait ReminderSender {

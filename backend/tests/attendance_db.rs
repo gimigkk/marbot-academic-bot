@@ -21,7 +21,10 @@ use std::{
 };
 
 #[derive(Clone)]
-struct Fixture(Arc<Mutex<(StatusCode, Value)>>);
+struct Fixture(
+    Arc<Mutex<(StatusCode, Value)>>,
+    Arc<Mutex<Vec<(String, std::time::Instant)>>>,
+);
 
 fn recap(missed: u32) -> Value {
     json!([{"KodeMk":"TEST101","NamaMk":"Test Course","DetailRekap":[{
@@ -44,7 +47,13 @@ async fn snapshot(
     Query(q): Query<HashMap<String, String>>,
 ) -> (StatusCode, Json<Value>) {
     assert!(!headers.contains_key("authorization"));
-    assert_eq!(q.get("MahasiswaId").map(String::as_str), Some("42"));
+    let id = q.get("MahasiswaId").unwrap();
+    assert!(id == "42" || id == "43");
+    state
+        .1
+        .lock()
+        .unwrap()
+        .push((id.clone(), std::time::Instant::now()));
     let (status, body) = state.0.lock().unwrap().clone();
     (status, Json(body))
 }
@@ -88,7 +97,16 @@ async fn durable_opt_in_polling_and_single_delivery() {
     .execute(&pool)
     .await
     .unwrap();
-    let state = Fixture(Arc::new(Mutex::new((StatusCode::OK, recap(1)))));
+    sqlx::raw_sql(include_str!(
+        "../migrations/20261109140000_attendance_poll_schedule.up.sql"
+    ))
+    .execute(&pool)
+    .await
+    .unwrap();
+    let state = Fixture(
+        Arc::new(Mutex::new((StatusCode::OK, recap(1)))),
+        Arc::new(Mutex::new(Vec::new())),
+    );
     let app = Router::new()
         .route("/v1/Mahasiswa/StatusMahasiswa", get(student))
         .route("/v1/Kehadiran/Mahasiswa/RekapKuliah", get(snapshot))
@@ -131,7 +149,8 @@ async fn durable_opt_in_polling_and_single_delivery() {
     assert_eq!(sender.messages.lock().unwrap().len(), 1);
     let first = sender.messages.lock().unwrap()[0].clone();
     assert_eq!(first.0, user);
-    assert!(first.1.contains("1 → 2"));
+    assert!(first.1.contains("Kalau belum absen, ayo segera isi"));
+    assert!(!first.1.contains("1 → 2"));
     assert!(first.1.starts_with("📝 *[Pengingat Absensi]*"));
     assert!(first.1.contains("*└─*"));
 
@@ -168,7 +187,7 @@ async fn durable_opt_in_polling_and_single_delivery() {
     attendance::check_subscriptions(&pool, &api).await.unwrap();
     attendance::dispatch_pending(&pool, &sender).await.unwrap();
     assert_eq!(sender.messages.lock().unwrap().len(), 2);
-    assert!(sender.messages.lock().unwrap()[1].1.contains("2 → 3"));
+    assert!(!sender.messages.lock().unwrap()[1].1.contains("2 → 3"));
 
     // Correction lowers the baseline; the next increase is a new reminder.
     *state.0.lock().unwrap() = (StatusCode::OK, recap(1));
@@ -355,6 +374,101 @@ async fn durable_opt_in_polling_and_single_delivery() {
     );
     assert!(blocked.headers().contains_key("retry-after"));
     api_server.abort();
+
+    // Scheduled polls honor persisted due times, deduplicate NIMs, and cannot
+    // burst even when two scheduler workers wake up together.
+    for extra in ["second@c.us", "third@c.us"] {
+        sqlx::query("INSERT INTO attendance_subscriptions(user_id,chat_id,nim,student_id,generation,baseline,next_check_at)
+            SELECT $2,$2,nim,student_id,$3,baseline,next_check_at FROM attendance_subscriptions WHERE user_id=$1")
+            .bind(user).bind(extra).bind(uuid::Uuid::new_v4()).execute(&pool).await.unwrap();
+    }
+    sqlx::query("UPDATE attendance_subscriptions SET student_id=43,nim='G6401260002' WHERE user_id='third@c.us'")
+        .execute(&pool).await.unwrap();
+    sqlx::query("UPDATE attendance_subscriptions SET next_check_at=now()+interval '1 hour'")
+        .execute(&pool)
+        .await
+        .unwrap();
+    let before = state.1.lock().unwrap().len();
+    assert_eq!(
+        attendance::check_due_subscriptions(&pool, &api)
+            .await
+            .unwrap(),
+        0
+    );
+    assert_eq!(state.1.lock().unwrap().len(), before);
+    sqlx::query("UPDATE attendance_subscriptions SET next_check_at=now()-interval '1 second'")
+        .execute(&pool)
+        .await
+        .unwrap();
+    let (a, b) = tokio::join!(
+        attendance::check_due_subscriptions(&pool, &api),
+        attendance::check_due_subscriptions(&pool, &api)
+    );
+    assert_eq!(a.unwrap() + b.unwrap(), 0);
+    {
+        let calls = state.1.lock().unwrap();
+        assert_eq!(calls.len() - before, 2); // two unique IDs, three subscribers
+        assert!(
+            calls[before + 1].1.duration_since(calls[before].1)
+                >= std::time::Duration::from_secs(2)
+        );
+    }
+    let scheduled: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM attendance_subscriptions WHERE next_check_at>last_checked_at",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(scheduled, 3);
+    sqlx::query("UPDATE attendance_subscriptions SET next_check_at=now()+interval '1 hour'")
+        .execute(&pool)
+        .await
+        .unwrap();
+    let before = state.1.lock().unwrap().len();
+    attendance::check_due_subscriptions(&pool, &api)
+        .await
+        .unwrap();
+    assert_eq!(state.1.lock().unwrap().len(), before);
+    println!("[SIMULATION] Staggering passed: two distinct NIMs, one fetch each, at least 2 seconds apart.");
+
+    let preserved: Vec<(
+        String,
+        sqlx::types::Json<Value>,
+        chrono::DateTime<chrono::Utc>,
+    )> = sqlx::query_as(
+        "SELECT user_id,baseline,last_checked_at FROM attendance_subscriptions ORDER BY user_id",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    *state.0.lock().unwrap() = (StatusCode::UNAUTHORIZED, json!({"error":"fixture"}));
+    sqlx::query("UPDATE attendance_subscriptions SET next_check_at=now()-interval '1 second'")
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        attendance::check_due_subscriptions(&pool, &api)
+            .await
+            .unwrap(),
+        3
+    );
+    let after: Vec<(
+        String,
+        sqlx::types::Json<Value>,
+        chrono::DateTime<chrono::Utc>,
+    )> = sqlx::query_as(
+        "SELECT user_id,baseline,last_checked_at FROM attendance_subscriptions ORDER BY user_id",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(preserved, after);
+    sqlx::raw_sql(include_str!(
+        "../migrations/20261109140000_attendance_poll_schedule.down.sql"
+    ))
+    .execute(&pool)
+    .await
+    .unwrap();
 
     sqlx::raw_sql(include_str!(
         "../migrations/20261109120000_attendance_reminders.down.sql"

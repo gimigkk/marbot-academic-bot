@@ -83,10 +83,19 @@ Example with synthetic data:
 }
 ```
 
-`last_checked_at` is UTC. Polling runs hourly at minute zero; the data can lag
+`last_checked_at` is UTC. Polling targets every 15 minutes during 08:00–12:00 and 13:00–17:00 WIB,
+and hourly outside those windows; the data can lag
 behind IPB Mobile. Missing classes and empty replies preserve older counts, so
 some class data may predate the last successful check. Failed checks leave the
 baseline and timestamp unchanged.
+
+Polling slots are staggered per NIM and persisted across restarts. A scheduler
+tick every 30 seconds checks only due records; it does not poll everyone every
+30 seconds. Different NIMs are fetched serially with at least a two-second gap,
+and shared-NIM subscriptions reuse a single response per batch. A database lock
+prevents concurrent scheduled polling batches. Failed requests keep their
+baseline and advance to the next slot. Overload/outages can delay checks.
+Reminder messages omit counter values; the API still exposes `missed`/`meetings`.
 
 Without a subscription, the response is still HTTP 200:
 

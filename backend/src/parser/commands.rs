@@ -846,7 +846,7 @@ pub async fn handle_command(
                 - #setkelas asah <track> — atur track Asah 2026 Dicoding (AI / FS / DS / NONE)\n\
                 - #mykelas — lihat settings kode parallel kamu\n\
                 - #daily <1/0> — aktifkan/matikan reminder #todo harian\n\
-                - #remind-absen <NIM> — aktifkan reminder absensi tiap jam (NIM sendiri, chat pribadi)\n\
+                - #remind-absen <NIM> — aktifkan reminder absensi 15 menit/jam (NIM sendiri, chat pribadi)\n\
                 - #remind-absen off — berhenti dan hapus data pengingat absensi\n\n\
                 *Perintah Developer (Umum):*\n\
                 - #apikey new <nama> — buat API key baru\n\
@@ -1035,7 +1035,7 @@ pub async fn handle_command(
                 *2. Rekap absensi tersimpan*\n\
                 `GET {0}/api/v1/attendance`\n\
                 Tidak menerima query, NIM, mahasiswaId, atau userId. Identitas selalu dari pemilik key.\n\
-                Aktifkan dulu lewat chat pribadi: #remind-absen <NIM sendiri>. Dicek tiap jam; API membaca data tersimpan, bukan melakukan cek langsung ke IPB.\n\
+                Aktifkan dulu lewat chat pribadi: #remind-absen <NIM sendiri>. Dicek tiap 15 menit pada 08.00–12.00 dan 13.00–17.00 WIB, di luar itu tiap 1 jam. Waktu cek tiap NIM disebar; API membaca data tersimpan, bukan melakukan cek langsung ke IPB.\n\
                 Data: enabled, nim, last_checked_at (UTC), classes. Tiap kelas: course, class, missed, meetings. Jika belum aktif: enabled=false, nim/last_checked_at=null, classes=[].\n\n\
                 *Format respons:*\n\
                 Sukses: {{\"success\":true,\"data\":...}}\n\

@@ -200,16 +200,16 @@ pub async fn start_scheduler(
         })?)
         .await?;
 
-    // Hourly at minute zero (UTC and WIB hour boundaries coincide).
+    // Wake often; each NIM has a persisted, staggered due time in WIB.
     let attendance_pool = pool.clone();
     let attendance_logs = log_tx.clone();
-    sched.add(Job::new_async("0 0 * * * *", move |_uuid, _lock| {
+    sched.add(Job::new_async("0,30 * * * * *", move |_uuid, _lock| {
         let pool = attendance_pool.clone();
         let logs = attendance_logs.clone();
         Box::pin(async move {
             let logger = JobLogger::new(crate::tui::generate_job_id(), logs);
             let Ok(api) = crate::attendance::AttendanceApi::random() else { return; };
-            match crate::attendance::check_subscriptions(&pool, &api).await {
+            match crate::attendance::check_due_subscriptions(&pool, &api).await {
                 Ok(0) => {},
                 Ok(count) => logger.log(&format!("⚠️ Absensi: {} pemeriksaan gagal; baseline dipertahankan", count)),
                 Err(_) => logger.log("⚠️ Absensi: gagal membaca langganan"),

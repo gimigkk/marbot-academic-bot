@@ -457,10 +457,17 @@ Pen Tester: Ilham Edgar
 API-key access and complete request/response documentation: [Marbot API](docs/API.md).
 
 In a private chat with the bot, send `#remind-absen <NIM>` using your own NIM.
-The bot saves an initial baseline silently, then checks opted-in users every
-hour at minute zero. `#remind-absen off` unsubscribes and deletes the stored
+The bot saves an initial baseline silently, then checks every 15 minutes during
+08:00–12:00 and 13:00–17:00 WIB, and hourly outside those windows. `#remind-absen off` unsubscribes and deletes the stored
 subscription and its reminder history. Repeating the same enable command does
 not reset the baseline. Switching NIM establishes a new baseline.
+
+Each NIM has a stable time slot and a persisted next-check time. The scheduler
+wakes every 30 seconds, but fetches only due NIMs. Requests run serially with at
+least two seconds between them; a PostgreSQL lock prevents overlapping polling
+batches across replicas. Subscribers sharing a student ID reuse one response
+per batch. Busy periods or outages can delay checks. Notifications name the
+course and prompt the user to check/submit attendance without showing counters.
 
 For each course code, class type and parallel class, an increase in
 `JumlahTidakHadir` produces one private reminder. Unchanged counts produce no
@@ -498,7 +505,7 @@ PostgreSQL before a single WhatsApp send attempt, preventing retries after an
 uncertain result. A crash after claiming, a timeout, or a failed delivery can
 therefore lose a reminder; delivery is **at most once**, not guaranteed exactly
 once. Unsubscribing cancels unclaimed reminders; an already claimed send may
-still complete. Pending messages are processed at the next hourly run.
+still complete. Pending messages are processed on the next scheduler tick (every 30 seconds).
 
 Verification: `SQLX_OFFLINE=true cargo test --locked` in `backend/`.
 Database/HTTP fixture tests additionally use `ATTENDANCE_TEST_DATABASE_URL`

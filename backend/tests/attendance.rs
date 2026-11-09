@@ -3,6 +3,57 @@ use marbot::classifier::classify_message;
 use marbot::models::{BotCommand, MessageType};
 use serde_json::json;
 
+#[test]
+fn polling_uses_wib_class_hours_and_lunch_break() {
+    use marbot::attendance::poll_interval_seconds;
+    for (time, expected) in [
+        ("07:59:59", 3600),
+        ("08:00:00", 900),
+        ("11:59:59", 900),
+        ("12:00:00", 3600),
+        ("12:59:59", 3600),
+        ("13:00:00", 900),
+        ("16:59:59", 900),
+        ("17:00:00", 3600),
+    ] {
+        let now = chrono::DateTime::parse_from_rfc3339(&format!("2026-11-09T{time}+07:00"))
+            .unwrap()
+            .to_utc();
+        assert_eq!(poll_interval_seconds(now), expected, "{time} WIB");
+    }
+}
+
+#[test]
+fn nim_slots_are_stable_spread_out_and_adapt_at_boundaries() {
+    use marbot::attendance::{next_poll_at, poll_interval_seconds};
+    let now = chrono::DateTime::parse_from_rfc3339("2026-11-09T09:00:00+07:00")
+        .unwrap()
+        .to_utc();
+    let next = next_poll_at(377902, now);
+    assert!(next > now && next <= now + chrono::Duration::minutes(15));
+    assert_eq!(next, next_poll_at(377902, now));
+    assert_eq!(
+        next_poll_at(377902, next) - next,
+        chrono::Duration::minutes(15)
+    );
+    let night = chrono::DateTime::parse_from_rfc3339("2026-11-09T19:00:00+07:00").unwrap().to_utc();
+    let next = next_poll_at(377902, night);
+    assert_eq!(next_poll_at(377902, next) - next, chrono::Duration::hours(1));
+    let slots: std::collections::BTreeSet<_> = (1..=100).map(|id| next_poll_at(id, now)).collect();
+    assert!(slots.len() > 50);
+    for time in ["07:59:59", "11:59:59", "12:59:59", "16:59:59", "23:59:59"] {
+        let now = chrono::DateTime::parse_from_rfc3339(&format!("2026-11-09T{time}+07:00"))
+            .unwrap()
+            .to_utc();
+        let next = next_poll_at(377902, now);
+        assert!(next > now && next <= now + chrono::Duration::hours(1));
+        if time == "07:59:59" || time == "12:59:59" {
+            assert_eq!(poll_interval_seconds(next), 900);
+            assert!(next - now <= chrono::Duration::minutes(15));
+        }
+    }
+}
+
 fn recap(missed: u32, parallel: &str) -> serde_json::Value {
     json!([{"KodeMk":"TEST101","NamaMk":"Test Course","DetailRekap":[{
         "JenisKelas":"K","KelasParalel":parallel,"JumlahHadir":5,
