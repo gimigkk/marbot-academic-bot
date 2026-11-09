@@ -4,6 +4,10 @@ Base URL: `https://<your-bot-host>/api/v1`. Use HTTPS outside local development.
 All endpoints are read-only (`GET`; `HEAD` is also supported). This is the
 **Marbot API**, not the university's API.
 
+For a loopback-only local process, set `BIND_ADDR=127.0.0.1:3300` and
+`APP_URL=http://127.0.0.1:3300`. Without `BIND_ADDR`, the existing deployment
+default remains `0.0.0.0:3000`.
+
 ## API keys
 
 Manage keys in a private WhatsApp chat with Maarbot:
