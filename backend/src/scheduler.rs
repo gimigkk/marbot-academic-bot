@@ -208,7 +208,7 @@ pub async fn start_scheduler(
         let logs = attendance_logs.clone();
         Box::pin(async move {
             let logger = JobLogger::new(crate::tui::generate_job_id(), logs);
-            let Ok(api) = crate::attendance::AttendanceApi::from_env() else { return; };
+            let Ok(api) = crate::attendance::AttendanceApi::random() else { return; };
             match crate::attendance::check_subscriptions(&pool, &api).await {
                 Ok(0) => {},
                 Ok(count) => logger.log(&format!("⚠️ Absensi: {} pemeriksaan gagal; baseline dipertahankan", count)),

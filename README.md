@@ -454,6 +454,8 @@ Pen Tester: Ilham Edgar
 
 ## Attendance count reminders
 
+API-key access and complete request/response documentation: [Marbot API](docs/API.md).
+
 In a private chat with the bot, send `#remind-absen <NIM>` using your own NIM.
 The bot saves an initial baseline silently, then checks opted-in users every
 hour at minute zero. `#remind-absen off` unsubscribes and deletes the stored
@@ -469,17 +471,25 @@ A decrease in the meeting total is treated as a reset and does not trigger an
 alert. The API exposes no semester identifier here, so resets cannot always be
 identified perfectly.
 
+`GET /api/v1/attendance` reads the key owner's saved recap. Register the NIM
+through private WhatsApp first. The endpoint rejects all query parameters,
+shares the existing 60-requests/minute per-user API limit, and sends no-store
+responses. It never polls upstream on demand. API-key management is private-chat
+only; `#help`, `#apikey`, and `#apidocs` include the feature.
+
 This reports a count change, **not proof that someone forgot to submit attendance**.
 The upstream recap counts both explicit absences and unrecorded attendance.
 NIM entry is self-declared; the bot does not independently verify university
 account ownership. Do not subscribe other people without their consent.
 
-Deployment: configure `IPB_API_TOKEN` with the complete approved
-`X-IPBAPI-Token` header value (including `Bearer ` if applicable). The bot uses
+Each attendance API client generates a fresh
+random UUID and sends `X-IPBAPI-Token: Bearer <UUID>`. This is an app-header
+placeholder, not a user login token; the required endpoints accepted it during
+testing. No token configuration or override is used. The bot uses
 `GET /v1/Mahasiswa/StatusMahasiswa?NIM=...` to resolve an exact NIM and
 `GET /v1/Kehadiran/Mahasiswa/RekapKuliah?MahasiswaId=...` for polling. It does
-not store a Student JWT, enumerate students, submit attendance, or automatically
-fall back to random credentials. If the university changes access requirements,
+not store a Student JWT, enumerate students, or submit attendance.
+If the university changes access requirements,
 polls fail without changing the baseline.
 
 The new PostgreSQL migration runs through the existing startup migration flow.

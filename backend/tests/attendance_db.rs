@@ -8,8 +8,13 @@ use axum::{
     Json, Router,
 };
 use marbot::attendance::{self, AttendanceApi, ReminderSender};
+pub use marbot::database;
 use serde_json::{json, Value};
 use sqlx::postgres::PgPoolOptions;
+#[path = "../src/api/auth.rs"]
+mod auth;
+#[path = "../src/api/rate_limit.rs"]
+mod rate_limit;
 use std::{
     collections::HashMap,
     sync::{Arc, Mutex},
@@ -121,6 +126,8 @@ async fn durable_opt_in_polling_and_single_delivery() {
     let first = sender.messages.lock().unwrap()[0].clone();
     assert_eq!(first.0, user);
     assert!(first.1.contains("1 → 2"));
+    assert!(first.1.starts_with("📝 *[Pengingat Absensi]*"));
+    assert!(first.1.contains("*└─*"));
 
     // New pool simulates process restart: persisted state suppresses duplicates.
     let restarted = PgPoolOptions::new().connect(&url).await.unwrap();
@@ -213,6 +220,130 @@ async fn durable_opt_in_polling_and_single_delivery() {
         .await
         .unwrap();
     assert_eq!(count, 1); // group command cannot disable a private subscription
+    let (logs, _rx) = tokio::sync::mpsc::unbounded_channel();
+    let logger = marbot::tui::JobLogger::new("fixture".to_string(), logs);
+    let reply = marbot::parser::commands::handle_command(
+        marbot::models::BotCommand::ApiKey("new fixture".to_string()),
+        user,
+        "Fixture",
+        "group@g.us",
+        &pool,
+        &logger,
+        None,
+    )
+    .await;
+    assert!(
+        matches!(reply, marbot::parser::commands::CommandResponse::Text(text) if text.contains("chat pribadi") && !text.contains("marbot_sk_"))
+    );
+
+    // Exercise the real key-auth and rate-limit middleware over local HTTP.
+    let keys = auth::new_api_key_cache();
+    keys.insert("fixture-key".into(), user.into()).await;
+    keys.insert("other-key".into(), "other@c.us".into()).await;
+    keys.insert("rate-key-1".into(), "rate@c.us".into()).await;
+    keys.insert("rate-key-2".into(), "rate@c.us".into()).await;
+    let limits = rate_limit::new_rate_limiter();
+    let http_api = attendance::api_router::<()>(pool.clone())
+        .route_layer(axum::middleware::from_fn_with_state(
+            limits,
+            rate_limit::rate_limit_middleware,
+        ))
+        .route_layer(axum::middleware::from_fn_with_state(
+            (Arc::new(pool.clone()), keys),
+            auth::auth_middleware,
+        ));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}/attendance", listener.local_addr().unwrap());
+    let api_server = tokio::spawn(async {
+        axum::serve(listener, http_api).await.unwrap();
+    });
+    let client = reqwest::Client::new();
+    assert_eq!(
+        client.get(&url).send().await.unwrap().status().as_u16(),
+        StatusCode::UNAUTHORIZED.as_u16()
+    );
+    assert_eq!(
+        client
+            .get(&url)
+            .bearer_auth("invalid")
+            .send()
+            .await
+            .unwrap()
+            .status()
+            .as_u16(),
+        StatusCode::UNAUTHORIZED.as_u16()
+    );
+    let response = client
+        .get(&url)
+        .bearer_auth("fixture-key")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status().as_u16(), StatusCode::OK.as_u16());
+    assert_eq!(response.headers()["cache-control"], "no-store");
+    let body: Value = response.json().await.unwrap();
+    assert_eq!(body["data"]["enabled"], true);
+    assert_eq!(body["data"]["nim"], "G6401260001");
+    assert!(body["data"]["classes"].as_array().unwrap().len() > 0);
+    let other: Value = client
+        .get(&url)
+        .bearer_auth("other-key")
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(other["data"]["enabled"], false);
+    assert_eq!(other["data"]["nim"], Value::Null);
+    assert_eq!(
+        client
+            .get(format!("{url}?MahasiswaId=42"))
+            .bearer_auth("fixture-key")
+            .send()
+            .await
+            .unwrap()
+            .status()
+            .as_u16(),
+        StatusCode::BAD_REQUEST.as_u16()
+    );
+    assert_eq!(
+        client
+            .post(&url)
+            .bearer_auth("fixture-key")
+            .send()
+            .await
+            .unwrap()
+            .status()
+            .as_u16(),
+        StatusCode::METHOD_NOT_ALLOWED.as_u16()
+    );
+    for i in 0..60 {
+        let key = if i < 30 { "rate-key-1" } else { "rate-key-2" };
+        assert_eq!(
+            client
+                .get(&url)
+                .bearer_auth(key)
+                .send()
+                .await
+                .unwrap()
+                .status()
+                .as_u16(),
+            StatusCode::OK.as_u16()
+        );
+    }
+    let blocked = client
+        .get(&url)
+        .bearer_auth("rate-key-2")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        blocked.status().as_u16(),
+        StatusCode::TOO_MANY_REQUESTS.as_u16()
+    );
+    assert!(blocked.headers().contains_key("retry-after"));
+    api_server.abort();
 
     sqlx::raw_sql(include_str!(
         "../migrations/20261109120000_attendance_reminders.down.sql"

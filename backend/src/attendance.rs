@@ -12,7 +12,7 @@ pub enum ReminderAction {
     Disable,
 }
 
-pub const USAGE: &str = "Gunakan di chat pribadi: #remind-absen <NIM> untuk NIM kamu sendiri, atau #remind-absen off untuk berhenti dan menghapus data pengingat.";
+pub const USAGE: &str = "⚙️ *SETTING PENGINGAT ABSENSI*\n\n#remind-absen <NIM> — aktifkan untuk NIM kamu sendiri\n#remind-absen off — berhenti dan hapus data pengingat\n\n_Kirim lewat chat pribadi Maarbot ya!_";
 
 pub fn parse_action(args: &[&str]) -> Option<ReminderAction> {
     match args {
@@ -146,14 +146,34 @@ pub struct AttendanceApi {
     token: String,
 }
 
+#[cfg(test)]
+mod token_tests {
+    use super::*;
+
+    #[test]
+    fn each_client_generates_a_fresh_bearer_uuid() {
+        let tokens = [
+            AttendanceApi::random().unwrap().token,
+            AttendanceApi::random().unwrap().token,
+        ];
+        for token in &tokens {
+            let uuid = Uuid::parse_str(token.strip_prefix("Bearer ").unwrap()).unwrap();
+            assert_eq!(uuid.get_version_num(), 4);
+        }
+        assert_ne!(tokens[0], tokens[1]);
+    }
+}
+
 impl AttendanceApi {
-    pub fn from_env() -> Result<Self> {
-        let token = std::env::var("IPB_API_TOKEN").unwrap_or_default();
-        ensure!(!token.trim().is_empty(), "IPB_API_TOKEN is not configured");
-        Self::new("https://api.ipb.ac.id/v1", &token)
+    pub fn random() -> Result<Self> {
+        // shortcut: these endpoints accept random app tokens; revisit if validation changes.
+        Self::new(
+            "https://api.ipb.ac.id/v1",
+            &format!("Bearer {}", Uuid::new_v4()),
+        )
     }
 
-    /// A custom base is useful for local HTTP fixtures. Production uses from_env.
+    /// A custom base is useful for local HTTP fixtures. Production uses random.
     pub fn new(base: &str, token: &str) -> Result<Self> {
         Ok(Self {
             client: reqwest::Client::builder()
@@ -284,22 +304,22 @@ pub async fn handle_command(
         );
     }
     let result = match action {
-        ReminderAction::Disable => unsubscribe(pool, user).await.map(|_| "Pengingat absensi dimatikan dan data pengingat dihapus.".to_string()),
-        ReminderAction::Enable(nim) => match AttendanceApi::from_env() {
+        ReminderAction::Disable => unsubscribe(pool, user).await.map(|_| "🔕 *Pengingat Absensi Non-Aktif*\n\nPengingat dimatikan dan data absensi tersimpan sudah dihapus.\n_Ketik #remind-absen <NIM> kalau mau aktifkan lagi._".to_string()),
+        ReminderAction::Enable(nim) => match AttendanceApi::random() {
             Ok(api) => subscribe(pool, &api, user, chat, &nim).await.map(|created| {
                 if created {
-                    "Pengingat absensi aktif. Baseline awal disimpan tanpa notifikasi. Dicek setiap jam; satu pengingat tiap kenaikan jumlah tidak hadir. Ini tidak membuktikan kamu lupa absen. #remind-absen off untuk berhenti.".to_string()
-                } else { "Pengingat absensi sudah aktif untuk NIM ini; baseline tetap dipertahankan.".to_string() }
+                    "✅ *Pengingat Absensi Aktif!*\n\n🕐 Maarbot cek setiap jam. Kalau jumlah tidak hadir/belum tercatat naik, kamu dapat satu pengingat.\n📚 Data awal sudah disimpan; absensi lama tidak dikirim ulang.\n\n_Kamu juga bisa lihat rekap tersimpan lewat API key sendiri. Ketik #apidocs untuk caranya._\n_#remind-absen off untuk berhenti langganan._".to_string()
+                } else { "✅ *Pengingat Absensi Sudah Aktif*\n\nSetting NIM dan data pembanding kamu tetap tersimpan.\n_#remind-absen off untuk berhenti langganan._".to_string() }
             }),
-            Err(_) => return "Pengingat absensi belum dikonfigurasi oleh pengelola bot (IPB_API_TOKEN).".to_string(),
+            Err(_) => return "❌ Pengingat absensi sedang tidak tersedia.\n_Coba lagi sebentar ya._".to_string(),
         },
     };
-    result.unwrap_or_else(|_| "Tidak bisa memperbarui pengingat absensi. Periksa NIM kamu atau coba lagi nanti; pengaturan sebelumnya tetap tersimpan.".to_string())
+    result.unwrap_or_else(|_| "❌ Gagal mengatur pengingat absensi.\nPeriksa NIM kamu atau coba lagi sebentar ya.\n_Setting sebelumnya tetap tersimpan._".to_string())
 }
 
 fn reminder_message(changes: &[Change]) -> String {
     let mut text =
-        "*Pengingat absensi*\nJumlah tidak hadir/belum tercatat meningkat:\n".to_string();
+        "📝 *[Pengingat Absensi]*\n_Yuk, cek presensi kamu di IPB Mobile!_\n\n".to_string();
     for change in changes {
         // Keep API text from injecting WhatsApp formatting or additional lines.
         let course: String = change
@@ -308,13 +328,81 @@ fn reminder_message(changes: &[Change]) -> String {
             .filter(|c| !c.is_control() && !"*_~`".contains(*c))
             .take(120)
             .collect();
+        let class: String = change
+            .class
+            .chars()
+            .filter(|c| c.is_ascii_alphanumeric())
+            .take(20)
+            .collect();
         text.push_str(&format!(
-            "- {} ({}): {} → {}\n",
-            course, change.class, change.previous, change.current
+            "📚 *{}* ({})\n*└─* Tidak hadir/belum tercatat: *{} → {}*\n\n",
+            course, class, change.previous, change.current
         ));
     }
-    text.push_str("\nCek IPB Mobile apakah ada presensi yang belum diisi. Data ini tidak membedakan lupa mengisi dengan benar-benar tidak hadir.\n#remind-absen off untuk berhenti.");
+    text.push_str("_Angka ini bisa berarti belum isi presensi atau tercatat tidak hadir. Cek dulu ya!_\n\n_#remind-absen off untuk berhenti langganan._");
     text
+}
+
+/// Read saved data only; identity always comes from Marbot's key middleware.
+pub fn api_router<S: Clone + Send + Sync + 'static>(pool: PgPool) -> axum::Router<S> {
+    axum::Router::new()
+        .route("/attendance", axum::routing::get(get_attendance))
+        .with_state(pool)
+}
+
+async fn get_attendance(
+    axum::extract::State(pool): axum::extract::State<PgPool>,
+    axum::Extension(user): axum::Extension<String>,
+    axum::extract::RawQuery(query): axum::extract::RawQuery,
+) -> axum::response::Response {
+    use axum::{http::StatusCode, response::IntoResponse, Json};
+    let (status, body) = if query.is_some() {
+        (
+            StatusCode::BAD_REQUEST,
+            serde_json::json!({"success":false,"data":null,"error":"Endpoint ini tidak menerima query. Identitas mengikuti API key."}),
+        )
+    } else {
+        let row: Result<
+            Option<(
+                String,
+                sqlx::types::Json<Snapshot>,
+                chrono::DateTime<chrono::Utc>,
+            )>,
+            _,
+        > = sqlx::query_as(
+            "SELECT nim,baseline,last_checked_at FROM attendance_subscriptions WHERE user_id=$1",
+        )
+        .bind(&user)
+        .fetch_optional(&pool)
+        .await;
+        match row {
+            Ok(Some((nim, sqlx::types::Json(baseline), checked))) => (
+                StatusCode::OK,
+                serde_json::json!({
+                "success":true,"data":{"enabled":true,"nim":nim,"last_checked_at":checked,
+                "classes":baseline.into_values().collect::<Vec<_>>()}}),
+            ),
+            Ok(None) => (
+                StatusCode::OK,
+                serde_json::json!({"success":true,"data":{
+                "enabled":false,"nim":null,"last_checked_at":null,"classes":[]}}),
+            ),
+            Err(_) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                serde_json::json!({"success":false,"data":null,"error":"Gagal membaca pengingat absensi."}),
+            ),
+        }
+    };
+    let mut response = (status, Json(body)).into_response();
+    response.headers_mut().insert(
+        "Cache-Control",
+        axum::http::HeaderValue::from_static("no-store"),
+    );
+    response.headers_mut().insert(
+        "Vary",
+        axum::http::HeaderValue::from_static("Authorization"),
+    );
+    response
 }
 
 /// Each subscriber is locked independently. A failed API request leaves their

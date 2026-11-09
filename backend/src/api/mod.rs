@@ -25,6 +25,7 @@ pub fn api_router(pool: PgPool, api_key_cache: auth::ApiKeyCache) -> Router<AppS
 
     Router::new()
         .route("/assignments", get(routes::get_assignments))
+        .merge(crate::attendance::api_router((*shared_pool).clone()))
         // Middleware runs in REVERSE order of .route_layer() attachment:
         // 2nd attached = outermost = runs FIRST: auth validates the token
         // 1st attached = innermost = runs SECOND: rate limit on verified user_id only
