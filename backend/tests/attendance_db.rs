@@ -56,6 +56,10 @@ struct Sender {
 }
 impl ReminderSender for Sender {
     async fn send(&self, chat: &str, message: &str) -> anyhow::Result<()> {
+        println!(
+            "\n[SIMULATION: mock send attempt; fail={}]\n{}\n",
+            self.fail, message
+        );
         self.messages
             .lock()
             .unwrap()
@@ -102,10 +106,12 @@ async fn durable_opt_in_polling_and_single_delivery() {
             .unwrap()
     );
     let sender = Sender::default();
+    println!("[SIMULATION] Initial missed=1: save baseline, no reminder.");
     attendance::dispatch_pending(&pool, &sender).await.unwrap();
     assert!(sender.messages.lock().unwrap().is_empty()); // initial baseline is silent
 
     *state.0.lock().unwrap() = (StatusCode::OK, recap(2));
+    println!("[SIMULATION] API changes missed=1 -> 2: expect one reminder, even with concurrent workers.");
     assert!(
         !attendance::subscribe(&pool, &api, user, user, "G6401260001")
             .await
@@ -131,6 +137,7 @@ async fn durable_opt_in_polling_and_single_delivery() {
 
     // New pool simulates process restart: persisted state suppresses duplicates.
     let restarted = PgPoolOptions::new().connect(&url).await.unwrap();
+    println!("[SIMULATION] API stays at missed=2 after restart: no duplicate reminder.");
     attendance::check_subscriptions(&restarted, &api)
         .await
         .unwrap();
@@ -141,6 +148,7 @@ async fn durable_opt_in_polling_and_single_delivery() {
 
     // Errors and empty responses cannot wipe a baseline.
     *state.0.lock().unwrap() = (StatusCode::UNAUTHORIZED, json!({"error":"fixture"}));
+    println!("[SIMULATION] API errors/malformed/empty replies: preserve baseline.");
     assert_eq!(
         attendance::check_subscriptions(&pool, &api).await.unwrap(),
         1
@@ -156,6 +164,7 @@ async fn durable_opt_in_polling_and_single_delivery() {
         0
     );
     *state.0.lock().unwrap() = (StatusCode::OK, recap(3));
+    println!("[SIMULATION] API changes missed=2 -> 3: expect a new reminder.");
     attendance::check_subscriptions(&pool, &api).await.unwrap();
     attendance::dispatch_pending(&pool, &sender).await.unwrap();
     assert_eq!(sender.messages.lock().unwrap().len(), 2);
@@ -163,6 +172,7 @@ async fn durable_opt_in_polling_and_single_delivery() {
 
     // Correction lowers the baseline; the next increase is a new reminder.
     *state.0.lock().unwrap() = (StatusCode::OK, recap(1));
+    println!("[SIMULATION] Correction lowers missed=3 -> 1: silent baseline update.");
     attendance::check_subscriptions(&pool, &api).await.unwrap();
     *state.0.lock().unwrap() = (StatusCode::OK, recap(2));
     attendance::check_subscriptions(&pool, &api).await.unwrap();
@@ -170,6 +180,7 @@ async fn durable_opt_in_polling_and_single_delivery() {
         fail: true,
         ..Default::default()
     };
+    println!("[SIMULATION] Next increase: uncertain send gets one attempt, no retry.");
     assert_eq!(
         attendance::dispatch_pending(&pool, &failing).await.unwrap(),
         1
