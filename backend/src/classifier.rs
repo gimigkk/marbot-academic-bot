@@ -42,6 +42,10 @@ fn parse_command(text: &str) -> Option<BotCommand> {
     let command = parts[0].to_lowercase();
     
     match command.as_str() {
+        "remind-absen" => Some(match crate::attendance::parse_action(&parts[1..]) {
+            Some(action) => BotCommand::RemindAbsen(action),
+            None => BotCommand::MissingArgument("remind-absen".to_string()),
+        }),
         "test" | "tes" | "ping" => Some(BotCommand::Ping),
         
         // Admin only #update command

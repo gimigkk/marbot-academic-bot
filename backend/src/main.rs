@@ -32,6 +32,7 @@ pub mod pi;
 pub mod api;
 pub mod agriinfo;
 pub mod waha;
+pub mod attendance;
 
 use crate::database::crud;
 use crate::parser::commands::{CommandResponse, AIForceMode};
@@ -687,6 +688,7 @@ async fn webhook(
                 BotCommand::SetKelasPaket(_) => "setkelas",
                 BotCommand::MyKelas => "mykelas",
                 BotCommand::Daily(_) => "daily",
+                BotCommand::RemindAbsen(_) => "remind-absen",
                 BotCommand::MissingArgument(_) => "error",
                 BotCommand::UnknownCommand(_) => "unknown",
                 BotCommand::Update(_, _) => "ai",

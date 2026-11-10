@@ -57,6 +57,9 @@ pub async fn handle_command(
     api_key_cache: Option<&Cache<String, String>>,
 ) -> CommandResponse {
     match cmd {
+        BotCommand::RemindAbsen(action) => CommandResponse::Text(
+            crate::attendance::handle_command(action, user_phone, chat_id, pool).await,
+        ),
         BotCommand::Ping => {
             logger.log(&format!("🏓 Ping command received from {}", user_phone));
             
@@ -842,13 +845,15 @@ pub async fn handle_command(
                 - #setkelas <matkul> <kode1> <kode2> — atur kode pararel untuk matkul\n\
                 - #setkelas asah <track> — atur track Asah 2026 Dicoding (AI / FS / DS / NONE)\n\
                 - #mykelas — lihat settings kode parallel kamu\n\
-                - #daily <1/0> — aktifkan/matikan reminder #todo harian\n\n\
+                - #daily <1/0> — aktifkan/matikan reminder #todo harian\n\
+                - #remind-absen <NIM> — aktifkan reminder absensi 15 menit/jam (NIM sendiri, chat pribadi)\n\
+                - #remind-absen off — berhenti dan hapus data pengingat absensi\n\n\
                 *Perintah Developer (Umum):*\n\
                 - #apikey new <nama> — buat API key baru\n\
                 - #apikey remove <nama> — hapus API key tertentu\n\
                 - #apikey list — lihat daftar nama API key\n\
                 - #apikey check <nama> — cek detail API key\n\
-                - #apidocs — dokumentasi REST API Marbot\n\n\
+                - #apidocs — dokumentasi REST API tugas & absensi pribadi\n\n\
                 *Perintah Admin:*\n\
                 - #delete <id> — hapus tugas (id dari #tugas)\n\
                 - #update <id> <pesan> — update tugas dengan AI\n\
@@ -895,7 +900,8 @@ pub async fn handle_command(
                                     Key:\n`{}`\n\n\
                                     ⚠️ *RAHASIA:* Jangan bagikan key ini ke siapa pun!\n\
                                     _Key ini hanya ditampilkan sekali._\n\n\
-                                    📚 *Cara Pakai API:* Ketik `#apidocs`",
+                                    📚 *Cara Pakai API:* Ketik `#apidocs`\n\
+                                    _Key ini bisa membaca tugas dan rekap absensi tersimpan milik kamu sendiri._",
                                     sanitize_wa_md(key_name),
                                     new_api_key
                                 )),
@@ -1031,14 +1037,27 @@ pub async fn handle_command(
                 ```\n\n\
                 *Rate Limit:*\n\
                 60 request / menit\n\n\
-                _API Marbot bersifat read-only. Integrasikan tugas-tugas kamu ke Notion, Google Calendar, atau bot kamu sendiri!_",
-                base_url, base_url
+                _API Marbot bersifat read-only. Integrasikan tugas-tugas kamu ke Notion, Google Calendar, atau bot kamu sendiri!_\n\n\
+                *Absensi pribadi:*\n\
+                `GET {}/api/v1/attendance`\n\
+                Aktifkan lewat chat pribadi: #remind-absen <NIM sendiri>. Endpoint membaca rekap tersimpan milik pemegang key; tidak menerima query NIM, mahasiswaId, atau userId.\n\
+                Polling 15 menit pada 08.00–12.00 dan 13.00–17.00 WIB, di luar itu 1 jam; waktu tiap NIM disebar. API tidak memicu polling langsung.\n\
+                Data: enabled, nim, last_checked_at (UTC), classes. Tiap kelas: course, class, missed, meetings. Jika belum aktif: enabled=false, nim/last_checked_at=null, classes=[].\n\
+                Sukses: {{\"success\":true,\"data\":...}}. Error absensi: {{\"success\":false,\"data\":null,\"error\":\"...\"}}.\n\
+                Status: 200 sukses, 400 query ditolak, 401 key tidak valid, 405 metode tidak didukung, 429 limit tercapai, 500 gangguan server. Error middleware dapat berupa teks/body kosong.\n\
+                Mengikuti rate limit API yang sudah ada: 60 request/menit per pengguna, gabungan seluruh key dan endpoint per proses. X-RateLimit-Reset berisi detik sampai reset.\n\
+                Respons absensi memakai Cache-Control: no-store; simpan key dengan aman dan gunakan HTTPS. Nilai missed tidak membedakan lupa isi dengan tercatat tidak hadir.\n\
+                _#remind-absen off untuk berhenti dan hapus data pengingat._",
+                base_url, base_url, base_url
             );
             
             CommandResponse::Text(docs)
         }
 
         BotCommand::MissingArgument(cmd) => {
+            if cmd == "remind-absen" {
+                return CommandResponse::Text(crate::attendance::USAGE.to_string());
+            }
             logger.log(&format!("⚠️ Missing argument for command '{}' from {}", cmd, user_phone));
             
             let usage_msg = match cmd.as_str() {
@@ -1129,7 +1148,7 @@ pub async fn handle_command(
 }
 
 fn build_api_key_usage_message() -> String {
-    "🔑 *API KEY HELP*\n\nCommands:\n- #apikey new <name>  — create key\n- #apikey remove <name> — remove key\n- #apikey list — list keys\n- #apikey check <name> — show metadata\n\nUse #apidocs for REST usage.".to_string()
+    "🔑 *API KEY HELP*\n\nCommands:\n- #apikey new <name>  — create key\n- #apikey remove <name> — remove key\n- #apikey list — list keys\n- #apikey check <name> — show metadata\n\nUse #apidocs for REST usage.\n\nKey juga bisa membaca rekap absensi tersimpan milik kamu sendiri. Aktifkan lewat chat pribadi: #remind-absen <NIM>.".to_string()
 }
 
 fn generate_api_key_secret() -> String {
