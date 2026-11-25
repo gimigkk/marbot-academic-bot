@@ -1,0 +1,76 @@
+name: Recover VPS SSH Access
+
+on:
+  workflow_dispatch:
+    inputs:
+      public_key:
+        description: "SSH public key (.pub) to add to ~/.ssh/authorized_keys on the VPS"
+        required: true
+        type: string
+        default: "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAACAQDQMDpCtOQTFjdvSZ0ls0HEjbWO5Iv/oonM48K9QK15OV7L/6spM59thJPtW5HP0paS3uItQoo5wiyJM+Fa+uT0sZFRnQUdbN3a3WN1pYNCGKWQMXW79nHXATqfdCamY27Jzh0Zyab+4+DhOkEtJq4GM0VzMzcHdFd2amUzscvwz7/XPj13vUNGLoZndWR+F7Wrq5+shbvuvgfnUuDRKxLnhBfy+pWtMH+052eo1lE0sfj2lWGyM31LnrfrEisybDGtIF6tC62AOfra8dVe/ERpHNC9Cu3h6VHAc3GIuB9x4ahg+5HLNrW6wrevxdZUelKqdtgSv8pouVJ2+FDKEtLeHpfBysElTLEyNgsF/yWpmAB+fzjMURJaq+KWSzX2QAm4KP7O1FSmu9N3lAwAuXQxrDgCEWUbiHKc5MLoSt/hmbU6IAL2oBFLGY5B6FvxI30egI8rDfYpRoRNixaZkMRSmmtjgt62KIFRI++xE7+XanQGaTjtBRF8HQvWF8uPmEn8JwJUyPZvUE3H9qAqh5jaHd8k/xEI+N+CCYB6qluV0ow93w9lZYqfK6mzQk8TQKfmQJ15WHHYFeWIwm0vzTe5Db+i1Kbm82BmykB0eR/D0orgRbJokotMhw4Ukz/8512XG8ES3/IaOzHM8sckXhj6ZKK/yjdo8HTziginYOajEw== gilang_server"
+
+jobs:
+  add-ssh-key:
+    name: Add SSH Public Key to VPS
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Validate public key input
+        id: validate
+        env:
+          NEW_PUBKEY: ${{ inputs.public_key }}
+        run: |
+          set -euo pipefail
+          CLEAN_KEY=$(printf '%s' "$NEW_PUBKEY" | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+          if [ -z "$CLEAN_KEY" ]; then
+            echo "Error: public_key input is empty." >&2
+            exit 1
+          fi
+          if [ "$(printf '%s\n' "$CLEAN_KEY" | wc -l)" -ne 1 ]; then
+            echo "Error: public_key must be a single line." >&2
+            exit 1
+          fi
+          if ! printf '%s\n' "$CLEAN_KEY" | grep -Eq '^(ssh-(rsa|ed25519)|ecdsa-sha2-nistp(256|384|521)|sk-(ssh-ed25519|ecdsa-sha2-nistp256)@openssh\.com) [A-Za-z0-9+/=]+([[:space:]].*)?$'; then
+            echo "Error: input does not look like a valid SSH public key." >&2
+            exit 1
+          fi
+          PUBKEY_B64=$(printf '%s' "$CLEAN_KEY" | base64 -w0)
+          echo "pubkey_b64=$PUBKEY_B64" >> "$GITHUB_OUTPUT"
+
+      - name: Setup deploy SSH key
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+
+      - name: Append public key to VPS authorized_keys
+        env:
+          PUBKEY_B64: ${{ steps.validate.outputs.pubkey_b64 }}
+        run: |
+          set -euo pipefail
+          ssh -i ~/.ssh/deploy_key \
+              -o StrictHostKeyChecking=no \
+              -o UserKnownHostsFile=/dev/null \
+              -o ConnectTimeout=30 \
+              -p "${{ secrets.VPS_PORT }}" \
+              "${{ secrets.VPS_USERNAME }}@${{ secrets.VPS_HOST }}" \
+              "PUBKEY_B64='${PUBKEY_B64}' bash -s" <<'ENDSSH'
+          set -euo pipefail
+          PUBKEY=$(printf '%s' "$PUBKEY_B64" | base64 -d)
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          touch ~/.ssh/authorized_keys
+          chmod 600 ~/.ssh/authorized_keys
+          if grep -qxF "$PUBKEY" ~/.ssh/authorized_keys; then
+            echo "Public key is already present in ~/.ssh/authorized_keys"
+          else
+            printf '%s\n' "$PUBKEY" >> ~/.ssh/authorized_keys
+            echo "Public key added to ~/.ssh/authorized_keys"
+          fi
+          ENDSSH
+
+      - name: Cleanup deploy SSH key
+        if: always()
+        run: rm -f ~/.ssh/deploy_key
